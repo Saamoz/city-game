@@ -1,14 +1,22 @@
 {
-  "name": "city game",
-  "version": "1.0.0",
-  "description": "",
-  "main": "dist/index.js",
+  "name": "city-game",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
   "scripts": {
-    "build": "tsc"
+    "dev": "concurrently -n client,server -c cyan,yellow \"pnpm dev:client\" \"pnpm dev:server\"",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "dev:client": "pnpm --filter @city-game/client dev",
+    "dev:server": "pnpm --filter @city-game/server dev",
+    "test": "pnpm --filter @city-game/server test"
   },
-  "dependencies": {},
   "devDependencies": {
-    "typescript": "^5.5.3"
-  },
-  "private": true
+    "concurrently": "^9.1.2"
+  }
 }
