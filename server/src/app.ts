@@ -6,11 +6,13 @@ import { registerAppErrorHandler } from './lib/errors.js';
 import { gameRoutes } from './routes/game-routes.js';
 import { playerRoutes } from './routes/player-routes.js';
 import { zoneRoutes } from './routes/zone-routes.js';
+import { createOsmImportService, type OsmImportService } from './services/osm-import-service.js';
 
 export interface BuildAppOptions {
   db?: DatabaseClient;
   pool?: DatabasePool;
   adminToken?: string;
+  osmImportService?: OsmImportService;
 }
 
 export function buildApp(options: BuildAppOptions = {}) {
@@ -26,6 +28,7 @@ export function buildApp(options: BuildAppOptions = {}) {
       };
 
   app.decorate('db', database.db);
+  app.decorate('osmImportService', options.osmImportService ?? createOsmImportService());
 
   if (database.pool && database.ownsPool) {
     app.addHook('onClose', async () => {

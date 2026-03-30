@@ -22,11 +22,22 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 7 zone CRUD and spatial service complete
+- Current implementation stage: Phase 8 OSM import preview complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 8 Progress
+
+- Added `server/src/services/osm-import-service.ts` with a rate-limited Overpass client, relation-first preview fetch, way fallback, and normalized GeoJSON output that the admin UI can preview directly
+- Added admin-gated `POST /game/:id/zones/import-osm { city }` preview support through the existing zone route module
+- Added injection support for the OSM preview service in `buildApp()` so network-dependent behavior can be tested without stubbing globals
+- Added isolated coverage in `server/src/services/osm-import-service.test.ts` for query construction, relation-to-way fallback, and rate limiting
+- Added route coverage in `server/src/routes/osm-import-routes.test.ts` for admin auth, game existence, and preview responses
+- Added Overpass env defaults to `.env.example`
+
+---
 
 ## Phase 7 Progress
 
@@ -147,7 +158,7 @@ pnpm -r build
 Results:
 
 - Workspace typecheck passed
-- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, player route coverage, zone route coverage, and spatial-service coverage
+- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, player route coverage, zone route coverage, spatial-service coverage, OSM preview route coverage, and OSM import service coverage
 - Full workspace build passed
 - `pnpm db:up` works against the Docker-backed local database
 - `pnpm db:migrate` completed successfully
@@ -183,6 +194,7 @@ Practical rule for now:
 - Docker Desktop daemon is now reachable from this environment through `docker.exe`
 - WSL-native `docker` is still not installed in this distro, so repo scripts use a wrapper that falls back to `docker.exe` when needed
 - `psql` is installed on Windows: `PostgreSQL 10.18`
+- Phase 8 uses the public Overpass API by default; if rate limits or reliability become an issue, set `OVERPASS_API_URL` to a private endpoint before heavy preview usage
 
 ### Repo / Workspace Notes
 
@@ -219,7 +231,7 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 8 OSM import preview work if needed, or skip directly to Phase 9 challenge CRUD because Phase 8 is explicitly deferrable.
+1. Proceed to Phase 9 challenge CRUD. Phase 8 is now covered well enough for preview-driven admin import workflows.
 2. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 3. Reuse `server/src/test/test-db.ts` for future DB-backed integration tests instead of creating isolated test pools per suite.
 
@@ -232,4 +244,4 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 8 OSM import preview support if desired, otherwise Phase 9 challenge CRUD on top of the auth, DB, game/team/player flows, and new spatial service.
+- The next highest-value work is Phase 9 challenge CRUD on top of the auth, DB, game/team/player flows, and the new spatial + OSM preview services.
