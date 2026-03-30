@@ -22,11 +22,22 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 2 database and ORM setup complete
+- Current implementation stage: Phase 3 error system and shared types complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 3 Progress
+
+- Replaced placeholder shared exports with spec-aligned constants, error codes, event taxonomies, resource definitions, and entity interfaces
+- Added typed win conditions as an array-only discriminated union in `shared/src/types.ts`
+- Added `server/src/lib/errors.ts` with a shared-code-backed `AppError` class and centralized error response builder
+- Wired the Fastify error handler in `server/src/app.ts` so application and schema validation failures now return the spec error shape
+- Added server tests covering thrown `AppError` responses and normalized Fastify validation errors
+- Updated the client scaffold to consume the new shared constant exports
+
+---
 
 ## Phase 2 Progress
 
@@ -94,7 +105,7 @@ pnpm -r build
 Results:
 
 - Workspace typecheck passed
-- Server test passed
+- Server tests passed, including AppError and validation-error coverage
 - Full workspace build passed
 - `pnpm db:up` works against the Docker-backed local database
 - `pnpm db:migrate` completed successfully
@@ -116,6 +127,7 @@ Results:
 - Enabled `pnpm v10.33.0` through Corepack
 - Updated shell startup so login shells load `nvm` automatically
 - WebStorm run configurations now call into WSL directly and no longer depend on PowerShell or the Windows Node install
+- In this Codex desktop session, the reported cwd for the patch tool was malformed; file edits had to be done through explicit WSL shell paths instead of `apply_patch`
 
 Practical rule for now:
 
@@ -147,6 +159,7 @@ Practical rule for now:
 - Added a Vite proxy rewrite so `/api/*` maps to server routes correctly during development
 - Kept Phase 1 database scripts as placeholders rather than faking database setup before Phase 2
 - Moved the preferred development environment from Windows PowerShell to WSL
+- Added `GAME_RESUMED` and `game_resumed` to the shared event taxonomy to match the earlier plan decision around pause/resume lifecycle
 
 These are implementation-level decisions, not product/spec changes.
 
@@ -161,9 +174,9 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Decide whether to rename local branch `master` to `main` before first push.
-2. Continue into backend implementation on top of the schema and migration baseline.
-3. Add migration-backed integration tests once service code starts depending on the database.
+1. Proceed to Phase 4 auth middleware using the shared error codes and response contract.
+2. Start attaching real route schemas so the centralized validation-error handler is exercised by application endpoints, not just tests.
+3. Add migration-backed integration tests as service code starts depending on the database.
 
 ---
 
@@ -174,4 +187,4 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is backend service implementation on top of the schema and migration baseline.
+- The next highest-value work is Phase 4 auth middleware and the first real API surface on top of the shared contracts.

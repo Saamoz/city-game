@@ -1,4 +1,4 @@
-import { sharedConstants } from '@city-game/shared';
+import { PLATFORM_NAME } from '@city-game/shared';
 
 export function App() {
   return (
@@ -15,7 +15,7 @@ export function App() {
         <p className="mt-6 text-sm text-slate-300">
           Shared constant loaded from workspace package:{' '}
           <span className="font-mono text-mist">
-            {sharedConstants.platformName}
+            {PLATFORM_NAME}
           </span>
         </p>
       </section>
