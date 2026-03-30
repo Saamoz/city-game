@@ -40,6 +40,10 @@ export const errorDefinitions = {
     statusCode: 403,
     defaultMessage: 'Game is not active.',
   },
+  GAME_NOT_FOUND: {
+    statusCode: 404,
+    defaultMessage: 'Game not found.',
+  },
   NOT_ON_TEAM: {
     statusCode: 403,
     defaultMessage: 'Player must join a team first.',
@@ -94,6 +98,7 @@ export const errorCodes = {
   claimNotYours: 'CLAIM_NOT_YOURS',
   noActiveClaim: 'NO_ACTIVE_CLAIM',
   gameNotActive: 'GAME_NOT_ACTIVE',
+  gameNotFound: 'GAME_NOT_FOUND',
   notOnTeam: 'NOT_ON_TEAM',
   teamNotFound: 'TEAM_NOT_FOUND',
   zoneDisabled: 'ZONE_DISABLED',

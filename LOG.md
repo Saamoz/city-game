@@ -22,11 +22,23 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 4 auth middleware complete
+- Current implementation stage: Phase 5 game and team CRUD complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 5 Progress
+
+- Added first real `/api/v1` route module in `server/src/routes/game-routes.ts`
+- Implemented admin-gated game creation and update, game detail lookup, active game discovery, team creation, and team listing
+- Added lifecycle route stubs for `start`, `pause`, and `end` that return 501 until Phase 15
+- Added deterministic win-condition validation for create/update so `winCondition` stays array-shaped and semantically valid
+- Added `server/src/lib/join-code.ts` for 8-character team join code generation with DB-backed retry on uniqueness collisions
+- Added `GAME_NOT_FOUND` to the shared error catalog for missing game lookups
+- Added integration coverage in `server/src/routes/game-routes.test.ts` for admin auth, CRUD, join-code generation, win-condition validation, and active game discovery
+
+---
 
 ## Phase 4 Progress
 
@@ -117,7 +129,7 @@ pnpm -r build
 Results:
 
 - Workspace typecheck passed
-- Server tests passed, including AppError, validation-error, and auth middleware coverage
+- Server tests passed, including AppError, validation-error, auth middleware, and game/team route coverage
 - Full workspace build passed
 - `pnpm db:up` works against the Docker-backed local database
 - `pnpm db:migrate` completed successfully
@@ -173,6 +185,7 @@ Practical rule for now:
 - Moved the preferred development environment from Windows PowerShell to WSL
 - Added `GAME_RESUMED` and `game_resumed` to the shared event taxonomy to match the earlier plan decision around pause/resume lifecycle
 - Cookie utility keeps `Secure` enabled in production and disables it in development/test so local HTTP + Vite proxy auth remains usable
+- Vitest file parallelism is disabled in `server/vitest.config.ts` because the current DB-backed integration suites share one migrated test database
 
 These are implementation-level decisions, not product/spec changes.
 
@@ -187,8 +200,8 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 5 game and team CRUD on top of the new auth and error layers.
-2. Start attaching real route schemas so the centralized validation-error handler is exercised by application endpoints, not just tests.
+1. Proceed to Phase 6 player registration, team join, and `GET /players/me` on top of the new game/team routes.
+2. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 3. Reuse `server/src/test/test-db.ts` for future DB-backed integration tests instead of creating isolated test pools per suite.
 
 ---
@@ -200,4 +213,4 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 5 game and team CRUD on top of the auth, DB, and shared contract layers.
+- The next highest-value work is Phase 6 player registration and team join on top of the auth, DB, and game/team CRUD layers.
