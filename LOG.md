@@ -22,11 +22,22 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 10 resource ledger service complete
+- Current implementation stage: Phase 11 event service and state-version plumbing complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 11 Progress
+
+- Added `server/src/services/game-service.ts` with atomic `stateVersion` increment support for future mutating flows
+- Added `server/src/services/event-service.ts` with event logging, recent-event queries, and delta-sync queries that return `fullSyncRequired` when the version gap exceeds `MAX_DELTA_SYNC_GAP`
+- Added public event endpoints in `server/src/routes/event-routes.ts` for recent events and delta sync (`/game/:id/events` and `/game/:id/events/since/:version`)
+- Added `EVENT_TYPE_VALUES` to `shared/src/events.ts` so route-level validation uses the shared event taxonomy
+- Added direct service coverage in `server/src/services/event-service.test.ts` for version increment, event insert/query behavior, and delta threshold handling
+- Added route coverage in `server/src/routes/event-routes.test.ts` for event filtering, delta reads, and `fullSyncRequired` responses
+
+---
 
 ## Phase 10 Progress
 
@@ -179,7 +190,7 @@ pnpm -r build
 Results:
 
 - Workspace typecheck passed
-- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, player route coverage, zone route coverage, challenge route coverage, resource route coverage, resource-service coverage, spatial-service coverage, OSM preview route coverage, and OSM import service coverage
+- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, player route coverage, zone route coverage, challenge route coverage, resource route coverage, event route coverage, resource-service coverage, event-service coverage, spatial-service coverage, OSM preview route coverage, and OSM import service coverage
 - Full workspace build passed
 - `pnpm db:up` works against the Docker-backed local database
 - `pnpm db:migrate` completed successfully
@@ -239,6 +250,7 @@ Practical rule for now:
 - Vitest file parallelism is disabled in `server/vitest.config.ts` because the current DB-backed integration suites share one migrated test database
 - When running a single Vitest file in this repo, use `pnpm --filter @city-game/server exec vitest run <path>` instead of `pnpm --filter @city-game/server test -- <path>`; the script wrapper still runs the full suite
 - Phase 10 uses `FOR UPDATE` on the scope row (`teams` for team balances, `players` for player balances) to serialize concurrent ledger writes even when no prior ledger row exists
+- Phase 11 delta sync marks `fullSyncRequired` when `game.stateVersion - sinceVersion > MAX_DELTA_SYNC_GAP`; otherwise it returns events ordered by ascending `stateVersion`
 
 These are implementation-level decisions, not product/spec changes.
 
@@ -253,7 +265,7 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 11 event service and state-version increment plumbing.
+1. Proceed to Phase 12 idempotency middleware so future mutating endpoints can become replay-safe.
 2. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 3. Reuse `server/src/test/test-db.ts` for future DB-backed integration tests instead of creating isolated test pools per suite.
 
@@ -266,4 +278,4 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 11 event service and state-version plumbing on top of the auth, DB, game/team/player flows, and the new resource ledger APIs.
+- The next highest-value work is Phase 12 idempotency middleware on top of the auth, DB, game/team/player flows, and the new event/state-version plumbing.

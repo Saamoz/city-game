@@ -44,6 +44,7 @@ export const eventTypes = {
 export type EngineEventType = (typeof engineEventTypes)[keyof typeof engineEventTypes];
 export type TerritoryEventType = (typeof territoryEventTypes)[keyof typeof territoryEventTypes];
 export type GameEventType = EngineEventType | TerritoryEventType;
+export const EVENT_TYPE_VALUES = Object.values(eventTypes) as GameEventType[];
 
 export const socketServerEventTypes = {
   gameStateSync: 'game_state_sync',

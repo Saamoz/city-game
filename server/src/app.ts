@@ -4,6 +4,7 @@ import { createDb } from './db/connection.js';
 import { registerAuth } from './lib/auth.js';
 import { registerAppErrorHandler } from './lib/errors.js';
 import { challengeRoutes } from './routes/challenge-routes.js';
+import { eventRoutes } from './routes/event-routes.js';
 import { gameRoutes } from './routes/game-routes.js';
 import { playerRoutes } from './routes/player-routes.js';
 import { resourceRoutes } from './routes/resource-routes.js';
@@ -49,6 +50,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.register(resourceRoutes, { prefix: '/api/v1' });
   app.register(zoneRoutes, { prefix: '/api/v1' });
   app.register(challengeRoutes, { prefix: '/api/v1' });
+  app.register(eventRoutes, { prefix: '/api/v1' });
 
   return app;
 }
