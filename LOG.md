@@ -22,11 +22,22 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 9 challenge CRUD complete
+- Current implementation stage: Phase 10 resource ledger service complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 10 Progress
+
+- Added `server/src/services/resource-service.ts` with balance reads, per-team snapshots, history queries, concurrency-safe transactions, and reusable initial-balance seeding helpers
+- Resource transactions serialize same-scope writes by locking the team or player scope row with `FOR UPDATE` before computing the next sequence and balance
+- Added public resource endpoints in `server/src/routes/resource-routes.ts` for all team balances, a single team snapshot, and filtered history
+- Added direct service coverage in `server/src/services/resource-service.test.ts` for sequential writes, negative-balance rejection, concurrent writes, initial seeding, and unique-index enforcement
+- Added route coverage in `server/src/routes/resource-routes.test.ts` for zero-default responses, single-team history reads, and cross-game team rejection
+- Initial balance seeding is implemented as a helper for future lifecycle wiring; game start remains deferred because `/game/:id/start` is still intentionally stubbed until Phase 15
+
+---
 
 ## Phase 9 Progress
 
@@ -168,7 +179,7 @@ pnpm -r build
 Results:
 
 - Workspace typecheck passed
-- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, player route coverage, zone route coverage, challenge route coverage, spatial-service coverage, OSM preview route coverage, and OSM import service coverage
+- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, player route coverage, zone route coverage, challenge route coverage, resource route coverage, resource-service coverage, spatial-service coverage, OSM preview route coverage, and OSM import service coverage
 - Full workspace build passed
 - `pnpm db:up` works against the Docker-backed local database
 - `pnpm db:migrate` completed successfully
@@ -227,6 +238,7 @@ Practical rule for now:
 - Cookie utility keeps `Secure` enabled in production and disables it in development/test so local HTTP + Vite proxy auth remains usable
 - Vitest file parallelism is disabled in `server/vitest.config.ts` because the current DB-backed integration suites share one migrated test database
 - When running a single Vitest file in this repo, use `pnpm --filter @city-game/server exec vitest run <path>` instead of `pnpm --filter @city-game/server test -- <path>`; the script wrapper still runs the full suite
+- Phase 10 uses `FOR UPDATE` on the scope row (`teams` for team balances, `players` for player balances) to serialize concurrent ledger writes even when no prior ledger row exists
 
 These are implementation-level decisions, not product/spec changes.
 
@@ -241,7 +253,7 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 10 resource ledger service and challenge-completion resource award plumbing.
+1. Proceed to Phase 11 event service and state-version increment plumbing.
 2. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 3. Reuse `server/src/test/test-db.ts` for future DB-backed integration tests instead of creating isolated test pools per suite.
 
@@ -254,4 +266,4 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 10 resource ledger service on top of the auth, DB, game/team/player flows, and the new zone/challenge admin APIs.
+- The next highest-value work is Phase 11 event service and state-version plumbing on top of the auth, DB, game/team/player flows, and the new resource ledger APIs.
