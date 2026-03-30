@@ -22,11 +22,20 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 6 player registration and team join complete
+- Current implementation stage: Phase 7 zone CRUD and spatial service complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 7 Progress
+
+- Added `server/src/services/spatial-service.ts` for PostGIS geometry validation, centroid generation, buffered `ST_Covers` checks, distance queries, bulk import, and same-game owner-team validation
+- Added `server/src/routes/zone-routes.ts` with admin-gated zone create/import/update/delete endpoints plus public list/detail lookups
+- Added integration coverage in `server/src/routes/zone-routes.test.ts` for zone CRUD, centroid computation, FeatureCollection import, invalid geometry rejection, and cross-game owner rejection
+- Added direct service coverage in `server/src/services/spatial-service.test.ts` for containing-zone queries, buffered coverage, and distance calculations
+
+---
 
 ## Phase 6 Progress
 
@@ -138,7 +147,7 @@ pnpm -r build
 Results:
 
 - Workspace typecheck passed
-- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, and player route coverage
+- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, player route coverage, zone route coverage, and spatial-service coverage
 - Full workspace build passed
 - `pnpm db:up` works against the Docker-backed local database
 - `pnpm db:migrate` completed successfully
@@ -195,6 +204,7 @@ Practical rule for now:
 - Added `GAME_RESUMED` and `game_resumed` to the shared event taxonomy to match the earlier plan decision around pause/resume lifecycle
 - Cookie utility keeps `Secure` enabled in production and disables it in development/test so local HTTP + Vite proxy auth remains usable
 - Vitest file parallelism is disabled in `server/vitest.config.ts` because the current DB-backed integration suites share one migrated test database
+- When running a single Vitest file in this repo, use `pnpm --filter @city-game/server exec vitest run <path>` instead of `pnpm --filter @city-game/server test -- <path>`; the script wrapper still runs the full suite
 
 These are implementation-level decisions, not product/spec changes.
 
@@ -209,7 +219,7 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 7 resource CRUD and challenge CRUD on top of the game, team, and player flows.
+1. Proceed to Phase 8 OSM import preview work if needed, or skip directly to Phase 9 challenge CRUD because Phase 8 is explicitly deferrable.
 2. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 3. Reuse `server/src/test/test-db.ts` for future DB-backed integration tests instead of creating isolated test pools per suite.
 
@@ -222,4 +232,4 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 7 resource and challenge CRUD on top of the auth, DB, and game/team/player route layers.
+- The next highest-value work is Phase 8 OSM import preview support if desired, otherwise Phase 9 challenge CRUD on top of the auth, DB, game/team/player flows, and new spatial service.
