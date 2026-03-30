@@ -20,13 +20,26 @@ If the product direction or implementation plan changes in a major way, update [
 - WSL repo path: `/mnt/e/city game`
 - Remote: `origin -> https://github.com/Saamoz/city-game.git`
 - Current local branch: `master`
-- Date of latest update: 2026-03-29
+- Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 1 scaffold complete and verified from WSL
+- Current implementation stage: Phase 2 database and ORM setup complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 2 Progress
+
+- Added native PostgreSQL ORM support with Drizzle in `server/`
+- Added `compose.yml` with a `postgis/postgis:16-3.4` database service
+- Added `server/drizzle.config.ts` and database scripts for generate/migrate/test-db lifecycle
+- Implemented the Phase 2 schema in `server/src/db/schema.ts`
+- Generated the initial SQL migration in `server/src/db/migrations/`
+- Added a real `create-test-db` / `drop-test-db` flow using `pg`
+- Verified the server package typechecks with the new ORM code
+- Brought up the local PostGIS container successfully and verified the live databases
+
+---
 
 - Replaced the original single-package TypeScript stub with an npm workspace monorepo
 - Created workspace packages:
@@ -58,6 +71,13 @@ If the product direction or implementation plan changes in a major way, update [
   - `Typecheck`
   - `Server Tests`
   - `Build`
+  - `Validate`
+  - `DB Up`
+  - `DB Down`
+  - `DB Logs`
+  - `DB Migrate`
+  - `DB Test Create`
+  - `DB Generate`
 
 ---
 
@@ -76,6 +96,10 @@ Results:
 - Workspace typecheck passed
 - Server test passed
 - Full workspace build passed
+- `pnpm db:up` works against the Docker-backed local database
+- `pnpm db:migrate` completed successfully
+- `pnpm db:test:create` completed successfully
+- `postgis_version()` verified in both `territory` and `territory_test`
 
 ---
 
@@ -102,7 +126,8 @@ Practical rule for now:
 ### Tooling Available
 
 - Docker is installed on Windows: `Docker version 24.0.2`
-- Docker emitted a warning reading `C:\Users\saamo\.docker\config.json` due to access denial when checked from Windows earlier
+- Docker Desktop daemon is now reachable from this environment through `docker.exe`
+- WSL-native `docker` is still not installed in this distro, so repo scripts use a wrapper that falls back to `docker.exe` when needed
 - `psql` is installed on Windows: `PostgreSQL 10.18`
 
 ### Repo / Workspace Notes
@@ -115,6 +140,8 @@ Practical rule for now:
 
 ## Small Plan Adjustments / Decisions
 
+- One-off `tsx` scripts hit an ENOTSUP IPC error in this WSL/filesystem setup; using `node --import tsx` for DB scripts avoids that issue
+- Root Docker scripts now use `scripts/docker-compose.sh`, which prefers Linux `docker compose` and falls back to `docker.exe compose` when Docker Desktop is available
 - Chose `pnpm` for workspace management
 - Added `concurrently` so root `dev` can run client and server together
 - Added a Vite proxy rewrite so `/api/*` maps to server routes correctly during development
@@ -127,12 +154,7 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Known Gaps
 
-- Phase 1 test DB lifecycle scripts are placeholders only:
-  - `server/src/db/scripts/create-test-db.ts`
-  - `server/src/db/scripts/drop-test-db.ts`
-- No real Postgres/PostGIS integration yet
 - No monorepo README yet
-- Remote is configured, but the repo has not been pushed from this session
 - Local branch is still `master`; rename to `main` later if desired
 
 ---
@@ -140,13 +162,8 @@ These are implementation-level decisions, not product/spec changes.
 ## Recommended Next Steps
 
 1. Decide whether to rename local branch `master` to `main` before first push.
-2. Set up local Postgres/PostGIS strategy for development and tests.
-3. Start Phase 2:
-   - Drizzle setup
-   - schema definition
-   - migrations
-   - test database automation
-4. Once Phase 2 begins, replace placeholder DB scripts with real creation/teardown logic.
+2. Continue into backend implementation on top of the schema and migration baseline.
+3. Add migration-backed integration tests once service code starts depending on the database.
 
 ---
 
@@ -157,4 +174,4 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is local database setup and Phase 2 schema/migration implementation.
+- The next highest-value work is backend service implementation on top of the schema and migration baseline.

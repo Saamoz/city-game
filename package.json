@@ -14,7 +14,15 @@
     "typecheck": "pnpm -r typecheck",
     "dev:client": "pnpm --filter @city-game/client dev",
     "dev:server": "pnpm --filter @city-game/server dev",
-    "test": "pnpm --filter @city-game/server test"
+    "test": "pnpm --filter @city-game/server test",
+    "db:up": "bash ./scripts/docker-compose.sh -f compose.yml up -d db",
+    "db:down": "bash ./scripts/docker-compose.sh -f compose.yml down",
+    "db:logs": "bash ./scripts/docker-compose.sh -f compose.yml logs -f db",
+    "db:generate": "pnpm --filter @city-game/server db:generate",
+    "db:migrate": "pnpm --filter @city-game/server db:migrate",
+    "db:studio": "pnpm --filter @city-game/server db:studio",
+    "db:test:create": "pnpm --filter @city-game/server db:test:create",
+    "db:test:drop": "pnpm --filter @city-game/server db:test:drop"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
