@@ -60,7 +60,9 @@ export function createTestChallenge(overrides: Record<string, unknown> = {}) {
     description: 'Complete the test challenge.',
     kind: 'visit',
     config: {},
+    completionMode: 'self_report',
     scoring: { points: 10 },
+    status: 'available',
     ...overrides,
   };
 }

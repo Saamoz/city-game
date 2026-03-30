@@ -22,11 +22,21 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 8 OSM import preview complete
+- Current implementation stage: Phase 9 challenge CRUD complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 9 Progress
+
+- Added `server/src/routes/challenge-routes.ts` with admin-gated challenge create/update/delete endpoints plus public challenge listing by game
+- Added request validation for `kind`, `status`, and `completionMode`, with same-game `zoneId` enforcement before insert/update
+- Added integration coverage in `server/src/routes/challenge-routes.test.ts` for create, cross-game zone rejection, list filtering, update/delete, and completion-mode validation
+- Registered challenge routes in `buildApp()` so the Phase 9 API is live under `/api/v1`
+- Challenge route tests must use the actual zone IDs returned by `createZone()`; the spatial service generates zone IDs rather than honoring extra fixture keys
+
+---
 
 ## Phase 8 Progress
 
@@ -158,7 +168,7 @@ pnpm -r build
 Results:
 
 - Workspace typecheck passed
-- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, player route coverage, zone route coverage, spatial-service coverage, OSM preview route coverage, and OSM import service coverage
+- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, player route coverage, zone route coverage, challenge route coverage, spatial-service coverage, OSM preview route coverage, and OSM import service coverage
 - Full workspace build passed
 - `pnpm db:up` works against the Docker-backed local database
 - `pnpm db:migrate` completed successfully
@@ -231,7 +241,7 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 9 challenge CRUD. Phase 8 is now covered well enough for preview-driven admin import workflows.
+1. Proceed to Phase 10 resource ledger service and challenge-completion resource award plumbing.
 2. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 3. Reuse `server/src/test/test-db.ts` for future DB-backed integration tests instead of creating isolated test pools per suite.
 
@@ -244,4 +254,4 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 9 challenge CRUD on top of the auth, DB, game/team/player flows, and the new spatial + OSM preview services.
+- The next highest-value work is Phase 10 resource ledger service on top of the auth, DB, game/team/player flows, and the new zone/challenge admin APIs.

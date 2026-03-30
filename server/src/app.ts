@@ -3,6 +3,7 @@ import type { DatabaseClient, DatabasePool } from './db/connection.js';
 import { createDb } from './db/connection.js';
 import { registerAuth } from './lib/auth.js';
 import { registerAppErrorHandler } from './lib/errors.js';
+import { challengeRoutes } from './routes/challenge-routes.js';
 import { gameRoutes } from './routes/game-routes.js';
 import { playerRoutes } from './routes/player-routes.js';
 import { zoneRoutes } from './routes/zone-routes.js';
@@ -45,6 +46,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.register(gameRoutes, { prefix: '/api/v1' });
   app.register(playerRoutes, { prefix: '/api/v1' });
   app.register(zoneRoutes, { prefix: '/api/v1' });
+  app.register(challengeRoutes, { prefix: '/api/v1' });
 
   return app;
 }
