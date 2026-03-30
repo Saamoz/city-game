@@ -22,11 +22,20 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 5 game and team CRUD complete
+- Current implementation stage: Phase 6 player registration and team join complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 6 Progress
+
+- Added `server/src/routes/player-routes.ts` with player registration, team join-by-code, and `GET /players/me`
+- Registration now creates a player with `teamId: null`, generates a session token, and sets the auth cookie in the same response
+- Team join now reuses the Phase 4 cookie session to attach the current player to a game team by join code
+- Added integration coverage in `server/src/routes/player-routes.test.ts` for register, join, invalid codes, unauthenticated `GET /players/me`, and authenticated `GET /players/me`
+
+---
 
 ## Phase 5 Progress
 
@@ -129,7 +138,7 @@ pnpm -r build
 Results:
 
 - Workspace typecheck passed
-- Server tests passed, including AppError, validation-error, auth middleware, and game/team route coverage
+- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, and player route coverage
 - Full workspace build passed
 - `pnpm db:up` works against the Docker-backed local database
 - `pnpm db:migrate` completed successfully
@@ -200,7 +209,7 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 6 player registration, team join, and `GET /players/me` on top of the new game/team routes.
+1. Proceed to Phase 7 resource CRUD and challenge CRUD on top of the game, team, and player flows.
 2. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 3. Reuse `server/src/test/test-db.ts` for future DB-backed integration tests instead of creating isolated test pools per suite.
 
@@ -213,4 +222,4 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 6 player registration and team join on top of the auth, DB, and game/team CRUD layers.
+- The next highest-value work is Phase 7 resource and challenge CRUD on top of the auth, DB, and game/team/player route layers.

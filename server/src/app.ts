@@ -4,6 +4,7 @@ import { createDb } from './db/connection.js';
 import { registerAuth } from './lib/auth.js';
 import { registerAppErrorHandler } from './lib/errors.js';
 import { gameRoutes } from './routes/game-routes.js';
+import { playerRoutes } from './routes/player-routes.js';
 
 export interface BuildAppOptions {
   db?: DatabaseClient;
@@ -38,6 +39,7 @@ export function buildApp(options: BuildAppOptions = {}) {
 
   app.get('/health', async () => ({ status: 'ok' }));
   app.register(gameRoutes, { prefix: '/api/v1' });
+  app.register(playerRoutes, { prefix: '/api/v1' });
 
   return app;
 }
