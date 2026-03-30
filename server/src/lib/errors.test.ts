@@ -12,14 +12,16 @@ describe('app error handler', () => {
   });
 
   it('serializes AppError responses using the shared contract', async () => {
-    app = await createTestApp((instance) => {
-      instance.get('/test/app-error', async () => {
-        throw new AppError(errorCodes.notOnTeam, {
-          details: {
-            requiresTeam: true,
-          },
+    app = await createTestApp({
+      register(instance) {
+        instance.get('/test/app-error', async () => {
+          throw new AppError(errorCodes.notOnTeam, {
+            details: {
+              requiresTeam: true,
+            },
+          });
         });
-      });
+      },
     });
 
     const response = await app.inject({
@@ -40,26 +42,28 @@ describe('app error handler', () => {
   });
 
   it('normalizes Fastify validation errors into VALIDATION_ERROR', async () => {
-    app = await createTestApp((instance) => {
-      instance.post(
-        '/test/validation',
-        {
-          schema: {
-            body: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['displayName'],
-              properties: {
-                displayName: {
-                  type: 'string',
-                  minLength: 1,
+    app = await createTestApp({
+      register(instance) {
+        instance.post(
+          '/test/validation',
+          {
+            schema: {
+              body: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['displayName'],
+                properties: {
+                  displayName: {
+                    type: 'string',
+                    minLength: 1,
+                  },
                 },
               },
             },
           },
-        },
-        async () => ({ ok: true }),
-      );
+          async () => ({ ok: true }),
+        );
+      },
     });
 
     const response = await app.inject({

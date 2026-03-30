@@ -22,11 +22,23 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 3 error system and shared types complete
+- Current implementation stage: Phase 4 auth middleware complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 4 Progress
+
+- Added cookie-based REST auth in `server/src/lib/auth.ts` backed by real `players.session_token` lookups
+- Added `authenticate`, `requireTeam`, and `requireAdmin` Fastify decorations on the root app instance
+- Added session cookie helpers and UUIDv4 token generation for later player registration work
+- Added DB injection support to `buildApp()` so integration tests can run against the test database without mutating the dev database
+- Added `server/src/test/test-db.ts` for migration-aware test DB reuse and cleanup
+- Upgraded the test factories to use valid UUIDs and realistic insertable defaults
+- Added `@fastify/cookie` and integration tests covering missing cookie, valid session, null-team rejection, missing admin token, and cookie serialization
+
+---
 
 ## Phase 3 Progress
 
@@ -105,7 +117,7 @@ pnpm -r build
 Results:
 
 - Workspace typecheck passed
-- Server tests passed, including AppError and validation-error coverage
+- Server tests passed, including AppError, validation-error, and auth middleware coverage
 - Full workspace build passed
 - `pnpm db:up` works against the Docker-backed local database
 - `pnpm db:migrate` completed successfully
@@ -160,6 +172,7 @@ Practical rule for now:
 - Kept Phase 1 database scripts as placeholders rather than faking database setup before Phase 2
 - Moved the preferred development environment from Windows PowerShell to WSL
 - Added `GAME_RESUMED` and `game_resumed` to the shared event taxonomy to match the earlier plan decision around pause/resume lifecycle
+- Cookie utility keeps `Secure` enabled in production and disables it in development/test so local HTTP + Vite proxy auth remains usable
 
 These are implementation-level decisions, not product/spec changes.
 
@@ -174,9 +187,9 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 4 auth middleware using the shared error codes and response contract.
+1. Proceed to Phase 5 game and team CRUD on top of the new auth and error layers.
 2. Start attaching real route schemas so the centralized validation-error handler is exercised by application endpoints, not just tests.
-3. Add migration-backed integration tests as service code starts depending on the database.
+3. Reuse `server/src/test/test-db.ts` for future DB-backed integration tests instead of creating isolated test pools per suite.
 
 ---
 
@@ -187,4 +200,4 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 4 auth middleware and the first real API surface on top of the shared contracts.
+- The next highest-value work is Phase 5 game and team CRUD on top of the auth, DB, and shared contract layers.
