@@ -22,7 +22,7 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-31
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 18 Territory claim action complete
+- Current implementation stage: Phase 19 claim timeout job complete
 
 ---
 
@@ -265,8 +265,8 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 19 claim timeout job.
-2. Reuse the Phase 18 claim service for timeout expiry and the upcoming complete/release flows instead of duplicating claim state transitions.
+1. Proceed to Phase 20 Territory complete action.
+2. Reuse the Phase 18 claim service serializers and the Phase 19 timeout job event/broadcast seams for complete/release flows instead of forking challenge state transitions.
 3. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 
 ---
@@ -278,7 +278,7 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 19 claim timeout job.
+- The next highest-value work is Phase 20 Territory complete action.
 
 ## Phase 12 Notes
 
@@ -391,3 +391,18 @@ These are implementation-level decisions, not product/spec changes.
 - Gameplay actions need an event helper that can append multiple rows under one `stateVersion`; the old one-event-per-increment helper was not sufficient once Territory flows started emitting both engine and mode events.
 - Idempotency tests must reuse the exact same payload, including timestamps, or they will correctly trip request-hash conflicts instead of replaying.
 - Drizzle/Postgres unique-constraint failures can arrive wrapped under `cause`; conflict normalization helpers need to inspect nested error objects, not just the top-level exception.
+
+## Phase 19 Notes
+
+- Phase 19 is complete: added `server/src/jobs/claim-timeout.ts` with a periodic claim sweep, immediate startup recovery run, and explicit `stop()` / `runNow()` control for tests and future ops hooks.
+- Expiry handling now locks active current claims with `FOR UPDATE SKIP LOCKED`, marks them `expired`, clears the linked challenge back to `available`, increments `stateVersion` once per expired claim, writes `OBJECTIVE_STATE_CHANGED` + `CHALLENGE_RELEASED`, and broadcasts `challenge_released` after commit.
+- Pre-expiry handling now scans active current claims inside the warning window, sets `warning_sent = TRUE`, and emits a team notification through the new notification service seam without changing authoritative game state.
+- Added `server/src/services/notification-service.ts` as the first notification abstraction and decorated it in `buildApp()` so later push work has a stable integration point.
+- `server/src/index.ts` now starts the timeout job on server boot, which gives startup recovery for already-expired claims.
+- Added DB-backed coverage in `server/src/jobs/claim-timeout.test.ts` for expiry, warning delivery, and immediate startup recovery.
+
+### Phase 19 Learnings
+
+- Raw `db.execute(sql...)` result rows do not reliably preserve `Date` instances; timeout-job queries need explicit timestamp normalization before building event metadata or notification payloads.
+- Startup/background jobs are easier to test when they accept a controllable clock and expose `runNow()` / `stop()` handles instead of burying timing entirely inside `setInterval`.
+- The same challenge/claim serializers used by HTTP routes are worth reusing in background jobs; otherwise broadcast payloads and event metadata drift from the authoritative API shape.

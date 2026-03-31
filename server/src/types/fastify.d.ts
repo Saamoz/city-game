@@ -5,6 +5,7 @@ import type { DatabaseClient } from '../db/connection.js';
 import type { players } from '../db/schema.js';
 import type { ModeRegistry } from '../modes/index.js';
 import type { OsmImportService } from '../services/osm-import-service.js';
+import type { NotificationService } from '../services/notification-service.js';
 import type { Broadcaster } from '../socket/broadcaster.js';
 import type { RealtimeServer } from '../socket/broadcaster.js';
 
@@ -15,6 +16,7 @@ declare module 'fastify' {
     db: DatabaseClient;
     modeRegistry: ModeRegistry;
     osmImportService: OsmImportService;
+    notificationService: NotificationService;
     io: RealtimeServer;
     broadcaster: Broadcaster;
     authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void>;

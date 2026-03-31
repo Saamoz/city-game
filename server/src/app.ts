@@ -15,12 +15,14 @@ import { resourceRoutes } from './routes/resource-routes.js';
 import { stateRoutes } from './routes/state-routes.js';
 import { zoneRoutes } from './routes/zone-routes.js';
 import { createOsmImportService, type OsmImportService } from './services/osm-import-service.js';
+import { createNotificationService, type NotificationService } from './services/notification-service.js';
 
 export interface BuildAppOptions {
   db?: DatabaseClient;
   pool?: DatabasePool;
   adminToken?: string;
   osmImportService?: OsmImportService;
+  notificationService?: NotificationService;
   modeRegistry?: ModeRegistry;
 }
 
@@ -41,6 +43,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.decorate('db', database.db);
   app.decorate('modeRegistry', modeRegistry);
   app.decorate('osmImportService', options.osmImportService ?? createOsmImportService());
+  app.decorate('notificationService', options.notificationService ?? createNotificationService());
 
   if (database.pool && database.ownsPool) {
     app.addHook('onClose', async () => {

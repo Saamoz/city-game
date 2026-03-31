@@ -306,7 +306,7 @@ function isActiveClaimConstraintError(error: unknown): boolean {
   return message.includes('idx_one_active_claim_per_challenge') && message.includes('23505');
 }
 
-function serializeChallenge(row: typeof challenges.$inferSelect): Challenge {
+export function serializeChallenge(row: typeof challenges.$inferSelect): Challenge {
   return {
     id: row.id,
     gameId: row.gameId,
@@ -326,7 +326,7 @@ function serializeChallenge(row: typeof challenges.$inferSelect): Challenge {
   };
 }
 
-function serializeClaim(row: typeof challengeClaims.$inferSelect): ChallengeClaim {
+export function serializeClaim(row: typeof challengeClaims.$inferSelect): ChallengeClaim {
   return {
     id: row.id,
     challengeId: row.challengeId,
