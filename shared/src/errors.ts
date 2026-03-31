@@ -60,6 +60,10 @@ export const errorDefinitions = {
     statusCode: 403,
     defaultMessage: 'Zone is disabled.',
   },
+  MAX_CONCURRENT_CLAIMS_REACHED: {
+    statusCode: 409,
+    defaultMessage: 'Team has reached the maximum number of active claims.',
+  },
   INSUFFICIENT_RESOURCES: {
     statusCode: 422,
     defaultMessage: 'Insufficient resources.',
@@ -107,6 +111,7 @@ export const errorCodes = {
   notOnTeam: 'NOT_ON_TEAM',
   teamNotFound: 'TEAM_NOT_FOUND',
   zoneDisabled: 'ZONE_DISABLED',
+  maxConcurrentClaimsReached: 'MAX_CONCURRENT_CLAIMS_REACHED',
   insufficientResources: 'INSUFFICIENT_RESOURCES',
   idempotencyConflict: 'IDEMPOTENCY_CONFLICT',
   rateLimited: 'RATE_LIMITED',

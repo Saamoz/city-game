@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import type {
   GameStateSnapshot,
+  GpsPayload,
+  JsonObject,
   ResourceDefinition,
   ResourceType,
   ScoreboardEntry,
@@ -28,12 +30,18 @@ export interface ModeContext {
 export interface ModeActionInput {
   type: 'claim' | 'complete' | 'release';
   challengeId: string;
-  payload?: unknown;
+  gameId: string;
+  playerId: string;
+  teamId: string;
+  payload?: GpsPayload | JsonObject | null;
 }
 
 export interface ModeActionResult {
+  gameId: string;
   statusCode: number;
+  stateVersion?: number;
   body?: unknown;
+  responseHeaders?: JsonObject;
 }
 
 export interface WinCheckResult {

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_CLAIM_TIMEOUT_MINUTES,
   DEFAULT_GPS_MAX_AGE_SECONDS,
   DEFAULT_GPS_MAX_ERROR_METERS,
   DEFAULT_GPS_MAX_VELOCITY_KMH,
@@ -45,6 +46,7 @@ export const env = {
   testDatabaseUrl: requireEnv('TEST_DATABASE_URL'),
   adminToken: process.env.ADMIN_TOKEN ?? 'replace-me',
   nodeEnv: getNodeEnv(),
+  claimTimeoutMinutes: getOptionalNumber('CLAIM_TIMEOUT_MINUTES', DEFAULT_CLAIM_TIMEOUT_MINUTES),
   gpsMaxErrorMeters: getOptionalNumber('GPS_MAX_ERROR_METERS', DEFAULT_GPS_MAX_ERROR_METERS),
   gpsMaxAgeSeconds: getOptionalNumber('GPS_MAX_AGE_SECONDS', DEFAULT_GPS_MAX_AGE_SECONDS),
   gpsMaxVelocityKmh: getOptionalNumber('GPS_MAX_VELOCITY_KMH', DEFAULT_GPS_MAX_VELOCITY_KMH),

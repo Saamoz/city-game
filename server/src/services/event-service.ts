@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt } from 'drizzle-orm';
 import {
   MAX_DELTA_SYNC_GAP,
+  errorCodes,
   type EventActorType,
   type EventEntityType,
   type GameEventPayload,
@@ -13,7 +14,6 @@ import type { DatabaseClient } from '../db/connection.js';
 import { gameEvents, games } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import { incrementVersion } from './game-service.js';
-import { errorCodes } from '@city-game/shared';
 
 interface GameEventRow {
   id: string;
@@ -45,6 +45,29 @@ export interface LogEventInput<TEvent extends GameEventType = GameEventType> {
   payload?: GameEventPayload<TEvent>;
 }
 
+export interface AppendEventInput<TEvent extends GameEventType = GameEventType> {
+  eventType: TEvent;
+  entityType: EventEntityType;
+  entityId: string;
+  actorType: EventActorType;
+  actorId?: string | null;
+  actorTeamId?: string | null;
+  beforeState?: JsonValue | null;
+  afterState?: JsonValue | null;
+  meta?: JsonObject;
+  payload?: GameEventPayload<TEvent>;
+}
+
+export interface AppendEventsInput {
+  gameId: string;
+  events: AppendEventInput[];
+}
+
+export interface AppendEventsResult {
+  stateVersion: number;
+  events: GameEventRecord[];
+}
+
 export interface GetRecentEventsInput {
   gameId: string;
   limit?: number;
@@ -69,27 +92,57 @@ export async function logEvent<TEvent extends GameEventType>(
 ): Promise<GameEventRecord> {
   return db.transaction(async (tx) => {
     const transactionalDb = tx as unknown as DatabaseClient;
-    const stateVersion = await incrementVersion(transactionalDb, input.gameId);
+    const result = await appendEvents(transactionalDb, {
+      gameId: input.gameId,
+      events: [
+        {
+          eventType: input.eventType,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          actorType: input.actorType,
+          actorId: input.actorId ?? null,
+          actorTeamId: input.actorTeamId ?? null,
+          beforeState: input.beforeState ?? null,
+          afterState: input.afterState ?? null,
+          meta: input.meta,
+          payload: input.payload,
+        },
+      ],
+    });
 
-    const [event] = await transactionalDb
-      .insert(gameEvents)
-      .values({
+    return result.events[0];
+  });
+}
+
+export async function appendEvents(db: DatabaseClient, input: AppendEventsInput): Promise<AppendEventsResult> {
+  if (input.events.length === 0) {
+    throw new Error('appendEvents requires at least one event.');
+  }
+
+  const stateVersion = await incrementVersion(db, input.gameId);
+  const rows = await db
+    .insert(gameEvents)
+    .values(
+      input.events.map((event) => ({
         gameId: input.gameId,
         stateVersion,
-        eventType: input.eventType,
-        entityType: input.entityType,
-        entityId: input.entityId,
-        actorType: input.actorType,
-        actorId: input.actorId ?? null,
-        actorTeamId: input.actorTeamId ?? null,
-        beforeState: input.beforeState ?? null,
-        afterState: input.afterState ?? null,
-        meta: input.meta ?? (input.payload as JsonObject | undefined) ?? {},
-      })
-      .returning();
+        eventType: event.eventType,
+        entityType: event.entityType,
+        entityId: event.entityId,
+        actorType: event.actorType,
+        actorId: event.actorId ?? null,
+        actorTeamId: event.actorTeamId ?? null,
+        beforeState: event.beforeState ?? null,
+        afterState: event.afterState ?? null,
+        meta: event.meta ?? (event.payload as JsonObject | undefined) ?? {},
+      })),
+    )
+    .returning();
 
-    return serializeGameEvent(event as GameEventRow);
-  });
+  return {
+    stateVersion,
+    events: rows.map((row) => serializeGameEvent(row as GameEventRow)),
+  };
 }
 
 export async function getRecentEvents(db: DatabaseClient, input: GetRecentEventsInput): Promise<GameEventRecord[]> {

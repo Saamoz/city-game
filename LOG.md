@@ -22,7 +22,7 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-31
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 17 map state and delta sync complete
+- Current implementation stage: Phase 18 Territory claim action complete
 
 ---
 
@@ -265,8 +265,8 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 18 Territory claim action.
-2. Reuse the shared snapshot builder and broadcaster for all authoritative realtime state changes.
+1. Proceed to Phase 19 claim timeout job.
+2. Reuse the Phase 18 claim service for timeout expiry and the upcoming complete/release flows instead of duplicating claim state transitions.
 3. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 
 ---
@@ -278,7 +278,7 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 18 Territory claim action.
+- The next highest-value work is Phase 19 claim timeout job.
 
 ## Phase 12 Notes
 
@@ -376,3 +376,18 @@ These are implementation-level decisions, not product/spec changes.
 - Socket room membership should track the joined team separately from the refreshed player object so a team change can leave the old team room correctly during reconnect.
 - Drizzle's PostGIS insert typing is still awkward in tests; geometry-heavy fixture inserts may need explicit casts until a cleaner helper layer exists.
 
+## Phase 18 Notes
+
+- Phase 18 is complete: `POST /challenges/:id/claim` now runs through auth, team check, idempotency, platform GPS validation, and the Territory handler.
+- Added `server/src/modes/territory/claim-service.ts` for the transactional claim flow: challenge row lock, game-active check, per-zone GPS override, spatial containment, max-concurrent-claims enforcement, claim insert, challenge update, single state-version increment, and dual event logging.
+- `server/src/modes/territory/routes.ts` now dispatches claim actions through `getModeHandlerForGame()` and broadcasts `challenge_claimed` after commit.
+- Added `appendEvents()` in `server/src/services/event-service.ts` so one gameplay action can emit multiple events under the same authoritative `stateVersion`.
+- Added `CLAIM_TIMEOUT_MINUTES` parsing in `server/src/db/env.ts` and started using it to compute `challenge_claims.expires_at` / `challenges.expires_at` on claim.
+- Added `MAX_CONCURRENT_CLAIMS_REACHED` to `shared/src/errors.ts` for the team-claim-cap conflict path.
+- Added DB-backed claim coverage in `server/src/modes/territory/routes.test.ts` for success, replay, already claimed, stale GPS, per-zone GPS overrides, outside-zone distance reporting, inactive game, missing team, max claims, and unique-index conflict normalization.
+
+### Phase 18 Learnings
+
+- Gameplay actions need an event helper that can append multiple rows under one `stateVersion`; the old one-event-per-increment helper was not sufficient once Territory flows started emitting both engine and mode events.
+- Idempotency tests must reuse the exact same payload, including timestamps, or they will correctly trip request-hash conflicts instead of replaying.
+- Drizzle/Postgres unique-constraint failures can arrive wrapped under `cause`; conflict normalization helpers need to inspect nested error objects, not just the top-level exception.

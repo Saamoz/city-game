@@ -1,14 +1,17 @@
 import { eq } from 'drizzle-orm';
 import {
   RESOURCE_TYPE_VALUES,
+  STATE_VERSION_HEADER,
   errorCodes,
   resourceDefinitions,
+  type GpsPayload,
   type ResourceType,
 } from '@city-game/shared';
 import { teams } from '../../db/schema.js';
 import { AppError } from '../../lib/errors.js';
 import { seedInitialBalances } from '../../services/resource-service.js';
 import type { ModeHandler, ModeResourceDefinition } from '../types.js';
+import { claimChallenge } from './claim-service.js';
 import { territoryRoutes } from './routes.js';
 
 const territoryResourceDefinitions: ModeResourceDefinition[] = RESOURCE_TYPE_VALUES.map((resourceType) => ({
@@ -34,10 +37,44 @@ export function createTerritoryModeHandler(): ModeHandler {
     async onGameEnd() {
       return;
     },
-    async handleAction() {
-      throw new AppError(errorCodes.internalServerError, {
-        message: 'Territory actions are not implemented yet.',
-      });
+    async handleAction(action, context) {
+      switch (action.type) {
+        case 'claim': {
+          const gpsPayload = action.payload;
+          if (!isGpsPayload(gpsPayload)) {
+            throw new AppError(errorCodes.validationError, {
+              message: 'GPS payload is required for claim actions.',
+            });
+          }
+
+          const result = await claimChallenge(context.db, {
+            challengeId: action.challengeId,
+            gameId: action.gameId,
+            playerId: action.playerId,
+            teamId: action.teamId,
+            gpsPayload,
+          });
+
+          return {
+            gameId: result.gameId,
+            statusCode: 200,
+            stateVersion: result.stateVersion,
+            body: {
+              challenge: result.challenge,
+              claim: result.claim,
+              stateVersion: result.stateVersion,
+            },
+            responseHeaders: {
+              [STATE_VERSION_HEADER]: String(result.stateVersion),
+            },
+          };
+        }
+        case 'complete':
+        case 'release':
+          throw new AppError(errorCodes.internalServerError, {
+            message: 'Territory actions are not implemented yet.',
+          });
+      }
     },
     async checkWinCondition() {
       return {
@@ -64,4 +101,15 @@ function buildInitialBalanceMap(definitions: ModeResourceDefinition[]): Partial<
   return Object.fromEntries(definitions.map((definition) => [definition.type, definition.initialBalance])) as Partial<
     Record<ResourceType, number>
   >;
+}
+
+function isGpsPayload(value: unknown): value is GpsPayload {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      typeof (value as GpsPayload).lat === 'number' &&
+      typeof (value as GpsPayload).lng === 'number' &&
+      typeof (value as GpsPayload).gpsErrorMeters === 'number' &&
+      typeof (value as GpsPayload).capturedAt === 'string',
+  );
 }

@@ -108,8 +108,8 @@ describe('mode registry', () => {
     expect(zeroRows.every((row) => row.delta === 0 && row.balanceAfter === 0 && row.reason === 'game_start_seed')).toBe(true);
   });
 
-  it('registers the territory skeleton routes during app startup', async () => {
-    await testDatabase.db.insert(games).values(createTestGame());
+  it('registers the territory claim route during app startup', async () => {
+    await testDatabase.db.insert(games).values(createTestGame({ status: 'active' }));
     await testDatabase.db.insert(teams).values(createTestTeam());
     await testDatabase.db.insert(players).values(createTestPlayer({ id: PLAYER_ID, sessionToken: 'territory-route-token' }));
     app = await createTestApp({ db: testDatabase.db });
@@ -121,7 +121,7 @@ describe('mode registry', () => {
         [SESSION_COOKIE_NAME]: 'territory-route-token',
       },
       headers: {
-        'idempotency-key': 'territory-claim-skeleton',
+        'idempotency-key': 'territory-claim-route',
       },
       payload: {
         lat: 49.8951,
@@ -131,11 +131,11 @@ describe('mode registry', () => {
       },
     });
 
-    expect(response.statusCode).toBe(501);
+    expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({
       error: {
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Territory mode action endpoints are not implemented yet.',
+        code: 'VALIDATION_ERROR',
+        message: 'Challenge not found.',
       },
     });
   });
