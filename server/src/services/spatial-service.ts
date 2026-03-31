@@ -233,27 +233,25 @@ export async function importZones(
     };
   }>,
 ): Promise<Zone[]> {
-  return db.transaction(async (tx) => {
-    const createdZones: Zone[] = [];
+  const createdZones: Zone[] = [];
 
-    for (const [index, feature] of features.entries()) {
-      const zone = await createZone(tx as unknown as DatabaseClient, {
-        gameId,
-        name: feature.properties?.name?.trim() || `Imported Zone ${index + 1}`,
-        geometry: feature.geometry,
-        ownerTeamId: feature.properties?.ownerTeamId ?? null,
-        pointValue: feature.properties?.pointValue ?? 1,
-        claimRadiusMeters: feature.properties?.claimRadiusMeters ?? null,
-        maxGpsErrorMeters: feature.properties?.maxGpsErrorMeters ?? null,
-        isDisabled: feature.properties?.isDisabled ?? false,
-        metadata: feature.properties?.metadata ?? {},
-      });
+  for (const [index, feature] of features.entries()) {
+    const zone = await createZone(db, {
+      gameId,
+      name: feature.properties?.name?.trim() || `Imported Zone ${index + 1}`,
+      geometry: feature.geometry,
+      ownerTeamId: feature.properties?.ownerTeamId ?? null,
+      pointValue: feature.properties?.pointValue ?? 1,
+      claimRadiusMeters: feature.properties?.claimRadiusMeters ?? null,
+      maxGpsErrorMeters: feature.properties?.maxGpsErrorMeters ?? null,
+      isDisabled: feature.properties?.isDisabled ?? false,
+      metadata: feature.properties?.metadata ?? {},
+    });
 
-      createdZones.push(zone);
-    }
+    createdZones.push(zone);
+  }
 
-    return createdZones;
-  });
+  return createdZones;
 }
 
 export async function validateZoneGeometry(db: DatabaseClient, geometry: GeoJsonPolygon): Promise<void> {

@@ -1,9 +1,11 @@
-import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync } from 'fastify';
 import type { Challenge, JsonObject } from '@city-game/shared';
 import { CHALLENGE_KIND_VALUES, CHALLENGE_STATUS_VALUES, errorCodes } from '@city-game/shared';
 import { and, asc, eq } from 'drizzle-orm';
+import type { DatabaseClient } from '../db/connection.js';
 import { challenges, games, zones } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
+import { executeIdempotentMutation } from '../services/idempotency-service.js';
 
 interface ChallengeRow {
   id: string;
@@ -142,28 +144,34 @@ export const challengeRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params as { id: string };
-      await getGameById(app, id);
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const { id } = request.params as { id: string };
+        await getGameById(db, id);
 
-      const body = request.body as ChallengeCreateBody;
-      await assertZoneBelongsToGame(app, id, body.zoneId ?? null);
+        const body = request.body as ChallengeCreateBody;
+        await assertZoneBelongsToGame(db, id, body.zoneId ?? null);
 
-      const insertValues: ChallengeInsertValues = {
-        gameId: id,
-        zoneId: body.zoneId ?? null,
-        title: body.title,
-        description: body.description,
-        kind: body.kind,
-        config: body.config ?? {},
-        completionMode: body.completionMode ?? 'self_report',
-        scoring: body.scoring ?? { points: 10 },
-        difficulty: body.difficulty ?? null,
-        status: body.status ?? 'available',
-      };
+        const insertValues: ChallengeInsertValues = {
+          gameId: id,
+          zoneId: body.zoneId ?? null,
+          title: body.title,
+          description: body.description,
+          kind: body.kind,
+          config: body.config ?? {},
+          completionMode: body.completionMode ?? 'self_report',
+          scoring: body.scoring ?? { points: 10 },
+          difficulty: body.difficulty ?? null,
+          status: body.status ?? 'available',
+        };
 
-      const [challenge] = await app.db.insert(challenges).values(insertValues).returning();
+        const [challenge] = await db.insert(challenges).values(insertValues).returning();
 
-      reply.status(201).send({ challenge: serializeChallengeRow(challenge as ChallengeRow) });
+        return {
+          gameId: id,
+          statusCode: 201,
+          body: { challenge: serializeChallengeRow(challenge as ChallengeRow) },
+        };
+      });
     },
   );
 
@@ -177,7 +185,7 @@ export const challengeRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      await getGameById(app, id);
+      await getGameById(app.db, id);
 
       const query = request.query as {
         zoneId?: string;
@@ -221,30 +229,36 @@ export const challengeRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params as { id: string };
-      const existingChallenge = await getChallengeByIdOrThrow(app, id);
-      const body = request.body as ChallengeUpdateBody;
-      const nextZoneId = body.zoneId === undefined ? existingChallenge.zoneId : body.zoneId;
-      await assertZoneBelongsToGame(app, existingChallenge.gameId, nextZoneId ?? null);
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const { id } = request.params as { id: string };
+        const existingChallenge = await getChallengeByIdOrThrow(db, id);
+        const body = request.body as ChallengeUpdateBody;
+        const nextZoneId = body.zoneId === undefined ? existingChallenge.zoneId : body.zoneId;
+        await assertZoneBelongsToGame(db, existingChallenge.gameId, nextZoneId ?? null);
 
-      const [challenge] = await app.db
-        .update(challenges)
-        .set({
-          zoneId: nextZoneId ?? null,
-          title: body.title ?? existingChallenge.title,
-          description: body.description ?? existingChallenge.description,
-          kind: body.kind ?? existingChallenge.kind,
-          config: body.config ?? existingChallenge.config,
-          completionMode: body.completionMode ?? existingChallenge.completionMode,
-          scoring: body.scoring ?? existingChallenge.scoring,
-          difficulty: body.difficulty === undefined ? existingChallenge.difficulty : body.difficulty,
-          status: body.status ?? existingChallenge.status,
-          updatedAt: new Date(),
-        })
-        .where(eq(challenges.id, id))
-        .returning();
+        const [challenge] = await db
+          .update(challenges)
+          .set({
+            zoneId: nextZoneId ?? null,
+            title: body.title ?? existingChallenge.title,
+            description: body.description ?? existingChallenge.description,
+            kind: body.kind ?? existingChallenge.kind,
+            config: body.config ?? existingChallenge.config,
+            completionMode: body.completionMode ?? existingChallenge.completionMode,
+            scoring: body.scoring ?? existingChallenge.scoring,
+            difficulty: body.difficulty === undefined ? existingChallenge.difficulty : body.difficulty,
+            status: body.status ?? existingChallenge.status,
+            updatedAt: new Date(),
+          })
+          .where(eq(challenges.id, id))
+          .returning();
 
-      reply.send({ challenge: serializeChallengeRow(challenge as ChallengeRow) });
+        return {
+          gameId: existingChallenge.gameId,
+          statusCode: 200,
+          body: { challenge: serializeChallengeRow(challenge as ChallengeRow) },
+        };
+      });
     },
   );
 
@@ -257,22 +271,21 @@ export const challengeRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params as { id: string };
-      const [deleted] = await app.db.delete(challenges).where(eq(challenges.id, id)).returning({ id: challenges.id });
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const challenge = await getChallengeByIdOrThrow(db, (request.params as { id: string }).id);
+        await db.delete(challenges).where(eq(challenges.id, challenge.id));
 
-      if (!deleted) {
-        throw new AppError(errorCodes.validationError, {
-          message: 'Challenge not found.',
-        });
-      }
-
-      reply.status(204).send();
+        return {
+          gameId: challenge.gameId,
+          statusCode: 204,
+        };
+      });
     },
   );
 };
 
-async function getGameById(app: FastifyInstance, gameId: string) {
-  const [game] = await app.db.select({ id: games.id }).from(games).where(eq(games.id, gameId)).limit(1);
+async function getGameById(db: DatabaseClient, gameId: string) {
+  const [game] = await db.select({ id: games.id }).from(games).where(eq(games.id, gameId)).limit(1);
 
   if (!game) {
     throw new AppError(errorCodes.gameNotFound);
@@ -281,8 +294,8 @@ async function getGameById(app: FastifyInstance, gameId: string) {
   return game;
 }
 
-async function getChallengeByIdOrThrow(app: FastifyInstance, challengeId: string) {
-  const [challenge] = await app.db.select().from(challenges).where(eq(challenges.id, challengeId)).limit(1);
+async function getChallengeByIdOrThrow(db: DatabaseClient, challengeId: string) {
+  const [challenge] = await db.select().from(challenges).where(eq(challenges.id, challengeId)).limit(1);
 
   if (!challenge) {
     throw new AppError(errorCodes.validationError, {
@@ -293,12 +306,12 @@ async function getChallengeByIdOrThrow(app: FastifyInstance, challengeId: string
   return challenge as ChallengeRow;
 }
 
-async function assertZoneBelongsToGame(app: FastifyInstance, gameId: string, zoneId: string | null) {
+async function assertZoneBelongsToGame(db: DatabaseClient, gameId: string, zoneId: string | null) {
   if (!zoneId) {
     return;
   }
 
-  const [zone] = await app.db
+  const [zone] = await db
     .select({ id: zones.id })
     .from(zones)
     .where(and(eq(zones.id, zoneId), eq(zones.gameId, gameId)))
@@ -325,7 +338,7 @@ function serializeChallengeRow(row: ChallengeRow): Challenge {
     difficulty: row.difficulty,
     status: row.status,
     currentClaimId: row.currentClaimId,
-    expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

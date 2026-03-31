@@ -31,6 +31,91 @@ describe('player routes', () => {
     await closeTestDatabase();
   });
 
+  it('requires Idempotency-Key for player registration', async () => {
+    await seedGame();
+    app = await createPlayerTestApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/game/${GAME_ID}/players`,
+      payload: {
+        display_name: 'Missing Key',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Idempotency-Key header required.',
+      },
+    });
+  });
+
+  it('replays a registration response without creating a second player', async () => {
+    await seedGame();
+    app = await createPlayerTestApp();
+
+    const firstResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/game/${GAME_ID}/players`,
+      headers: idempotencyHeaders('register-player-replay'),
+      payload: {
+        display_name: 'Replay Player',
+      },
+    });
+
+    const secondResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/game/${GAME_ID}/players`,
+      headers: idempotencyHeaders('register-player-replay'),
+      payload: {
+        display_name: 'Replay Player',
+      },
+    });
+
+    expect(firstResponse.statusCode).toBe(201);
+    expect(secondResponse.statusCode).toBe(201);
+    expect(secondResponse.json()).toEqual(firstResponse.json());
+    expect(secondResponse.headers['set-cookie']).toBe(firstResponse.headers['set-cookie']);
+
+    const storedPlayers = await testDatabase.db.select().from(players).where(eq(players.gameId, GAME_ID));
+    expect(storedPlayers).toHaveLength(1);
+    expect(storedPlayers[0]?.displayName).toBe('Replay Player');
+  });
+
+  it('returns IDEMPOTENCY_CONFLICT when a registration key is reused with a different body', async () => {
+    await seedGame();
+    app = await createPlayerTestApp();
+
+    const firstResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/game/${GAME_ID}/players`,
+      headers: idempotencyHeaders('register-player-conflict'),
+      payload: {
+        display_name: 'Player One',
+      },
+    });
+
+    const secondResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/game/${GAME_ID}/players`,
+      headers: idempotencyHeaders('register-player-conflict'),
+      payload: {
+        display_name: 'Player Two',
+      },
+    });
+
+    expect(firstResponse.statusCode).toBe(201);
+    expect(secondResponse.statusCode).toBe(409);
+    expect(secondResponse.json()).toEqual({
+      error: {
+        code: 'IDEMPOTENCY_CONFLICT',
+        message: 'Idempotency key was reused with a different request.',
+      },
+    });
+  });
+
   it('registers a player with teamId null and sets a session cookie', async () => {
     await seedGame();
     app = await createPlayerTestApp();
@@ -38,6 +123,7 @@ describe('player routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/players`,
+      headers: idempotencyHeaders('register-player-cookie'),
       payload: {
         display_name: 'New Player',
       },
@@ -73,6 +159,7 @@ describe('player routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/teams/join`,
+      headers: idempotencyHeaders('join-team-success'),
       cookies: {
         [SESSION_COOKIE_NAME]: 'join-session-token',
       },
@@ -110,6 +197,7 @@ describe('player routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/teams/join`,
+      headers: idempotencyHeaders('join-team-invalid-code'),
       cookies: {
         [SESSION_COOKIE_NAME]: 'bad-join-token',
       },
@@ -190,11 +278,7 @@ describe('player routes', () => {
     const team = createTestTeam(overrides);
     await testDatabase.db.insert(teams).values(team);
 
-    const [storedTeam] = await testDatabase.db
-      .select()
-      .from(teams)
-      .where(eq(teams.id, team.id))
-      .limit(1);
+    const [storedTeam] = await testDatabase.db.select().from(teams).where(eq(teams.id, team.id)).limit(1);
 
     return storedTeam;
   }
@@ -212,3 +296,9 @@ describe('player routes', () => {
     return storedPlayer;
   }
 });
+
+function idempotencyHeaders(idempotencyKey: string) {
+  return {
+    'idempotency-key': idempotencyKey,
+  };
+}

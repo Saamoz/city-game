@@ -35,9 +35,7 @@ describe('game and team routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/game',
-      headers: {
-        authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
+      headers: adminHeaders('create-game-1'),
       payload: {
         name: 'Downtown Territory',
         modeKey: 'territory',
@@ -91,9 +89,7 @@ describe('game and team routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/game',
-      headers: {
-        authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
+      headers: adminHeaders('create-game-invalid-win-condition'),
       payload: {
         name: 'Invalid Win Condition',
         modeKey: 'territory',
@@ -128,9 +124,7 @@ describe('game and team routes', () => {
     const patchResponse = await app.inject({
       method: 'PATCH',
       url: `/api/v1/game/${GAME_ID}`,
-      headers: {
-        authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
+      headers: adminHeaders('update-game-1'),
       payload: {
         name: 'Updated Test Game',
         defaultZoom: 15,
@@ -156,9 +150,7 @@ describe('game and team routes', () => {
     const firstTeamResponse = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/teams`,
-      headers: {
-        authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
+      headers: adminHeaders('create-team-1'),
       payload: {
         name: 'Red Team',
         color: '#ff0000',
@@ -168,9 +160,7 @@ describe('game and team routes', () => {
     const secondTeamResponse = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/teams`,
-      headers: {
-        authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
+      headers: adminHeaders('create-team-2'),
       payload: {
         name: 'Blue Team',
         color: '#0000ff',
@@ -269,3 +259,10 @@ describe('game and team routes', () => {
     return storedGame;
   }
 });
+
+function adminHeaders(idempotencyKey: string) {
+  return {
+    authorization: `Bearer ${ADMIN_TOKEN}`,
+    'idempotency-key': idempotencyKey,
+  };
+}

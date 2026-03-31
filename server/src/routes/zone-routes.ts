@@ -1,9 +1,11 @@
-import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync } from 'fastify';
 import type { GeoJsonFeatureCollection, GeoJsonPolygon, JsonObject } from '@city-game/shared';
 import { errorCodes } from '@city-game/shared';
 import { eq } from 'drizzle-orm';
+import type { DatabaseClient } from '../db/connection.js';
 import { games } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
+import { executeIdempotentMutation } from '../services/idempotency-service.js';
 import type { OsmPreviewProperties } from '../services/osm-import-service.js';
 import {
   createZone,
@@ -149,33 +151,39 @@ export const zoneRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params as { id: string };
-      await getGameById(app, id);
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const { id } = request.params as { id: string };
+        await getGameById(db, id);
 
-      const body = request.body as {
-        name: string;
-        geometry: GeoJsonPolygon;
-        ownerTeamId?: string;
-        pointValue?: number;
-        claimRadiusMeters?: number;
-        maxGpsErrorMeters?: number;
-        isDisabled?: boolean;
-        metadata?: JsonObject;
-      };
+        const body = request.body as {
+          name: string;
+          geometry: GeoJsonPolygon;
+          ownerTeamId?: string;
+          pointValue?: number;
+          claimRadiusMeters?: number;
+          maxGpsErrorMeters?: number;
+          isDisabled?: boolean;
+          metadata?: JsonObject;
+        };
 
-      const zone = await createZone(app.db, {
-        gameId: id,
-        name: body.name,
-        geometry: body.geometry,
-        ownerTeamId: body.ownerTeamId ?? null,
-        pointValue: body.pointValue,
-        claimRadiusMeters: body.claimRadiusMeters,
-        maxGpsErrorMeters: body.maxGpsErrorMeters,
-        isDisabled: body.isDisabled,
-        metadata: body.metadata,
+        const zone = await createZone(db, {
+          gameId: id,
+          name: body.name,
+          geometry: body.geometry,
+          ownerTeamId: body.ownerTeamId ?? null,
+          pointValue: body.pointValue,
+          claimRadiusMeters: body.claimRadiusMeters,
+          maxGpsErrorMeters: body.maxGpsErrorMeters,
+          isDisabled: body.isDisabled,
+          metadata: body.metadata,
+        });
+
+        return {
+          gameId: id,
+          statusCode: 201,
+          body: { zone },
+        };
       });
-
-      reply.status(201).send({ zone });
     },
   );
 
@@ -189,12 +197,19 @@ export const zoneRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params as { id: string };
-      await getGameById(app, id);
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const { id } = request.params as { id: string };
+        await getGameById(db, id);
 
-      const body = request.body as GeoJsonFeatureCollection<GeoJsonPolygon>;
-      const importedZones = await importZones(app.db, id, body.features);
-      reply.status(201).send({ zones: importedZones });
+        const body = request.body as GeoJsonFeatureCollection<GeoJsonPolygon>;
+        const zones = await importZones(db, id, body.features);
+
+        return {
+          gameId: id,
+          statusCode: 201,
+          body: { zones },
+        };
+      });
     },
   );
 
@@ -202,6 +217,9 @@ export const zoneRoutes: FastifyPluginAsync = async (app) => {
     '/game/:id/zones/import-osm',
     {
       preHandler: [app.requireAdmin],
+      config: {
+        skipIdempotency: true,
+      },
       schema: {
         params: gameParamsSchema,
         body: osmImportBodySchema,
@@ -209,7 +227,7 @@ export const zoneRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      await getGameById(app, id);
+      await getGameById(app.db, id);
 
       const body = request.body as { city: string };
       const featureCollection = await app.osmImportService.previewAdministrativeBoundaries({
@@ -229,7 +247,7 @@ export const zoneRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      await getGameById(app, id);
+      await getGameById(app.db, id);
       reply.send({ zones: await listZonesByGame(app.db, id) });
     },
   );
@@ -264,20 +282,27 @@ export const zoneRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params as { id: string };
-      const body = request.body as {
-        name?: string;
-        geometry?: GeoJsonPolygon;
-        ownerTeamId?: string | null;
-        pointValue?: number;
-        claimRadiusMeters?: number | null;
-        maxGpsErrorMeters?: number | null;
-        isDisabled?: boolean;
-        metadata?: JsonObject;
-      };
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const { id } = request.params as { id: string };
+        const body = request.body as {
+          name?: string;
+          geometry?: GeoJsonPolygon;
+          ownerTeamId?: string | null;
+          pointValue?: number;
+          claimRadiusMeters?: number | null;
+          maxGpsErrorMeters?: number | null;
+          isDisabled?: boolean;
+          metadata?: JsonObject;
+        };
 
-      const zone = await updateZone(app.db, id, body);
-      reply.send({ zone });
+        const zone = await updateZone(db, id, body);
+
+        return {
+          gameId: zone.gameId,
+          statusCode: 200,
+          body: { zone },
+        };
+      });
     },
   );
 
@@ -290,21 +315,28 @@ export const zoneRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const deleted = await deleteZoneById(app.db, (request.params as { id: string }).id);
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const zone = await getZoneById(db, (request.params as { id: string }).id);
 
-      if (!deleted) {
-        throw new AppError(errorCodes.validationError, {
-          message: 'Zone not found.',
-        });
-      }
+        if (!zone) {
+          throw new AppError(errorCodes.validationError, {
+            message: 'Zone not found.',
+          });
+        }
 
-      reply.status(204).send();
+        await deleteZoneById(db, zone.id);
+
+        return {
+          gameId: zone.gameId,
+          statusCode: 204,
+        };
+      });
     },
   );
 };
 
-async function getGameById(app: FastifyInstance, gameId: string) {
-  const [game] = await app.db.select({ id: games.id }).from(games).where(eq(games.id, gameId)).limit(1);
+async function getGameById(db: DatabaseClient, gameId: string) {
+  const [game] = await db.select({ id: games.id }).from(games).where(eq(games.id, gameId)).limit(1);
 
   if (!game) {
     throw new AppError(errorCodes.gameNotFound);

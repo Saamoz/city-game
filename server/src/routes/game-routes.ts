@@ -1,9 +1,11 @@
-import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync } from 'fastify';
 import { desc, eq, ne } from 'drizzle-orm';
 import { GAME_MODE_KEYS, errorCodes } from '@city-game/shared';
+import type { DatabaseClient } from '../db/connection.js';
 import { games, teams } from '../db/schema.js';
 import { AppError, buildErrorResponse } from '../lib/errors.js';
 import { generateJoinCode } from '../lib/join-code.js';
+import { executeIdempotentMutation } from '../services/idempotency-service.js';
 
 const winConditionItemSchema = {
   type: 'object',
@@ -112,34 +114,40 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const body = request.body as {
-        name: string;
-        modeKey: string;
-        city?: string;
-        centerLat: number;
-        centerLng: number;
-        defaultZoom: number;
-        winCondition?: Array<Record<string, unknown>>;
-        settings?: Record<string, unknown>;
-      };
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const body = request.body as {
+          name: string;
+          modeKey: string;
+          city?: string;
+          centerLat: number;
+          centerLng: number;
+          defaultZoom: number;
+          winCondition?: Array<Record<string, unknown>>;
+          settings?: Record<string, unknown>;
+        };
 
-      validateWinConditions(body.winCondition);
+        validateWinConditions(body.winCondition);
 
-      const [game] = await app.db
-        .insert(games)
-        .values({
-          name: body.name,
-          modeKey: body.modeKey,
-          city: body.city ?? null,
-          centerLat: body.centerLat.toString(),
-          centerLng: body.centerLng.toString(),
-          defaultZoom: body.defaultZoom,
-          winCondition: body.winCondition ?? [],
-          settings: body.settings ?? {},
-        })
-        .returning();
+        const [game] = await db
+          .insert(games)
+          .values({
+            name: body.name,
+            modeKey: body.modeKey,
+            city: body.city ?? null,
+            centerLat: body.centerLat.toString(),
+            centerLng: body.centerLng.toString(),
+            defaultZoom: body.defaultZoom,
+            winCondition: body.winCondition ?? [],
+            settings: body.settings ?? {},
+          })
+          .returning();
 
-      reply.status(201).send({ game: serializeGame(game) });
+        return {
+          gameId: game.id,
+          statusCode: 201,
+          body: { game: serializeGame(game) },
+        };
+      });
     },
   );
 
@@ -151,7 +159,7 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const game = await getGameById(app, (request.params as { id: string }).id);
+      const game = await getGameById(app.db, (request.params as { id: string }).id);
       reply.send({ game: serializeGame(game) });
     },
   );
@@ -166,36 +174,42 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params as { id: string };
-      const existingGame = await getGameById(app, id);
-      const body = request.body as {
-        name?: string;
-        city?: string;
-        centerLat?: number;
-        centerLng?: number;
-        defaultZoom?: number;
-        winCondition?: Array<Record<string, unknown>>;
-        settings?: Record<string, unknown>;
-      };
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const { id } = request.params as { id: string };
+        const existingGame = await getGameById(db, id);
+        const body = request.body as {
+          name?: string;
+          city?: string;
+          centerLat?: number;
+          centerLng?: number;
+          defaultZoom?: number;
+          winCondition?: Array<Record<string, unknown>>;
+          settings?: Record<string, unknown>;
+        };
 
-      validateWinConditions(body.winCondition);
+        validateWinConditions(body.winCondition);
 
-      const [game] = await app.db
-        .update(games)
-        .set({
-          name: body.name ?? existingGame.name,
-          city: body.city ?? existingGame.city,
-          centerLat: body.centerLat === undefined ? existingGame.centerLat : body.centerLat.toString(),
-          centerLng: body.centerLng === undefined ? existingGame.centerLng : body.centerLng.toString(),
-          defaultZoom: body.defaultZoom ?? existingGame.defaultZoom,
-          winCondition: body.winCondition ?? existingGame.winCondition,
-          settings: body.settings ?? existingGame.settings,
-          updatedAt: new Date(),
-        })
-        .where(eq(games.id, id))
-        .returning();
+        const [game] = await db
+          .update(games)
+          .set({
+            name: body.name ?? existingGame.name,
+            city: body.city ?? existingGame.city,
+            centerLat: body.centerLat === undefined ? existingGame.centerLat : body.centerLat.toString(),
+            centerLng: body.centerLng === undefined ? existingGame.centerLng : body.centerLng.toString(),
+            defaultZoom: body.defaultZoom ?? existingGame.defaultZoom,
+            winCondition: body.winCondition ?? existingGame.winCondition,
+            settings: body.settings ?? existingGame.settings,
+            updatedAt: new Date(),
+          })
+          .where(eq(games.id, id))
+          .returning();
 
-      reply.send({ game: serializeGame(game) });
+        return {
+          gameId: id,
+          statusCode: 200,
+          body: { game: serializeGame(game) },
+        };
+      });
     },
   );
 
@@ -254,24 +268,30 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params as { id: string };
-      await getGameById(app, id);
-      const body = request.body as {
-        name: string;
-        color: string;
-        icon?: string;
-        metadata?: Record<string, unknown>;
-      };
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const { id } = request.params as { id: string };
+        await getGameById(db, id);
+        const body = request.body as {
+          name: string;
+          color: string;
+          icon?: string;
+          metadata?: Record<string, unknown>;
+        };
 
-      const team = await createTeamWithUniqueJoinCode(app, {
-        gameId: id,
-        name: body.name,
-        color: body.color,
-        icon: body.icon ?? null,
-        metadata: body.metadata ?? {},
+        const team = await createTeamWithUniqueJoinCode(db, {
+          gameId: id,
+          name: body.name,
+          color: body.color,
+          icon: body.icon ?? null,
+          metadata: body.metadata ?? {},
+        });
+
+        return {
+          gameId: id,
+          statusCode: 201,
+          body: { team: serializeTeam(team) },
+        };
       });
-
-      reply.status(201).send({ team: serializeTeam(team) });
     },
   );
 
@@ -284,7 +304,7 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      await getGameById(app, id);
+      await getGameById(app.db, id);
 
       const gameTeams = await app.db
         .select()
@@ -297,8 +317,8 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
   );
 };
 
-async function getGameById(app: FastifyInstance, gameId: string) {
-  const [game] = await app.db.select().from(games).where(eq(games.id, gameId)).limit(1);
+async function getGameById(db: DatabaseClient, gameId: string) {
+  const [game] = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
 
   if (!game) {
     throw new AppError(errorCodes.gameNotFound);
@@ -308,7 +328,7 @@ async function getGameById(app: FastifyInstance, gameId: string) {
 }
 
 async function createTeamWithUniqueJoinCode(
-  app: FastifyInstance,
+  db: DatabaseClient,
   values: {
     gameId: string;
     name: string;
@@ -319,7 +339,7 @@ async function createTeamWithUniqueJoinCode(
 ) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
-      const [team] = await app.db
+      const [team] = await db
         .insert(teams)
         .values({
           ...values,

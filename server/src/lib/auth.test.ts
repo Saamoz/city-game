@@ -119,6 +119,9 @@ describe('auth middleware', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/test/set-cookie',
+      headers: {
+        'idempotency-key': 'set-cookie-test',
+      },
     });
 
     expect(response.statusCode).toBe(200);

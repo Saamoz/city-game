@@ -265,9 +265,9 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 12 idempotency middleware so future mutating endpoints can become replay-safe.
+1. Proceed to Phase 13 GPS validation middleware for /challenges/:id/claim and /players/me/location.
 2. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
-3. Reuse `server/src/test/test-db.ts` for future DB-backed integration tests instead of creating isolated test pools per suite.
+3. Reuse server/src/test/test-db.ts for future DB-backed integration tests instead of creating isolated test pools per suite.
 
 ---
 
@@ -278,4 +278,23 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 12 idempotency middleware on top of the auth, DB, game/team/player flows, and the new event/state-version plumbing.
+- The next highest-value work is Phase 13 GPS validation middleware, then Phase 14 mode loading and the Territory handler skeleton.
+
+## Phase 12 Notes
+
+- Phase 12 is complete: mutating POST/PATCH/DELETE routes now require `Idempotency-Key`, stored receipts are checked before execution, and receipts are written inside the same transaction as the guarded mutation.
+- Added `server/src/middleware/idempotency.ts` and `server/src/services/idempotency-service.ts`.
+- `action_receipts` was expanded to support non-player scopes:
+  - `player_id` is now nullable
+  - `scope_key` was added for `player:<id>`, `admin`, and `public`
+  - `response_headers` was added so replay can restore headers like `Set-Cookie`
+- Request fingerprinting now hashes `params`, `query`, and `body`, not just `body`. This prevents a reused key on a different route target from replaying the wrong response.
+- OSM preview is explicitly marked with `config.skipIdempotency = true` because it is a POST preview endpoint with no state mutation.
+- Player registration now persists the exact serialized session cookie in the receipt and replays it correctly.
+
+### Phase 12 Learnings
+
+- For 204 responses, storing a JavaScript `null` into a `jsonb not null` receipt field caused delete routes to fail. The helper now stores `{}` for 204 receipts and still sends an empty 204 response.
+- Fastify cookie state was not reliably discoverable through generic reply header inspection during replay capture. The registration route now passes an explicit serialized `Set-Cookie` header into the idempotency helper.
+- `fileParallelism: false` was not enough for the DB-backed Vitest suite. The shared Postgres test database needed `maxWorkers: 1` and `minWorkers: 1` in `server/vitest.config.ts` to eliminate cross-file truncation races.
+- Drizzle generated a migration that added `scope_key` as `NOT NULL` immediately. That was manually adjusted to add the column nullable first, backfill existing rows, then set `NOT NULL`.

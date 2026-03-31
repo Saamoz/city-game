@@ -41,7 +41,7 @@ describe('challenge routes', () => {
     const visitResponse = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/challenges`,
-      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+      headers: adminHeaders('create-challenge-visit'),
       payload: {
         zoneId: zone.id,
         title: 'Visit Checkpoint',
@@ -53,7 +53,7 @@ describe('challenge routes', () => {
     const quizResponse = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/challenges`,
-      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+      headers: adminHeaders('create-challenge-quiz'),
       payload: {
         title: 'Solve Quiz',
         description: 'Answer the prompt.',
@@ -95,7 +95,7 @@ describe('challenge routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/challenges`,
-      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+      headers: adminHeaders('create-challenge-other-zone'),
       payload: {
         zoneId: otherZone.id,
         title: 'Cross Game Zone',
@@ -156,7 +156,7 @@ describe('challenge routes', () => {
     const updateResponse = await app.inject({
       method: 'PATCH',
       url: `/api/v1/challenges/${CHALLENGE_ID}`,
-      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+      headers: adminHeaders('update-challenge-1'),
       payload: {
         title: 'Updated Challenge',
         kind: 'photo',
@@ -177,7 +177,7 @@ describe('challenge routes', () => {
     const deleteResponse = await app.inject({
       method: 'DELETE',
       url: `/api/v1/challenges/${CHALLENGE_ID}`,
-      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+      headers: adminHeaders('delete-challenge-1'),
     });
 
     expect(deleteResponse.statusCode).toBe(204);
@@ -198,7 +198,7 @@ describe('challenge routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/challenges`,
-      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+      headers: adminHeaders('create-challenge-invalid-mode'),
       payload: {
         title: 'Bad Mode',
         description: 'Should fail.',
@@ -253,6 +253,13 @@ describe('challenge routes', () => {
     await testDatabase.db.insert(challenges).values(createTestChallenge(overrides));
   }
 });
+
+function adminHeaders(idempotencyKey: string) {
+  return {
+    authorization: `Bearer ${ADMIN_TOKEN}`,
+    'idempotency-key': idempotencyKey,
+  };
+}
 
 function createSquarePolygon(lng = -97.1395, lat = 49.8952, size = 0.0005): GeoJsonPolygon {
   return {

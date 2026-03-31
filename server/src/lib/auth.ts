@@ -1,4 +1,5 @@
 import cookie from '@fastify/cookie';
+import { serialize } from 'cookie';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { SESSION_COOKIE_NAME, errorCodes } from '@city-game/shared';
@@ -26,6 +27,13 @@ export function getSessionCookieOptions(options: SessionCookieOptions = {}) {
     secure: options.secure ?? env.nodeEnv === 'production',
     sameSite: 'strict' as const,
   };
+}
+
+export function getSerializedSessionCookie(
+  sessionToken: string,
+  options: SessionCookieOptions = {},
+): string {
+  return serialize(SESSION_COOKIE_NAME, sessionToken, getSessionCookieOptions(options));
 }
 
 export function setSessionCookie(
@@ -73,10 +81,15 @@ export function registerAuth(app: FastifyInstance, options: AuthOptions = {}): v
     }
   });
 
+  app.decorate('isAdminRequest', (request) => {
+    const bearerToken = extractBearerToken(request.headers.authorization);
+    return Boolean(bearerToken && bearerToken === (options.adminToken ?? env.adminToken));
+  });
+
   app.decorate('requireAdmin', async (request) => {
     const bearerToken = extractBearerToken(request.headers.authorization);
 
-    if (!bearerToken || bearerToken !== (options.adminToken ?? env.adminToken)) {
+    if (!app.isAdminRequest(request) || !bearerToken) {
       throw new AppError(errorCodes.adminRequired);
     }
   });

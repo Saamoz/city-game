@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import type { DatabaseClient, DatabasePool } from './db/connection.js';
 import { createDb } from './db/connection.js';
 import { registerAuth } from './lib/auth.js';
+import { registerIdempotency } from './middleware/idempotency.js';
 import { registerAppErrorHandler } from './lib/errors.js';
 import { challengeRoutes } from './routes/challenge-routes.js';
 import { eventRoutes } from './routes/event-routes.js';
@@ -43,6 +44,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   registerAuth(app, {
     adminToken: options.adminToken,
   });
+  registerIdempotency(app);
 
   app.get('/health', async () => ({ status: 'ok' }));
   app.register(gameRoutes, { prefix: '/api/v1' });

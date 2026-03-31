@@ -221,21 +221,23 @@ export const actionReceipts = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     gameId: uuid('game_id').notNull().references(() => games.id),
-    playerId: uuid('player_id').notNull().references(() => players.id),
+    playerId: uuid('player_id').references(() => players.id),
+    scopeKey: varchar('scope_key', { length: 150 }).notNull(),
     actionType: varchar('action_type', { length: 50 }).notNull(),
     actionId: varchar('action_id', { length: 100 }).notNull(),
     requestHash: varchar('request_hash', { length: 128 }).notNull(),
     response: jsonb('response').notNull(),
+    responseHeaders: jsonb('response_headers').notNull().default(defaultJsonObject),
     statusCode: integer('status_code').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    actionReceiptsUnique: uniqueIndex('action_receipts_player_action_unique').on(
-      table.playerId,
+    actionReceiptsUnique: uniqueIndex('action_receipts_scope_action_unique').on(
+      table.scopeKey,
       table.actionType,
       table.actionId,
     ),
-    actionReceiptsLookupIdx: index('idx_receipts_lookup').on(table.playerId, table.actionType, table.actionId),
+    actionReceiptsLookupIdx: index('idx_receipts_lookup').on(table.scopeKey, table.actionType, table.actionId),
   }),
 );
 

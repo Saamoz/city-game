@@ -13,9 +13,18 @@ declare module 'fastify' {
     authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void>;
     requireTeam(request: FastifyRequest, reply: FastifyReply): Promise<void>;
     requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void>;
+    isAdminRequest(request: FastifyRequest): boolean;
+    requireIdempotency(request: FastifyRequest, reply: FastifyReply): Promise<void>;
   }
 
   interface FastifyRequest {
     player: AuthenticatedPlayer | null;
+    idempotency: {
+      actionId: string;
+      actionType: string;
+      scopeKey: string;
+      requestHash: string;
+      playerId: string | null;
+    } | null;
   }
 }

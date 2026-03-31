@@ -250,11 +250,13 @@ export interface GameEventRecord {
 export interface ActionReceipt {
   id: Uuid;
   gameId: Uuid;
-  playerId: Uuid;
+  playerId: Uuid | null;
+  scopeKey: string;
   actionType: string;
   actionId: string;
   requestHash: string;
   response: JsonValue;
+  responseHeaders: JsonObject;
   statusCode: number;
   createdAt: IsoTimestamp;
 }

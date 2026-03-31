@@ -41,9 +41,7 @@ describe('zone routes', () => {
     const createResponse = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/zones`,
-      headers: {
-        authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
+      headers: adminHeaders('create-zone-1'),
       payload: {
         name: 'Downtown Square',
         geometry: createSquarePolygon(),
@@ -93,9 +91,7 @@ describe('zone routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/zones`,
-      headers: {
-        authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
+      headers: adminHeaders('create-zone-invalid-geometry'),
       payload: {
         name: 'Broken Polygon',
         geometry: createSelfIntersectingPolygon(),
@@ -115,9 +111,7 @@ describe('zone routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/zones/import`,
-      headers: {
-        authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
+      headers: adminHeaders('import-zones-1'),
       payload: {
         type: 'FeatureCollection',
         features: [
@@ -155,9 +149,7 @@ describe('zone routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/zones`,
-      headers: {
-        authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
+      headers: adminHeaders('create-zone-invalid-owner'),
       payload: {
         name: 'Cross Game Owner',
         geometry: createSquarePolygon(),
@@ -181,9 +173,7 @@ describe('zone routes', () => {
     const createResponse = await app.inject({
       method: 'POST',
       url: `/api/v1/game/${GAME_ID}/zones`,
-      headers: {
-        authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
+      headers: adminHeaders('create-zone-for-update'),
       payload: {
         name: 'Mutable Zone',
         geometry: createSquarePolygon(),
@@ -195,9 +185,7 @@ describe('zone routes', () => {
     const updateResponse = await app.inject({
       method: 'PATCH',
       url: `/api/v1/zones/${zoneId}`,
-      headers: {
-        authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
+      headers: adminHeaders('update-zone-1'),
       payload: {
         name: 'Updated Zone',
         isDisabled: true,
@@ -216,9 +204,7 @@ describe('zone routes', () => {
     const deleteResponse = await app.inject({
       method: 'DELETE',
       url: `/api/v1/zones/${zoneId}`,
-      headers: {
-        authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
+      headers: adminHeaders('delete-zone-1'),
     });
 
     expect(deleteResponse.statusCode).toBe(204);
@@ -259,6 +245,13 @@ describe('zone routes', () => {
     );
   }
 });
+
+function adminHeaders(idempotencyKey: string) {
+  return {
+    authorization: `Bearer ${ADMIN_TOKEN}`,
+    'idempotency-key': idempotencyKey,
+  };
+}
 
 function createSquarePolygon(lng = -97.1395, lat = 49.8952, size = 0.0005): GeoJsonPolygon {
   const ring: GeoJsonPolygon['coordinates'][number] = [
