@@ -234,8 +234,73 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
         params: challengeParamsSchema,
       },
     },
-    async (_request, reply) => {
-      reply.status(501).send(notImplementedResponse);
+    async (request, reply) => {
+      let broadcastPayload:
+        | {
+            gameId: string;
+            stateVersion: number;
+            challenge: Challenge;
+            claim: ChallengeClaim;
+          }
+        | null = null;
+
+      await executeIdempotentMutation(
+        app,
+        request,
+        reply,
+        async (db) => {
+          const player = request.player;
+
+          if (!player?.teamId) {
+            throw new Error('Authenticated team player expected.');
+          }
+
+          const handler = await getModeHandlerForGame(db, app.modeRegistry, player.gameId);
+          const result = await handler.handleAction(
+            {
+              type: 'release',
+              challengeId: (request.params as { id: string }).id,
+              gameId: player.gameId,
+              playerId: player.id,
+              teamId: player.teamId,
+            },
+            { db },
+          );
+
+          if (isClaimActionBody(result.body) && result.stateVersion) {
+            broadcastPayload = {
+              gameId: result.gameId,
+              stateVersion: result.stateVersion,
+              challenge: result.body.challenge,
+              claim: result.body.claim,
+            };
+          }
+
+          return {
+            gameId: result.gameId,
+            playerId: player.id,
+            statusCode: result.statusCode,
+            body: result.body,
+            responseHeaders: result.responseHeaders ?? {},
+          };
+        },
+        async () => {
+          if (!broadcastPayload) {
+            return;
+          }
+
+          await app.broadcaster.send({
+            gameId: broadcastPayload.gameId,
+            modeKey: 'territory',
+            eventType: socketServerEventTypes.challengeReleased,
+            stateVersion: broadcastPayload.stateVersion,
+            payload: {
+              challenge: broadcastPayload.challenge,
+              claim: broadcastPayload.claim,
+            },
+          });
+        },
+      );
     },
   );
 };

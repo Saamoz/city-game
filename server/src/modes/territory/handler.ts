@@ -20,6 +20,7 @@ import { seedInitialBalances } from '../../services/resource-service.js';
 import type { ModeHandler, ModeResourceDefinition } from '../types.js';
 import { claimChallenge } from './claim-service.js';
 import { completeChallenge } from './complete-service.js';
+import { releaseChallenge } from './release-service.js';
 import { territoryRoutes } from './routes.js';
 
 const territoryResourceDefinitions: ModeResourceDefinition[] = RESOURCE_TYPE_VALUES.map((resourceType) => ({
@@ -152,10 +153,35 @@ export function createTerritoryModeHandler(): ModeHandler {
             } satisfies TerritoryChallengeCompletedPostCommit,
           };
         }
-        case 'release':
-          throw new AppError(errorCodes.internalServerError, {
-            message: 'Territory release action is not implemented yet.',
+        case 'release': {
+          const result = await releaseChallenge(context.db, {
+            challengeId: action.challengeId,
+            gameId: action.gameId,
+            playerId: action.playerId,
+            teamId: action.teamId,
           });
+
+          return {
+            gameId: result.gameId,
+            statusCode: 200,
+            stateVersion: result.stateVersion,
+            body: {
+              challenge: result.challenge,
+              claim: result.claim,
+              stateVersion: result.stateVersion,
+            },
+            responseHeaders: {
+              [STATE_VERSION_HEADER]: String(result.stateVersion),
+            },
+            postCommitData: {
+              type: 'challenge_released',
+              gameId: result.gameId,
+              stateVersion: result.stateVersion,
+              challenge: result.challenge,
+              claim: result.claim,
+            } satisfies TerritoryChallengeReleasedPostCommit,
+          };
+        }
       }
     },
     async checkWinCondition() {

@@ -22,11 +22,20 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-31
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 20 Territory complete action complete
+- Current implementation stage: Phase 21 Territory release action complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 21 Progress
+
+- Implemented the voluntary release flow in `server/src/modes/territory/release-service.ts` with one transaction for claim release, challenge reset, event logging, receipt storage, and post-commit broadcast
+- `POST /challenges/:id/release` is now live in `server/src/modes/territory/routes.ts` and uses the same idempotent mutation path as claim and complete
+- Updated `server/src/modes/territory/handler.ts` so Territory now supports all three player actions: claim, complete, and release
+- Added route coverage in `server/src/modes/territory/release-routes.test.ts` for successful release, immediate re-claim by another team, and idempotent replay
+
+---
 
 ## Phase 20 Progress
 
