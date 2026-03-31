@@ -1,10 +1,11 @@
 import cookie from '@fastify/cookie';
-import { serialize } from 'cookie';
+import { parse, serialize } from 'cookie';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { SESSION_COOKIE_NAME, errorCodes } from '@city-game/shared';
 import { env } from '../db/env.js';
 import { players } from '../db/schema.js';
+import type { DatabaseClient } from '../db/connection.js';
 import { AppError } from './errors.js';
 import { randomUUID } from 'node:crypto';
 
@@ -18,6 +19,24 @@ export interface SessionCookieOptions {
 
 export function generateSessionToken(): string {
   return randomUUID();
+}
+
+export function getSessionTokenFromCookieHeader(cookieHeader?: string): string | null {
+  if (!cookieHeader) {
+    return null;
+  }
+
+  return parse(cookieHeader)[SESSION_COOKIE_NAME] ?? null;
+}
+
+export async function getPlayerBySessionToken(db: DatabaseClient, sessionToken: string) {
+  const [player] = await db.select().from(players).where(eq(players.sessionToken, sessionToken)).limit(1);
+
+  if (!player) {
+    throw new AppError(errorCodes.unauthorized);
+  }
+
+  return player;
 }
 
 export function getSessionCookieOptions(options: SessionCookieOptions = {}) {
@@ -60,17 +79,7 @@ export function registerAuth(app: FastifyInstance, options: AuthOptions = {}): v
       throw new AppError(errorCodes.unauthorized);
     }
 
-    const [player] = await app.db
-      .select()
-      .from(players)
-      .where(eq(players.sessionToken, sessionToken))
-      .limit(1);
-
-    if (!player) {
-      throw new AppError(errorCodes.unauthorized);
-    }
-
-    request.player = player;
+    request.player = await getPlayerBySessionToken(app.db, sessionToken);
   });
 
   app.decorate('requireTeam', async (request, reply) => {

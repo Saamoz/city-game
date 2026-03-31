@@ -7,6 +7,7 @@ import { createModeRegistry, type ModeRegistry } from './modes/index.js';
 import { registerGpsValidation } from './middleware/gps-validation.js';
 import { registerIdempotency } from './middleware/idempotency.js';
 import { challengeRoutes } from './routes/challenge-routes.js';
+import { registerRealtime } from './socket/server.js';
 import { eventRoutes } from './routes/event-routes.js';
 import { gameRoutes } from './routes/game-routes.js';
 import { playerRoutes } from './routes/player-routes.js';
@@ -52,6 +53,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   });
   registerIdempotency(app);
   registerGpsValidation(app);
+  registerRealtime(app);
 
   app.get('/health', async () => ({ status: 'ok' }));
   app.register(gameRoutes, { prefix: '/api/v1' });

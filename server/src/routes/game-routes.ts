@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import { desc, eq, ne } from "drizzle-orm";
-import { GAME_MODE_KEYS, STATE_VERSION_HEADER, errorCodes } from "@city-game/shared";
+import { GAME_MODE_KEYS, STATE_VERSION_HEADER, errorCodes, socketServerEventTypes } from "@city-game/shared";
 import type { DatabaseClient } from "../db/connection.js";
 import { games, teams } from "../db/schema.js";
 import { AppError } from "../lib/errors.js";
@@ -293,21 +293,72 @@ function registerLifecycleRoute(app: FastifyInstance, transition: LifecycleTrans
       },
     },
     async (request, reply) => {
-      await executeIdempotentMutation(app, request, reply, async (db) => {
-        const { id } = request.params as { id: string };
-        const result = await transitionGameLifecycle(db, app.modeRegistry, id, transition);
+      let broadcastPayload:
+        | {
+            gameId: string;
+            modeKey: string;
+            stateVersion: number;
+            game: ReturnType<typeof serializeGameRecord>;
+          }
+        | null = null;
 
-        return {
-          gameId: id,
-          statusCode: 200,
-          body: { game: serializeGameRecord(result.game) },
-          responseHeaders: {
-            [STATE_VERSION_HEADER]: String(result.stateVersion),
-          },
-        };
-      });
+      await executeIdempotentMutation(
+        app,
+        request,
+        reply,
+        async (db) => {
+          const { id } = request.params as { id: string };
+          const result = await transitionGameLifecycle(db, app.modeRegistry, id, transition);
+          const serializedGame = serializeGameRecord(result.game);
+
+          broadcastPayload = {
+            gameId: id,
+            modeKey: serializedGame.modeKey,
+            stateVersion: result.stateVersion,
+            game: serializedGame,
+          };
+
+          return {
+            gameId: id,
+            statusCode: 200,
+            body: { game: serializedGame },
+            responseHeaders: {
+              [STATE_VERSION_HEADER]: String(result.stateVersion),
+            },
+          };
+        },
+        async () => {
+          if (!broadcastPayload) {
+            return;
+          }
+
+          await app.broadcaster.send({
+            gameId: broadcastPayload.gameId,
+            modeKey: broadcastPayload.modeKey,
+            eventType: getLifecycleSocketEventType(transition),
+            stateVersion: broadcastPayload.stateVersion,
+            payload: {
+              game: broadcastPayload.game,
+            },
+          });
+        },
+      );
     },
   );
+}
+
+
+function getLifecycleSocketEventType(transition: LifecycleTransition) {
+  switch (transition) {
+    case "start":
+      return socketServerEventTypes.gameStarted;
+    case "pause":
+      return socketServerEventTypes.gamePaused;
+    case "resume":
+      return socketServerEventTypes.gameResumed;
+    case "end":
+      return socketServerEventTypes.gameEnded;
+  }
 }
 
 async function createTeamWithUniqueJoinCode(

@@ -22,7 +22,7 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 15 game lifecycle complete
+- Current implementation stage: Phase 16 Socket.IO server and connection auth complete
 
 ---
 
@@ -265,8 +265,8 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 16 Socket.IO server and connection auth.
-2. Reuse the new lifecycle service and `X-State-Version` header pattern for future mutating gameplay routes.
+1. Proceed to Phase 17 map state and delta sync.
+2. Reuse the new broadcaster for authoritative realtime updates instead of emitting directly from route handlers.
 3. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 
 ---
@@ -278,7 +278,7 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 16 Socket.IO server and connection auth.
+- The next highest-value work is Phase 17 map state and delta sync.
 
 ## Phase 12 Notes
 
@@ -344,3 +344,20 @@ These are implementation-level decisions, not product/spec changes.
 - Zero-balance resource initialization is easier to observe and verify when game start writes explicit seed rows rather than relying on implicit empty-balance reads.
 - Modeling lifecycle transitions in a reusable service is cleaner than embedding status rules directly in route handlers; later gameplay flows can reuse the same game lookup and versioning seam.
 - Invalid lifecycle requests should fail as `409 INVALID_GAME_STATE_TRANSITION`, not generic validation errors, because the request shape is valid and only the current game state is wrong.
+
+
+## Phase 16 Notes
+
+- Phase 16 is complete: added Socket.IO server wiring in `server/src/socket/server.ts` with cookie-handshake auth backed by the existing player session cookie.
+- Added `join_game` / `leave_game` room management plus game-room and team-room helpers in `server/src/socket/rooms.ts`.
+- Added `server/src/socket/broadcaster.ts` for realtime emits that append `serverTime`, carry `stateVersion`, and call `filterStateForViewer()` before per-socket delivery when a payload contains `snapshot`.
+- Lifecycle routes now use the idempotent post-commit hook to broadcast `game_started`, `game_paused`, `game_resumed`, and `game_ended` only after the REST transaction and receipt write succeed.
+- Exposed the realtime server and broadcaster as Fastify decorations so later phases can publish authoritative updates without rebuilding the socket layer.
+- Added `server/src/socket/realtime.test.ts` covering handshake auth failure, join/leave room behavior with lifecycle broadcasts, and team sub-room broadcasting with viewer filtering.
+- Moved `socket.io` into `server/package.json` runtime dependencies and refreshed `pnpm-lock.yaml`.
+
+### Phase 16 Learnings
+
+- Viewer filtering cannot be implemented with a single room-level emit because each socket may need a different filtered snapshot. The broadcaster now resolves room membership first and emits per socket.
+- Refreshing the player from the database during `join_game` is the simplest way to keep team-room membership correct after REST-side team changes.
+- Fastify shutdown can call the Socket.IO close hook after the underlying HTTP server is already stopped. The realtime hook now tolerates `ERR_SERVER_NOT_RUNNING` during test and app shutdown.

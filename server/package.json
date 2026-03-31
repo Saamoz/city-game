@@ -24,13 +24,13 @@
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.2.1",
     "osmtogeojson": "3.0.0-beta.5",
-    "pg": "^8.20.0"
+    "pg": "^8.20.0",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "@types/node": "^22.13.14",
     "@types/pg": "^8.20.0",
     "drizzle-kit": "^0.31.10",
-    "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",

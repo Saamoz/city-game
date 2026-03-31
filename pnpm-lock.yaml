@@ -75,6 +75,9 @@ importers:
       pg:
         specifier: ^8.20.0
         version: 8.20.0
+      socket.io:
+        specifier: ^4.8.1
+        version: 4.8.3
     devDependencies:
       '@types/node':
         specifier: ^22.13.14
@@ -85,9 +88,6 @@ importers:
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
-      socket.io:
-        specifier: ^4.8.1
-        version: 4.8.3
       socket.io-client:
         specifier: ^4.8.1
         version: 4.8.3

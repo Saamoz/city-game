@@ -49,6 +49,12 @@ export interface IdempotentMutationResult {
   responseHeaders?: JsonObject;
 }
 
+export interface ExecutedMutationResult {
+  statusCode: number;
+  body: unknown;
+  responseHeaders: JsonObject;
+}
+
 export async function findStoredReceipt(
   db: DatabaseClient,
   context: IdempotencyContext,
@@ -103,6 +109,7 @@ export async function executeIdempotentMutation(
   request: FastifyRequest,
   reply: FastifyReply,
   run: (db: DatabaseClient) => Promise<IdempotentMutationResult>,
+  onCommitted?: (result: ExecutedMutationResult) => Promise<void> | void,
 ): Promise<void> {
   const context = request.idempotency;
 
@@ -140,6 +147,14 @@ export async function executeIdempotentMutation(
 
   applyStoredHeaders(reply, result.responseHeaders);
   sendStoredResponse(reply, result.statusCode, result.body);
+
+  if (onCommitted) {
+    try {
+      await onCommitted(result);
+    } catch (error) {
+      app.log.error({ err: error }, 'post-commit hook failed');
+    }
+  }
 }
 
 export function buildIdempotencyContext(app: FastifyInstance, request: FastifyRequest): IdempotencyContext {
