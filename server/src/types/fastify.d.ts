@@ -3,6 +3,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { GpsPayload } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import type { players } from '../db/schema.js';
+import type { ModeRegistry } from '../modes/index.js';
 import type { OsmImportService } from '../services/osm-import-service.js';
 
 export type AuthenticatedPlayer = typeof players.$inferSelect;
@@ -10,6 +11,7 @@ export type AuthenticatedPlayer = typeof players.$inferSelect;
 declare module 'fastify' {
   interface FastifyInstance {
     db: DatabaseClient;
+    modeRegistry: ModeRegistry;
     osmImportService: OsmImportService;
     authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void>;
     requireTeam(request: FastifyRequest, reply: FastifyReply): Promise<void>;

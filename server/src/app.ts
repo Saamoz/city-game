@@ -3,6 +3,7 @@ import type { DatabaseClient, DatabasePool } from './db/connection.js';
 import { createDb } from './db/connection.js';
 import { registerAuth } from './lib/auth.js';
 import { registerAppErrorHandler } from './lib/errors.js';
+import { createModeRegistry, type ModeRegistry } from './modes/index.js';
 import { registerGpsValidation } from './middleware/gps-validation.js';
 import { registerIdempotency } from './middleware/idempotency.js';
 import { challengeRoutes } from './routes/challenge-routes.js';
@@ -18,6 +19,7 @@ export interface BuildAppOptions {
   pool?: DatabasePool;
   adminToken?: string;
   osmImportService?: OsmImportService;
+  modeRegistry?: ModeRegistry;
 }
 
 export function buildApp(options: BuildAppOptions = {}) {
@@ -32,7 +34,10 @@ export function buildApp(options: BuildAppOptions = {}) {
         ownsPool: true,
       };
 
+  const modeRegistry = options.modeRegistry ?? createModeRegistry();
+
   app.decorate('db', database.db);
+  app.decorate('modeRegistry', modeRegistry);
   app.decorate('osmImportService', options.osmImportService ?? createOsmImportService());
 
   if (database.pool && database.ownsPool) {
@@ -55,6 +60,9 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.register(zoneRoutes, { prefix: '/api/v1' });
   app.register(challengeRoutes, { prefix: '/api/v1' });
   app.register(eventRoutes, { prefix: '/api/v1' });
+  app.register(async (modeApp) => {
+    modeRegistry.registerRoutes(modeApp);
+  }, { prefix: '/api/v1' });
 
   return app;
 }

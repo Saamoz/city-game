@@ -22,7 +22,7 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 13 GPS validation middleware complete
+- Current implementation stage: Phase 14 mode registry and Territory handler skeleton complete
 
 ---
 
@@ -265,7 +265,7 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 14 mode loading and the Territory handler skeleton.
+1. Proceed to Phase 15 game lifecycle orchestration.
 2. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 3. Reuse server/src/test/test-db.ts for future DB-backed integration tests instead of creating isolated test pools per suite.
 
@@ -278,7 +278,7 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 14 mode loading and the Territory handler skeleton, then Phase 15 game lifecycle orchestration.
+- The next highest-value work is Phase 15 game lifecycle orchestration, then Phase 16 Socket.IO server and connection auth.
 
 ## Phase 12 Notes
 
@@ -313,3 +313,18 @@ These are implementation-level decisions, not product/spec changes.
 - Shared `GpsPayload` requires `speedMps` and `headingDegrees`; the middleware now normalizes missing optional request fields to `null` so runtime payloads match the shared contract.
 - Fake timers caused Fastify inject and DB-backed route tests to hang under Vitest. The GPS suites now use real timestamps relative to `Date.now()` instead of freezing the clock.
 - In this Codex desktop session, `apply_patch` still resolves paths against the malformed app-resource cwd rather than `/mnt/e/city game`. Shell-based file writes remain the reliable fallback until that tool path issue is resolved.
+
+## Phase 14 Notes
+
+- Phase 14 is complete: added a mode registry in `server/src/modes/index.ts` that loads handlers by `modeKey`, throws a typed validation error for unknown modes, and registers mode-specific routes during app startup.
+- Added `server/src/modes/types.ts` to define the server-local handler contract, viewer filtering seam, mode resource definitions, and the future action/win-check interfaces.
+- Added `server/src/modes/territory/handler.ts` as the first concrete mode handler with identity `filterStateForViewer`, Territory resource definitions, stubbed action/win-check/scoreboard hooks, and `onGameStart()` resource initialization.
+- Added `server/src/modes/territory/routes.ts` to register skeleton `claim`, `complete`, and `release` endpoints under `/api/v1/challenges/:id/*`.
+- Wired the registry into `buildApp()` via a Fastify decoration so later lifecycle and realtime work can resolve handlers from the app context instead of re-instantiating them ad hoc.
+- Added `server/src/modes/index.test.ts` covering handler loading, graceful unknown-mode failure, zero-balance resource initialization on game start, and route registration through app startup.
+
+### Phase 14 Learnings
+
+- The mode contract is cleaner as a server-local interface than a shared one right now, because the handler needs direct DB access and server-only hooks such as route registration.
+- The spec says Territory resources initialize to zero on game start. To make that observable and testable, `seedInitialBalances()` now supports `includeZeroBalances: true`, which writes explicit zero-balance ledger rows only when the caller opts in.
+- Registering mode routes through the app-level registry now creates the seam Phase 15 will need for `POST /game/:id/start` without requiring later route-file refactors.

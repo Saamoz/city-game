@@ -52,6 +52,7 @@ export interface InitialBalanceSeedInput {
   teamIds: string[];
   balances: Partial<Record<ResourceType, number>>;
   reason?: string;
+  includeZeroBalances?: boolean;
 }
 
 export async function getBalance(db: DatabaseClient, input: ResourceScopeInput): Promise<number> {
@@ -206,7 +207,7 @@ export async function seedInitialBalances(
     for (const resourceType of RESOURCE_TYPE_VALUES) {
       const amount = input.balances[resourceType] ?? 0;
 
-      if (amount === 0) {
+      if (amount === 0 && !input.includeZeroBalances) {
         continue;
       }
 
@@ -262,13 +263,9 @@ function buildScopeCondition(input: ResourceScopeInput) {
   return and(
     eq(resourceLedger.gameId, input.gameId),
     eq(resourceLedger.teamId, input.teamId),
-    eq(resourceLedger.resourceType, input.resourceType),
     input.playerId ? eq(resourceLedger.playerId, input.playerId) : isNull(resourceLedger.playerId),
+    eq(resourceLedger.resourceType, input.resourceType),
   );
-}
-
-function createEmptyBalances(): TeamResourceBalances {
-  return Object.fromEntries(RESOURCE_TYPE_VALUES.map((resourceType) => [resourceType, 0])) as TeamResourceBalances;
 }
 
 function serializeResourceLedgerEntry(row: ResourceLedgerRow): ResourceLedgerEntry {
@@ -286,4 +283,8 @@ function serializeResourceLedgerEntry(row: ResourceLedgerRow): ResourceLedgerEnt
     referenceType: row.referenceType,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+function createEmptyBalances(): TeamResourceBalances {
+  return Object.fromEntries(RESOURCE_TYPE_VALUES.map((resourceType) => [resourceType, 0])) as TeamResourceBalances;
 }
