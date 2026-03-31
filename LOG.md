@@ -20,9 +20,9 @@ If the product direction or implementation plan changes in a major way, update [
 - WSL repo path: `/mnt/e/city game`
 - Remote: `origin -> https://github.com/Saamoz/city-game.git`
 - Current local branch: `master`
-- Date of latest update: 2026-03-30
+- Date of latest update: 2026-03-31
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 16 Socket.IO server and connection auth complete
+- Current implementation stage: Phase 17 map state and delta sync complete
 
 ---
 
@@ -265,8 +265,8 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 17 map state and delta sync.
-2. Reuse the new broadcaster for authoritative realtime updates instead of emitting directly from route handlers.
+1. Proceed to Phase 18 Territory claim action.
+2. Reuse the shared snapshot builder and broadcaster for all authoritative realtime state changes.
 3. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 
 ---
@@ -278,7 +278,7 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 17 map state and delta sync.
+- The next highest-value work is Phase 18 Territory claim action.
 
 ## Phase 12 Notes
 
@@ -361,3 +361,18 @@ These are implementation-level decisions, not product/spec changes.
 - Viewer filtering cannot be implemented with a single room-level emit because each socket may need a different filtered snapshot. The broadcaster now resolves room membership first and emits per socket.
 - Refreshing the player from the database during `join_game` is the simplest way to keep team-room membership correct after REST-side team changes.
 - Fastify shutdown can call the Socket.IO close hook after the underlying HTTP server is already stopped. The realtime hook now tolerates `ERR_SERVER_NOT_RUNNING` during test and app shutdown.
+## Phase 17 Notes
+
+- Phase 17 is complete: added `server/src/services/state-service.ts` to build authoritative game snapshots for both REST and socket sync flows.
+- Added `GET /game/:id/map-state` in `server/src/routes/state-routes.ts` and registered it in `server/src/app.ts`.
+- Snapshot responses now include game, teams, players, zones, challenges, active claims, annotations, and team resource balances for the requested game.
+- Annotation visibility is now filtered per viewer: `all` annotations are always visible, and `team` annotations are only visible when the viewer shares the creator's current team.
+- `join_game` in `server/src/socket/server.ts` now supports reconnect sync: it emits `game_state_sync` for first join or large gaps, and `game_state_delta` when `lastStateVersion` is still within `MAX_DELTA_SYNC_GAP`.
+- Added route coverage in `server/src/routes/state-routes.test.ts` and reconnect coverage in `server/src/socket/realtime.test.ts` for full sync, delta sync, and full-sync fallback behavior.
+
+### Phase 17 Learnings
+
+- REST snapshot assembly and socket reconnect sync need to share the same builder; otherwise visibility and payload shape drift quickly.
+- Socket room membership should track the joined team separately from the refreshed player object so a team change can leave the old team room correctly during reconnect.
+- Drizzle's PostGIS insert typing is still awkward in tests; geometry-heavy fixture inserts may need explicit casts until a cleaner helper layer exists.
+

@@ -1,5 +1,6 @@
 import type { GameStateSnapshot, SocketServerEventType } from '@city-game/shared';
 import type { Server, Socket } from 'socket.io';
+import type { ModeHandler, ViewerContext } from '../modes/types.js';
 import type { ModeRegistry } from '../modes/index.js';
 import { getGameRoom, getTeamRoom } from './rooms.js';
 
@@ -13,6 +14,7 @@ export interface RealtimeSocketData {
   sessionToken: string;
   player: RealtimePlayerIdentity;
   joinedGameId: string | null;
+  joinedTeamId: string | null;
 }
 
 export type RealtimeSocket = Socket<any, any, any, RealtimeSocketData>;
@@ -67,8 +69,8 @@ export class Broadcaster {
 
 function filterPayloadForViewer<TPayload extends Record<string, unknown>>(
   payload: TPayload,
-  modeHandler: ModeRegistry['get'] extends (...args: any[]) => infer THandler ? THandler : never,
-  viewer: { playerId: string; teamId: string | null },
+  modeHandler: ModeHandler,
+  viewer: ViewerContext,
 ): TPayload {
   if (!('snapshot' in payload) || !payload.snapshot) {
     return payload;

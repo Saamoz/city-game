@@ -2,7 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import {
+  MAX_DELTA_SYNC_GAP,
   SESSION_COOKIE_NAME,
+  eventTypes,
   socketClientEventTypes,
   socketServerEventTypes,
   type GameStateSnapshot,
@@ -16,6 +18,7 @@ import { createSocketClient, connectSocketClient } from '../test/socket-client-f
 import { createTestGame, createTestPlayer, createTestTeam } from '../test/factories.js';
 import { closeTestDatabase, getTestDatabase, resetTestDatabase } from '../test/test-db.js';
 import { serializeGameRecord } from '../services/game-service.js';
+import { logEvent } from '../services/event-service.js';
 
 const ADMIN_TOKEN = 'test-admin-token';
 const GAME_ID = '11111111-1111-4111-8111-111111111111';
@@ -65,6 +68,117 @@ describe('realtime socket server', () => {
       message: 'Authentication required.',
       data: {
         code: 'UNAUTHORIZED',
+      },
+    });
+  });
+
+  it('sends a full snapshot when joining without a last state version', async () => {
+    await seedGame();
+    await seedTeam();
+    await seedPlayer({ teamId: TEAM_ONE_ID, sessionToken: 'sync-session' });
+    app = await createRealtimeTestApp();
+    baseUrl = await listenApp(app);
+
+    const socket = trackSocket(createSocketClient({
+      url: baseUrl,
+      cookie: sessionCookie('sync-session'),
+    }));
+    await connectSocketClient(socket);
+
+    const syncPromise = waitForSocketEvent(socket, socketServerEventTypes.gameStateSync);
+    const joinResult = await socket.timeout(1000).emitWithAck(socketClientEventTypes.joinGame, {
+      gameId: GAME_ID,
+    });
+
+    expect(joinResult).toEqual({
+      ok: true,
+      gameId: GAME_ID,
+      teamId: TEAM_ONE_ID,
+    });
+
+    const syncEvent = await syncPromise;
+    expect(syncEvent).toMatchObject({
+      gameId: GAME_ID,
+      stateVersion: 0,
+      snapshot: {
+        game: { id: GAME_ID },
+        player: { id: PLAYER_ONE_ID, teamId: TEAM_ONE_ID },
+        team: { id: TEAM_ONE_ID },
+      },
+    });
+    expect(syncEvent.serverTime).toEqual(expect.any(String));
+  });
+
+  it('sends delta events when reconnecting within the delta threshold', async () => {
+    await seedGame();
+    await seedTeam();
+    await seedPlayer({ teamId: TEAM_ONE_ID, sessionToken: 'delta-session' });
+    await seedRealtimeEvents();
+    app = await createRealtimeTestApp();
+    baseUrl = await listenApp(app);
+
+    const socket = trackSocket(createSocketClient({
+      url: baseUrl,
+      cookie: sessionCookie('delta-session'),
+    }));
+    await connectSocketClient(socket);
+
+    const deltaPromise = waitForSocketEvent(socket, socketServerEventTypes.gameStateDelta);
+    const joinResult = await socket.timeout(1000).emitWithAck(socketClientEventTypes.joinGame, {
+      gameId: GAME_ID,
+      lastStateVersion: 1,
+    });
+
+    expect(joinResult).toEqual({
+      ok: true,
+      gameId: GAME_ID,
+      teamId: TEAM_ONE_ID,
+    });
+
+    const deltaEvent = await deltaPromise;
+    expect(deltaEvent).toMatchObject({
+      gameId: GAME_ID,
+      stateVersion: 2,
+      fullSyncRequired: false,
+    });
+    expect(deltaEvent.events).toHaveLength(1);
+    expect(deltaEvent.events[0]).toMatchObject({
+      stateVersion: 2,
+      eventType: eventTypes.resourceChanged,
+    });
+  });
+
+  it('falls back to a full snapshot when the reconnect gap is too large', async () => {
+    await seedGame({ stateVersion: MAX_DELTA_SYNC_GAP + 10 });
+    await seedTeam();
+    await seedPlayer({ teamId: TEAM_ONE_ID, sessionToken: 'full-sync-session' });
+    app = await createRealtimeTestApp();
+    baseUrl = await listenApp(app);
+
+    const socket = trackSocket(createSocketClient({
+      url: baseUrl,
+      cookie: sessionCookie('full-sync-session'),
+    }));
+    await connectSocketClient(socket);
+
+    const syncPromise = waitForSocketEvent(socket, socketServerEventTypes.gameStateSync);
+    const joinResult = await socket.timeout(1000).emitWithAck(socketClientEventTypes.joinGame, {
+      gameId: GAME_ID,
+      lastStateVersion: 0,
+    });
+
+    expect(joinResult).toEqual({
+      ok: true,
+      gameId: GAME_ID,
+      teamId: TEAM_ONE_ID,
+    });
+
+    const syncEvent = await syncPromise;
+    expect(syncEvent).toMatchObject({
+      gameId: GAME_ID,
+      stateVersion: MAX_DELTA_SYNC_GAP + 10,
+      snapshot: {
+        game: { stateVersion: MAX_DELTA_SYNC_GAP + 10 },
       },
     });
   });
@@ -250,6 +364,28 @@ describe('realtime socket server', () => {
     const player = createTestPlayer({ gameId: GAME_ID, id: PLAYER_ONE_ID, ...overrides });
     await testDatabase.db.insert(players).values(player);
     return player;
+  }
+
+  async function seedRealtimeEvents() {
+    await logEvent(testDatabase.db, {
+      gameId: GAME_ID,
+      eventType: eventTypes.objectiveStateChanged,
+      entityType: 'challenge',
+      entityId: '55555555-5555-4555-8555-555555555555',
+      actorType: 'system',
+      afterState: { status: 'claimed' },
+      meta: { source: 'socket-test' },
+    });
+
+    await logEvent(testDatabase.db, {
+      gameId: GAME_ID,
+      eventType: eventTypes.resourceChanged,
+      entityType: 'resource_ledger',
+      entityId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      actorType: 'system',
+      afterState: { balanceAfter: 10 },
+      meta: { resourceType: 'points' },
+    });
   }
 
   async function listenApp(testApp: FastifyInstance): Promise<string> {

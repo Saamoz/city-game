@@ -1,8 +1,10 @@
 import { Server as SocketIOServer } from 'socket.io';
-import { socketClientEventTypes, errorCodes } from '@city-game/shared';
+import { socketClientEventTypes, socketServerEventTypes, errorCodes } from '@city-game/shared';
 import type { FastifyInstance } from 'fastify';
 import { AppError, buildErrorResponse } from '../lib/errors.js';
 import { getPlayerBySessionToken, getSessionTokenFromCookieHeader } from '../lib/auth.js';
+import { getEventsSince } from '../services/event-service.js';
+import { buildGameStateSnapshot } from '../services/state-service.js';
 import { Broadcaster, type RealtimePlayerIdentity, type RealtimeServer, type RealtimeSocket } from './broadcaster.js';
 import { getGameRoom, getTeamRoom } from './rooms.js';
 
@@ -37,6 +39,7 @@ export function registerRealtime(app: FastifyInstance): void {
       socket.data.sessionToken = sessionToken;
       socket.data.player = toRealtimePlayer(player);
       socket.data.joinedGameId = null;
+      socket.data.joinedTeamId = null;
       next();
     } catch (error) {
       next(toSocketError(error));
@@ -49,6 +52,7 @@ export function registerRealtime(app: FastifyInstance): void {
         const player = await getPlayerBySessionToken(app.db, socket.data.sessionToken);
         socket.data.player = toRealtimePlayer(player);
         await joinGameRooms(socket, payload.gameId);
+        await syncSocketState(app, socket, payload.gameId, payload.lastStateVersion);
 
         ack?.({
           ok: true,
@@ -93,6 +97,54 @@ export function registerRealtime(app: FastifyInstance): void {
   });
 }
 
+async function syncSocketState(
+  app: FastifyInstance,
+  socket: RealtimeSocket,
+  gameId: string,
+  lastStateVersion?: number,
+): Promise<void> {
+  if (lastStateVersion === undefined) {
+    await emitFullSnapshot(app, socket, gameId);
+    return;
+  }
+
+  const delta = await getEventsSince(app.db, {
+    gameId,
+    sinceVersion: lastStateVersion,
+  });
+
+  if (delta.fullSyncRequired) {
+    await emitFullSnapshot(app, socket, gameId);
+    return;
+  }
+
+  if (delta.events.length === 0) {
+    return;
+  }
+
+  socket.emit(socketServerEventTypes.gameStateDelta, {
+    gameId,
+    stateVersion: delta.stateVersion,
+    serverTime: new Date().toISOString(),
+    events: delta.events,
+    fullSyncRequired: false,
+  });
+}
+
+async function emitFullSnapshot(app: FastifyInstance, socket: RealtimeSocket, gameId: string): Promise<void> {
+  const snapshot = await buildGameStateSnapshot(app.db, app.modeRegistry, {
+    gameId,
+    playerId: socket.data.player.id,
+  });
+
+  socket.emit(socketServerEventTypes.gameStateSync, {
+    gameId,
+    stateVersion: snapshot.game.stateVersion,
+    serverTime: new Date().toISOString(),
+    snapshot,
+  });
+}
+
 async function joinGameRooms(socket: RealtimeSocket, gameId: string): Promise<void> {
   if (!gameId) {
     throw new AppError(errorCodes.validationError, {
@@ -106,10 +158,6 @@ async function joinGameRooms(socket: RealtimeSocket, gameId: string): Promise<vo
     });
   }
 
-  if (socket.data.joinedGameId === gameId) {
-    return;
-  }
-
   await leaveCurrentRooms(socket);
   await socket.join(getGameRoom(gameId));
 
@@ -118,6 +166,7 @@ async function joinGameRooms(socket: RealtimeSocket, gameId: string): Promise<vo
   }
 
   socket.data.joinedGameId = gameId;
+  socket.data.joinedTeamId = socket.data.player.teamId;
 }
 
 async function leaveGameRooms(socket: RealtimeSocket, gameId: string): Promise<void> {
@@ -129,6 +178,7 @@ async function leaveGameRooms(socket: RealtimeSocket, gameId: string): Promise<v
 
   await leaveCurrentRooms(socket);
   socket.data.joinedGameId = null;
+  socket.data.joinedTeamId = null;
 }
 
 async function leaveCurrentRooms(socket: RealtimeSocket): Promise<void> {
@@ -140,8 +190,8 @@ async function leaveCurrentRooms(socket: RealtimeSocket): Promise<void> {
 
   await socket.leave(getGameRoom(joinedGameId));
 
-  if (socket.data.player.teamId) {
-    await socket.leave(getTeamRoom(joinedGameId, socket.data.player.teamId));
+  if (socket.data.joinedTeamId) {
+    await socket.leave(getTeamRoom(joinedGameId, socket.data.joinedTeamId));
   }
 }
 
