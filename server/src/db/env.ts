@@ -1,3 +1,8 @@
+import {
+  DEFAULT_GPS_MAX_AGE_SECONDS,
+  DEFAULT_GPS_MAX_ERROR_METERS,
+  DEFAULT_GPS_MAX_VELOCITY_KMH,
+} from '@city-game/shared';
 import { config } from 'dotenv';
 import { resolve } from 'node:path';
 
@@ -40,6 +45,9 @@ export const env = {
   testDatabaseUrl: requireEnv('TEST_DATABASE_URL'),
   adminToken: process.env.ADMIN_TOKEN ?? 'replace-me',
   nodeEnv: getNodeEnv(),
+  gpsMaxErrorMeters: getOptionalNumber('GPS_MAX_ERROR_METERS', DEFAULT_GPS_MAX_ERROR_METERS),
+  gpsMaxAgeSeconds: getOptionalNumber('GPS_MAX_AGE_SECONDS', DEFAULT_GPS_MAX_AGE_SECONDS),
+  gpsMaxVelocityKmh: getOptionalNumber('GPS_MAX_VELOCITY_KMH', DEFAULT_GPS_MAX_VELOCITY_KMH),
   overpassApiUrl: process.env.OVERPASS_API_URL ?? 'https://overpass-api.de/api/interpreter',
   overpassMinIntervalMs: getOptionalNumber('OVERPASS_MIN_INTERVAL_MS', 1_000),
   overpassTimeoutMs: getOptionalNumber('OVERPASS_TIMEOUT_MS', 15_000),

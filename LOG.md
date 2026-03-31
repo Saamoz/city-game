@@ -22,7 +22,7 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 11 event service and state-version plumbing complete
+- Current implementation stage: Phase 13 GPS validation middleware complete
 
 ---
 
@@ -265,7 +265,7 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 13 GPS validation middleware for /challenges/:id/claim and /players/me/location.
+1. Proceed to Phase 14 mode loading and the Territory handler skeleton.
 2. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 3. Reuse server/src/test/test-db.ts for future DB-backed integration tests instead of creating isolated test pools per suite.
 
@@ -278,7 +278,7 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 13 GPS validation middleware, then Phase 14 mode loading and the Territory handler skeleton.
+- The next highest-value work is Phase 14 mode loading and the Territory handler skeleton, then Phase 15 game lifecycle orchestration.
 
 ## Phase 12 Notes
 
@@ -298,3 +298,18 @@ These are implementation-level decisions, not product/spec changes.
 - Fastify cookie state was not reliably discoverable through generic reply header inspection during replay capture. The registration route now passes an explicit serialized `Set-Cookie` header into the idempotency helper.
 - `fileParallelism: false` was not enough for the DB-backed Vitest suite. The shared Postgres test database needed `maxWorkers: 1` and `minWorkers: 1` in `server/vitest.config.ts` to eliminate cross-file truncation races.
 - Drizzle generated a migration that added `scope_key` as `NOT NULL` immediately. That was manually adjusted to add the column nullable first, backfill existing rows, then set `NOT NULL`.
+
+## Phase 13 Notes
+
+- Phase 13 is complete: added `server/src/middleware/gps-validation.ts` with freshness checks, max-error enforcement, non-blocking velocity warnings, and request-scoped validated GPS payload attachment.
+- Exported GPS env configuration from `server/src/db/env.ts` using shared defaults for age, accuracy, and velocity thresholds.
+- Added `POST /players/me/location` in `server/src/routes/player-routes.ts` and wired it through auth, GPS validation, and idempotent mutation handling.
+- `/players/me/location` now updates `players.last_lat`, `last_lng`, `last_gps_error`, and `last_seen_at` and returns both the safe player payload and normalized GPS payload.
+- Added `server/src/middleware/gps-validation.test.ts` for stale/error/success coverage and velocity warning behavior.
+- Extended `server/src/routes/player-routes.test.ts` with DB-backed coverage for successful location updates plus `GPS_TOO_OLD` and `GPS_ERROR_TOO_HIGH` failures.
+
+### Phase 13 Learnings
+
+- Shared `GpsPayload` requires `speedMps` and `headingDegrees`; the middleware now normalizes missing optional request fields to `null` so runtime payloads match the shared contract.
+- Fake timers caused Fastify inject and DB-backed route tests to hang under Vitest. The GPS suites now use real timestamps relative to `Date.now()` instead of freezing the clock.
+- In this Codex desktop session, `apply_patch` still resolves paths against the malformed app-resource cwd rather than `/mnt/e/city game`. Shell-based file writes remain the reliable fallback until that tool path issue is resolved.

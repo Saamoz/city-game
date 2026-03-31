@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { SESSION_COOKIE_NAME } from '@city-game/shared';
+import { env } from '../db/env.js';
 import { games, players, teams } from '../db/schema.js';
 import { createTestApp } from '../test/create-test-app.js';
 import { createTestGame, createTestPlayer, createTestTeam } from '../test/factories.js';
@@ -254,6 +255,120 @@ describe('player routes', () => {
       },
     });
     expect(response.json().player.sessionToken).toBeUndefined();
+  });
+
+  it('updates the current player location when the GPS payload is valid', async () => {
+    await seedGame();
+    await seedPlayer({ teamId: null, sessionToken: 'location-session-token' });
+    app = await createPlayerTestApp();
+
+    const capturedAt = new Date().toISOString();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/location',
+      headers: idempotencyHeaders('player-location-success'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'location-session-token',
+      },
+      payload: {
+        lat: 49.8951,
+        lng: -97.1384,
+        gpsErrorMeters: 7,
+        capturedAt,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      player: {
+        id: PLAYER_ID,
+        lastLat: '49.8951000',
+        lastLng: '-97.1384000',
+        lastGpsError: 7,
+        lastSeenAt: capturedAt,
+      },
+      gps: {
+        lat: 49.8951,
+        lng: -97.1384,
+        gpsErrorMeters: 7,
+        speedMps: null,
+        headingDegrees: null,
+        capturedAt,
+      },
+    });
+
+    const [storedPlayer] = await testDatabase.db
+      .select()
+      .from(players)
+      .where(eq(players.id, PLAYER_ID))
+      .limit(1);
+
+    expect(storedPlayer?.lastLat).toBe('49.8951000');
+    expect(storedPlayer?.lastLng).toBe('-97.1384000');
+    expect(storedPlayer?.lastGpsError).toBe(7);
+    expect(storedPlayer?.lastSeenAt?.toISOString()).toBe(capturedAt);
+  });
+
+  it('returns GPS_TOO_OLD when /players/me/location is called with stale GPS', async () => {
+    await seedGame();
+    await seedPlayer({ teamId: null, sessionToken: 'stale-location-token' });
+    app = await createPlayerTestApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/location',
+      headers: idempotencyHeaders('player-location-stale'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'stale-location-token',
+      },
+      payload: {
+        lat: 49.8951,
+        lng: -97.1384,
+        gpsErrorMeters: 7,
+        capturedAt: new Date(Date.now() - (env.gpsMaxAgeSeconds + 1) * 1_000).toISOString(),
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'GPS_TOO_OLD',
+        message: 'GPS reading is too old.',
+      },
+    });
+  });
+
+  it('returns GPS_ERROR_TOO_HIGH when /players/me/location exceeds the max error radius', async () => {
+    await seedGame();
+    await seedPlayer({ teamId: null, sessionToken: 'bad-accuracy-token' });
+    app = await createPlayerTestApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/location',
+      headers: idempotencyHeaders('player-location-error'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'bad-accuracy-token',
+      },
+      payload: {
+        lat: 49.8951,
+        lng: -97.1384,
+        gpsErrorMeters: env.gpsMaxErrorMeters + 1,
+        capturedAt: new Date().toISOString(),
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'GPS_ERROR_TOO_HIGH',
+        message: 'GPS accuracy is too low for this action.',
+        details: {
+          maxErrorMeters: env.gpsMaxErrorMeters,
+          gpsErrorMeters: env.gpsMaxErrorMeters + 1,
+        },
+      },
+    });
   });
 
   async function createPlayerTestApp() {

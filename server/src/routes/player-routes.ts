@@ -5,6 +5,7 @@ import type { DatabaseClient } from '../db/connection.js';
 import { games, players, teams } from '../db/schema.js';
 import { generateSessionToken, getSerializedSessionCookie } from '../lib/auth.js';
 import { AppError } from '../lib/errors.js';
+import { gpsPayloadSchema } from '../middleware/gps-validation.js';
 import { executeIdempotentMutation } from '../services/idempotency-service.js';
 
 const paramsWithGameIdSchema = {
@@ -131,6 +132,43 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       reply.send({ player: serializePlayer(request.player!) });
+    },
+  );
+
+  app.post(
+    '/players/me/location',
+    {
+      preHandler: [app.authenticate, app.validateGps],
+      schema: {
+        body: gpsPayloadSchema,
+      },
+    },
+    async (request, reply) => {
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const gpsPayload = request.gpsPayload!;
+        const [player] = await db
+          .update(players)
+          .set({
+            lastLat: gpsPayload.lat.toString(),
+            lastLng: gpsPayload.lng.toString(),
+            lastGpsError: gpsPayload.gpsErrorMeters,
+            lastSeenAt: new Date(gpsPayload.capturedAt),
+          })
+          .where(eq(players.id, request.player!.id))
+          .returning();
+
+        request.player = player;
+
+        return {
+          gameId: player.gameId,
+          playerId: player.id,
+          statusCode: 200,
+          body: {
+            player: serializePlayer(player),
+            gps: gpsPayload,
+          },
+        };
+      });
     },
   );
 };
