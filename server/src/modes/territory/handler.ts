@@ -4,14 +4,22 @@ import {
   STATE_VERSION_HEADER,
   errorCodes,
   resourceDefinitions,
+  type Challenge,
+  type ChallengeClaim,
   type GpsPayload,
+  type JsonObject,
+  type JsonValue,
+  type ResourceAwardMap,
+  type ResourceLedgerEntry,
   type ResourceType,
+  type Zone,
 } from '@city-game/shared';
 import { teams } from '../../db/schema.js';
-import { AppError } from '../../lib/errors.js';
+import { AppError, buildErrorResponse } from '../../lib/errors.js';
 import { seedInitialBalances } from '../../services/resource-service.js';
 import type { ModeHandler, ModeResourceDefinition } from '../types.js';
 import { claimChallenge } from './claim-service.js';
+import { completeChallenge } from './complete-service.js';
 import { territoryRoutes } from './routes.js';
 
 const territoryResourceDefinitions: ModeResourceDefinition[] = RESOURCE_TYPE_VALUES.map((resourceType) => ({
@@ -19,6 +27,27 @@ const territoryResourceDefinitions: ModeResourceDefinition[] = RESOURCE_TYPE_VAL
   ...resourceDefinitions[resourceType],
   initialBalance: 0,
 }));
+
+export interface TerritoryChallengeReleasedPostCommit {
+  type: 'challenge_released';
+  gameId: string;
+  stateVersion: number;
+  challenge: Challenge;
+  claim: ChallengeClaim;
+}
+
+export interface TerritoryChallengeCompletedPostCommit {
+  type: 'challenge_completed';
+  gameId: string;
+  stateVersion: number;
+  challenge: Challenge;
+  claim: ChallengeClaim;
+  zone: Zone | null;
+  resourcesAwarded: ResourceAwardMap;
+  resourceEntries: ResourceLedgerEntry[];
+}
+
+export type TerritoryPostCommitData = TerritoryChallengeReleasedPostCommit | TerritoryChallengeCompletedPostCommit;
 
 export function createTerritoryModeHandler(): ModeHandler {
   return {
@@ -69,10 +98,63 @@ export function createTerritoryModeHandler(): ModeHandler {
             },
           };
         }
-        case 'complete':
+        case 'complete': {
+          const result = await completeChallenge(context.db, {
+            challengeId: action.challengeId,
+            gameId: action.gameId,
+            playerId: action.playerId,
+            teamId: action.teamId,
+            submission: getCompletionSubmission(action.payload),
+          });
+
+          if (result.kind === 'expired') {
+            return {
+              gameId: result.gameId,
+              statusCode: 409,
+              stateVersion: result.stateVersion,
+              body: buildErrorResponse(errorCodes.claimExpired),
+              responseHeaders: {
+                [STATE_VERSION_HEADER]: String(result.stateVersion),
+              },
+              postCommitData: {
+                type: 'challenge_released',
+                gameId: result.gameId,
+                stateVersion: result.stateVersion,
+                challenge: result.challenge,
+                claim: result.claim,
+              } satisfies TerritoryChallengeReleasedPostCommit,
+            };
+          }
+
+          return {
+            gameId: result.gameId,
+            statusCode: 200,
+            stateVersion: result.stateVersion,
+            body: {
+              challenge: result.challenge,
+              claim: result.claim,
+              zone: result.zone,
+              resourcesAwarded: result.resourcesAwarded,
+              stateVersion: result.stateVersion,
+            },
+            responseHeaders: {
+              [STATE_VERSION_HEADER]: String(result.stateVersion),
+            },
+            postCommitData: {
+              type: 'challenge_completed',
+              gameId: result.gameId,
+              stateVersion: result.stateVersion,
+              challenge: result.challenge,
+              claim: result.claim,
+              zone: result.zone,
+              resourcesAwarded: result.resourcesAwarded,
+              resourceEntries: result.resourceEntries,
+            } satisfies TerritoryChallengeCompletedPostCommit,
+          };
+        }
         case 'release':
           throw new AppError(errorCodes.internalServerError, {
-            message: 'Territory actions are not implemented yet.',
+            message: 'Territory release action is not implemented yet.',
           });
       }
     },
@@ -112,4 +194,16 @@ function isGpsPayload(value: unknown): value is GpsPayload {
       typeof (value as GpsPayload).gpsErrorMeters === 'number' &&
       typeof (value as GpsPayload).capturedAt === 'string',
   );
+}
+
+function getCompletionSubmission(value: unknown): JsonValue | null {
+  if (!isJsonObject(value) || !('submission' in value)) {
+    return null;
+  }
+
+  return (value.submission as JsonValue | undefined) ?? null;
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }

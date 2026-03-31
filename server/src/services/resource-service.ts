@@ -149,52 +149,56 @@ export async function getHistory(db: DatabaseClient, input: ResourceHistoryInput
 }
 
 export async function transact(db: DatabaseClient, input: ResourceTransactionInput): Promise<ResourceLedgerEntry> {
-  return db.transaction(async (tx) => {
-    const transactionalDb = tx as unknown as DatabaseClient;
-    await lockResourceScope(transactionalDb, input);
+  return db.transaction(async (tx) => transactInTransaction(tx as unknown as DatabaseClient, input));
+}
 
-    const [latestRow] = await transactionalDb
-      .select({
-        sequence: resourceLedger.sequence,
-        balanceAfter: resourceLedger.balanceAfter,
-      })
-      .from(resourceLedger)
-      .where(buildScopeCondition(input))
-      .orderBy(desc(resourceLedger.sequence))
-      .limit(1);
+export async function transactInTransaction(
+  db: DatabaseClient,
+  input: ResourceTransactionInput,
+): Promise<ResourceLedgerEntry> {
+  await lockResourceScope(db, input);
 
-    const nextSequence = (latestRow?.sequence ?? 0) + 1;
-    const nextBalance = (latestRow?.balanceAfter ?? 0) + input.delta;
+  const [latestRow] = await db
+    .select({
+      sequence: resourceLedger.sequence,
+      balanceAfter: resourceLedger.balanceAfter,
+    })
+    .from(resourceLedger)
+    .where(buildScopeCondition(input))
+    .orderBy(desc(resourceLedger.sequence))
+    .limit(1);
 
-    if (nextBalance < 0 && !input.allowNegative) {
-      throw new AppError(errorCodes.insufficientResources, {
-        message: 'Insufficient resources.',
-        details: {
-          resourceType: input.resourceType,
-          balance: latestRow?.balanceAfter ?? 0,
-          attemptedDelta: input.delta,
-        },
-      });
-    }
+  const nextSequence = (latestRow?.sequence ?? 0) + 1;
+  const nextBalance = (latestRow?.balanceAfter ?? 0) + input.delta;
 
-    const [entry] = await transactionalDb
-      .insert(resourceLedger)
-      .values({
-        gameId: input.gameId,
-        teamId: input.teamId,
-        playerId: input.playerId ?? null,
+  if (nextBalance < 0 && !input.allowNegative) {
+    throw new AppError(errorCodes.insufficientResources, {
+      message: 'Insufficient resources.',
+      details: {
         resourceType: input.resourceType,
-        delta: input.delta,
-        balanceAfter: nextBalance,
-        sequence: nextSequence,
-        reason: input.reason,
-        referenceId: input.referenceId ?? null,
-        referenceType: input.referenceType ?? null,
-      })
-      .returning();
+        balance: latestRow?.balanceAfter ?? 0,
+        attemptedDelta: input.delta,
+      },
+    });
+  }
 
-    return serializeResourceLedgerEntry(entry as ResourceLedgerRow);
-  });
+  const [entry] = await db
+    .insert(resourceLedger)
+    .values({
+      gameId: input.gameId,
+      teamId: input.teamId,
+      playerId: input.playerId ?? null,
+      resourceType: input.resourceType,
+      delta: input.delta,
+      balanceAfter: nextBalance,
+      sequence: nextSequence,
+      reason: input.reason,
+      referenceId: input.referenceId ?? null,
+      referenceType: input.referenceType ?? null,
+    })
+    .returning();
+
+  return serializeResourceLedgerEntry(entry as ResourceLedgerRow);
 }
 
 export async function seedInitialBalances(

@@ -22,11 +22,21 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-31
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 19 claim timeout job complete
+- Current implementation stage: Phase 20 Territory complete action complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 20 Progress
+
+- Implemented the Territory completion flow in `server/src/modes/territory/complete-service.ts` with one transaction for claim completion, challenge completion, zone capture, resource awards, and event logging
+- `POST /challenges/:id/complete` is now live in `server/src/modes/territory/routes.ts` and supports `{ submission? }` bodies plus idempotent replay
+- Expired claims are cleaned up inline during completion attempts: the action commits the release, returns `CLAIM_EXPIRED`, increments `stateVersion`, and broadcasts `challenge_released` after commit
+- Added `transactInTransaction()` to `server/src/services/resource-service.ts` so resource awards can be applied safely inside larger mode transactions without opening nested top-level flows
+- Added route coverage in `server/src/modes/territory/complete-routes.test.ts` for success, expiry cleanup, wrong-team rejection, missing-claim rejection, and idempotent replay
+
+---
 
 ## Phase 11 Progress
 
@@ -190,7 +200,7 @@ pnpm -r build
 Results:
 
 - Workspace typecheck passed
-- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, player route coverage, zone route coverage, challenge route coverage, resource route coverage, event route coverage, resource-service coverage, event-service coverage, spatial-service coverage, OSM preview route coverage, and OSM import service coverage
+- Server tests passed, including AppError, validation-error, auth middleware, game/team route coverage, player route coverage, Territory claim and complete route coverage, zone route coverage, challenge route coverage, resource route coverage, event route coverage, resource-service coverage, event-service coverage, spatial-service coverage, OSM preview route coverage, and OSM import service coverage
 - Full workspace build passed
 - `pnpm db:up` works against the Docker-backed local database
 - `pnpm db:migrate` completed successfully

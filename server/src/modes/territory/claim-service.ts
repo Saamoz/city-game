@@ -169,7 +169,7 @@ export async function claimChallenge(db: DatabaseClient, input: ClaimChallengeIn
   };
 }
 
-async function lockChallenge(db: DatabaseClient, challengeId: string): Promise<typeof challenges.$inferSelect> {
+export async function lockChallenge(db: DatabaseClient, challengeId: string): Promise<typeof challenges.$inferSelect> {
   const [challenge] = await db.select().from(challenges).where(eq(challenges.id, challengeId)).limit(1).for('update');
 
   if (!challenge) {

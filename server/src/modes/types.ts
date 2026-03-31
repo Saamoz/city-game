@@ -42,6 +42,7 @@ export interface ModeActionResult {
   stateVersion?: number;
   body?: unknown;
   responseHeaders?: JsonObject;
+  postCommitData?: unknown;
 }
 
 export interface WinCheckResult {
