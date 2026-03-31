@@ -22,7 +22,7 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-30
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 14 mode registry and Territory handler skeleton complete
+- Current implementation stage: Phase 15 game lifecycle complete
 
 ---
 
@@ -265,9 +265,9 @@ These are implementation-level decisions, not product/spec changes.
 
 ## Recommended Next Steps
 
-1. Proceed to Phase 15 game lifecycle orchestration.
-2. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
-3. Reuse server/src/test/test-db.ts for future DB-backed integration tests instead of creating isolated test pools per suite.
+1. Proceed to Phase 16 Socket.IO server and connection auth.
+2. Reuse the new lifecycle service and `X-State-Version` header pattern for future mutating gameplay routes.
+3. Keep expanding route-level schemas so request validation stays centralized through the Fastify error handler.
 
 ---
 
@@ -278,7 +278,7 @@ These are implementation-level decisions, not product/spec changes.
 - Use WSL as the source of truth for repo work.
 - Use the Linux Node install from `nvm`, not the Windows Node install.
 - If a shell does not see the Linux Node install, check `~/.profile` and `~/.bashrc`.
-- The next highest-value work is Phase 15 game lifecycle orchestration, then Phase 16 Socket.IO server and connection auth.
+- The next highest-value work is Phase 16 Socket.IO server and connection auth.
 
 ## Phase 12 Notes
 
@@ -328,3 +328,19 @@ These are implementation-level decisions, not product/spec changes.
 - The mode contract is cleaner as a server-local interface than a shared one right now, because the handler needs direct DB access and server-only hooks such as route registration.
 - The spec says Territory resources initialize to zero on game start. To make that observable and testable, `seedInitialBalances()` now supports `includeZeroBalances: true`, which writes explicit zero-balance ledger rows only when the caller opts in.
 - Registering mode routes through the app-level registry now creates the seam Phase 15 will need for `POST /game/:id/start` without requiring later route-file refactors.
+
+
+## Phase 15 Notes
+
+- Phase 15 is complete: added a reusable lifecycle service in `server/src/services/game-service.ts` that validates transitions, updates game status/timestamps, increments `stateVersion`, and writes lifecycle events atomically.
+- `POST /game/:id/start`, `pause`, `resume`, and `end` are now live in `server/src/routes/game-routes.ts` and replace the earlier stubs.
+- `start` resolves the mode handler through the registry and calls `onGameStart()` inside the lifecycle transaction; `end` calls `onGameEnd()` the same way.
+- Lifecycle mutation responses now set `X-State-Version` and return the serialized game payload for the new authoritative state.
+- Added DB-backed route coverage in `server/src/routes/game-routes.test.ts` for the full start/pause/resume/end flow, resource seeding on start, event logging, and invalid transition conflicts.
+- Added `INVALID_GAME_STATE_TRANSITION` to the shared error catalog in `shared/src/errors.ts`.
+
+### Phase 15 Learnings
+
+- Zero-balance resource initialization is easier to observe and verify when game start writes explicit seed rows rather than relying on implicit empty-balance reads.
+- Modeling lifecycle transitions in a reusable service is cleaner than embedding status rules directly in route handlers; later gameplay flows can reuse the same game lookup and versioning seam.
+- Invalid lifecycle requests should fail as `409 INVALID_GAME_STATE_TRANSITION`, not generic validation errors, because the request shape is valid and only the current game state is wrong.

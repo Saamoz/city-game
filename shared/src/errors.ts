@@ -40,6 +40,10 @@ export const errorDefinitions = {
     statusCode: 403,
     defaultMessage: 'Game is not active.',
   },
+  INVALID_GAME_STATE_TRANSITION: {
+    statusCode: 409,
+    defaultMessage: 'Game cannot transition from its current status.',
+  },
   GAME_NOT_FOUND: {
     statusCode: 404,
     defaultMessage: 'Game not found.',
@@ -98,6 +102,7 @@ export const errorCodes = {
   claimNotYours: 'CLAIM_NOT_YOURS',
   noActiveClaim: 'NO_ACTIVE_CLAIM',
   gameNotActive: 'GAME_NOT_ACTIVE',
+  invalidGameStateTransition: 'INVALID_GAME_STATE_TRANSITION',
   gameNotFound: 'GAME_NOT_FOUND',
   notOnTeam: 'NOT_ON_TEAM',
   teamNotFound: 'TEAM_NOT_FOUND',

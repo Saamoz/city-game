@@ -1,112 +1,118 @@
-import type { FastifyPluginAsync } from 'fastify';
-import { desc, eq, ne } from 'drizzle-orm';
-import { GAME_MODE_KEYS, errorCodes } from '@city-game/shared';
-import type { DatabaseClient } from '../db/connection.js';
-import { games, teams } from '../db/schema.js';
-import { AppError, buildErrorResponse } from '../lib/errors.js';
-import { generateJoinCode } from '../lib/join-code.js';
-import { executeIdempotentMutation } from '../services/idempotency-service.js';
+import type { FastifyInstance, FastifyPluginAsync } from "fastify";
+import { desc, eq, ne } from "drizzle-orm";
+import { GAME_MODE_KEYS, STATE_VERSION_HEADER, errorCodes } from "@city-game/shared";
+import type { DatabaseClient } from "../db/connection.js";
+import { games, teams } from "../db/schema.js";
+import { AppError } from "../lib/errors.js";
+import { generateJoinCode } from "../lib/join-code.js";
+import { executeIdempotentMutation } from "../services/idempotency-service.js";
+import {
+  getGameById,
+  serializeGameRecord,
+  transitionGameLifecycle,
+  type LifecycleTransition,
+} from "../services/game-service.js";
 
 const winConditionItemSchema = {
-  type: 'object',
+  type: "object",
   additionalProperties: true,
-  required: ['type'],
+  required: ["type"],
   properties: {
     type: {
-      type: 'string',
-      enum: ['all_zones', 'zone_majority', 'time_limit', 'score_threshold'],
+      type: "string",
+      enum: ["all_zones", "zone_majority", "time_limit", "score_threshold"],
     },
-    threshold: { type: 'number' },
-    duration_minutes: { type: 'integer', minimum: 1 },
-    target: { type: 'integer', minimum: 1 },
+    threshold: { type: "number" },
+    duration_minutes: { type: "integer", minimum: 1 },
+    target: { type: "integer", minimum: 1 },
   },
 } as const;
 
 const gameCreateBodySchema = {
-  type: 'object',
+  type: "object",
   additionalProperties: false,
-  required: ['name', 'modeKey', 'centerLat', 'centerLng', 'defaultZoom'],
+  required: ["name", "modeKey", "centerLat", "centerLng", "defaultZoom"],
   properties: {
-    name: { type: 'string', minLength: 1, maxLength: 255 },
-    modeKey: { type: 'string', enum: [...GAME_MODE_KEYS] },
-    city: { type: 'string', minLength: 1, maxLength: 255 },
-    centerLat: { type: 'number' },
-    centerLng: { type: 'number' },
-    defaultZoom: { type: 'integer' },
+    name: { type: "string", minLength: 1, maxLength: 255 },
+    modeKey: { type: "string", enum: [...GAME_MODE_KEYS] },
+    city: { type: "string", minLength: 1, maxLength: 255 },
+    centerLat: { type: "number" },
+    centerLng: { type: "number" },
+    defaultZoom: { type: "integer" },
     winCondition: {
-      type: 'array',
+      type: "array",
       items: winConditionItemSchema,
     },
     settings: {
-      type: 'object',
+      type: "object",
       additionalProperties: true,
     },
   },
 } as const;
 
 const gameUpdateBodySchema = {
-  type: 'object',
+  type: "object",
   additionalProperties: false,
   properties: {
-    name: { type: 'string', minLength: 1, maxLength: 255 },
-    city: { type: 'string', minLength: 1, maxLength: 255 },
-    centerLat: { type: 'number' },
-    centerLng: { type: 'number' },
-    defaultZoom: { type: 'integer' },
+    name: { type: "string", minLength: 1, maxLength: 255 },
+    city: { type: "string", minLength: 1, maxLength: 255 },
+    centerLat: { type: "number" },
+    centerLng: { type: "number" },
+    defaultZoom: { type: "integer" },
     winCondition: {
-      type: 'array',
+      type: "array",
       items: winConditionItemSchema,
     },
     settings: {
-      type: 'object',
+      type: "object",
       additionalProperties: true,
     },
   },
 } as const;
 
 const teamCreateBodySchema = {
-  type: 'object',
+  type: "object",
   additionalProperties: false,
-  required: ['name', 'color'],
+  required: ["name", "color"],
   properties: {
-    name: { type: 'string', minLength: 1, maxLength: 255 },
-    color: { type: 'string', pattern: '^#[0-9A-Fa-f]{6}$' },
-    icon: { type: 'string', minLength: 1, maxLength: 50 },
+    name: { type: "string", minLength: 1, maxLength: 255 },
+    color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" },
+    icon: { type: "string", minLength: 1, maxLength: 50 },
     metadata: {
-      type: 'object',
+      type: "object",
       additionalProperties: true,
     },
   },
 } as const;
 
 const paramsWithGameIdSchema = {
-  type: 'object',
-  required: ['id'],
+  type: "object",
+  required: ["id"],
   properties: {
-    id: { type: 'string', format: 'uuid' },
+    id: { type: "string", format: "uuid" },
   },
 } as const;
 
 export const gameRoutes: FastifyPluginAsync = async (app) => {
-  app.get('/game/active', async (_request, reply) => {
+  app.get("/game/active", async (_request, reply) => {
     const [game] = await app.db
       .select()
       .from(games)
-      .where(ne(games.status, 'completed'))
+      .where(ne(games.status, "completed"))
       .orderBy(desc(games.createdAt))
       .limit(1);
 
     if (!game) {
       throw new AppError(errorCodes.gameNotFound, {
-        message: 'No active game found.',
+        message: "No active game found.",
       });
     }
 
-    reply.send({ game: serializeGame(game) });
+    reply.send({ game: serializeGameRecord(game) });
   });
 
   app.post(
-    '/game',
+    "/game",
     {
       preHandler: [app.requireAdmin],
       schema: {
@@ -145,14 +151,14 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
         return {
           gameId: game.id,
           statusCode: 201,
-          body: { game: serializeGame(game) },
+          body: { game: serializeGameRecord(game) },
         };
       });
     },
   );
 
   app.get(
-    '/game/:id',
+    "/game/:id",
     {
       schema: {
         params: paramsWithGameIdSchema,
@@ -160,12 +166,12 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       const game = await getGameById(app.db, (request.params as { id: string }).id);
-      reply.send({ game: serializeGame(game) });
+      reply.send({ game: serializeGameRecord(game) });
     },
   );
 
   app.patch(
-    '/game/:id',
+    "/game/:id",
     {
       preHandler: [app.requireAdmin],
       schema: {
@@ -207,59 +213,19 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
         return {
           gameId: id,
           statusCode: 200,
-          body: { game: serializeGame(game) },
+          body: { game: serializeGameRecord(game) },
         };
       });
     },
   );
 
-  app.post(
-    '/game/:id/start',
-    {
-      preHandler: [app.requireAdmin],
-      schema: { params: paramsWithGameIdSchema },
-    },
-    async (_request, reply) => {
-      reply.status(501).send(
-        buildErrorResponse(errorCodes.internalServerError, {
-          message: 'Game lifecycle endpoints are not implemented yet.',
-        }),
-      );
-    },
-  );
+  registerLifecycleRoute(app, "start");
+  registerLifecycleRoute(app, "pause");
+  registerLifecycleRoute(app, "resume");
+  registerLifecycleRoute(app, "end");
 
   app.post(
-    '/game/:id/pause',
-    {
-      preHandler: [app.requireAdmin],
-      schema: { params: paramsWithGameIdSchema },
-    },
-    async (_request, reply) => {
-      reply.status(501).send(
-        buildErrorResponse(errorCodes.internalServerError, {
-          message: 'Game lifecycle endpoints are not implemented yet.',
-        }),
-      );
-    },
-  );
-
-  app.post(
-    '/game/:id/end',
-    {
-      preHandler: [app.requireAdmin],
-      schema: { params: paramsWithGameIdSchema },
-    },
-    async (_request, reply) => {
-      reply.status(501).send(
-        buildErrorResponse(errorCodes.internalServerError, {
-          message: 'Game lifecycle endpoints are not implemented yet.',
-        }),
-      );
-    },
-  );
-
-  app.post(
-    '/game/:id/teams',
+    "/game/:id/teams",
     {
       preHandler: [app.requireAdmin],
       schema: {
@@ -296,7 +262,7 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
   );
 
   app.get(
-    '/game/:id/teams',
+    "/game/:id/teams",
     {
       schema: {
         params: paramsWithGameIdSchema,
@@ -317,14 +283,31 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
   );
 };
 
-async function getGameById(db: DatabaseClient, gameId: string) {
-  const [game] = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
+function registerLifecycleRoute(app: FastifyInstance, transition: LifecycleTransition) {
+  app.post(
+    `/game/:id/${transition}`,
+    {
+      preHandler: [app.requireAdmin],
+      schema: {
+        params: paramsWithGameIdSchema,
+      },
+    },
+    async (request, reply) => {
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const { id } = request.params as { id: string };
+        const result = await transitionGameLifecycle(db, app.modeRegistry, id, transition);
 
-  if (!game) {
-    throw new AppError(errorCodes.gameNotFound);
-  }
-
-  return game;
+        return {
+          gameId: id,
+          statusCode: 200,
+          body: { game: serializeGameRecord(result.game) },
+          responseHeaders: {
+            [STATE_VERSION_HEADER]: String(result.stateVersion),
+          },
+        };
+      });
+    },
+  );
 }
 
 async function createTeamWithUniqueJoinCode(
@@ -357,26 +340,18 @@ async function createTeamWithUniqueJoinCode(
     }
   }
 
-  throw new Error('Unable to generate a unique team join code after repeated attempts.');
+  throw new Error("Unable to generate a unique team join code after repeated attempts.");
 }
 
 function isJoinCodeConstraintError(error: unknown) {
   return Boolean(
     error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      'constraint' in error &&
-      (error as { code?: string }).code === '23505' &&
-      (error as { constraint?: string }).constraint === 'teams_game_join_code_idx',
+      typeof error === "object" &&
+      "code" in error &&
+      "constraint" in error &&
+      (error as { code?: string }).code === "23505" &&
+      (error as { constraint?: string }).constraint === "teams_game_join_code_idx",
   );
-}
-
-function serializeGame(game: typeof games.$inferSelect) {
-  return {
-    ...game,
-    centerLat: Number(game.centerLat),
-    centerLng: Number(game.centerLng),
-  };
 }
 
 function serializeTeam(team: typeof teams.$inferSelect) {
@@ -390,19 +365,19 @@ function validateWinConditions(winConditions?: Array<Record<string, unknown>>) {
 
   for (const condition of winConditions) {
     switch (condition.type) {
-      case 'all_zones':
+      case "all_zones":
         break;
-      case 'zone_majority':
-        if (typeof condition.threshold !== 'number') {
+      case "zone_majority":
+        if (typeof condition.threshold !== "number") {
           throw invalidWinConditionError();
         }
         break;
-      case 'time_limit':
+      case "time_limit":
         if (!Number.isInteger(condition.duration_minutes) || (condition.duration_minutes as number) < 1) {
           throw invalidWinConditionError();
         }
         break;
-      case 'score_threshold':
+      case "score_threshold":
         if (!Number.isInteger(condition.target) || (condition.target as number) < 1) {
           throw invalidWinConditionError();
         }
@@ -415,6 +390,6 @@ function validateWinConditions(winConditions?: Array<Record<string, unknown>>) {
 
 function invalidWinConditionError() {
   return new AppError(errorCodes.validationError, {
-    message: 'winCondition must be an array of valid win condition objects.',
+    message: "winCondition must be an array of valid win condition objects.",
   });
 }
