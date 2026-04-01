@@ -3,10 +3,26 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
 export default defineConfig({
+  envDir: '..',
+  envPrefix: ['VITE_', 'MAPBOX_'],
   plugins: [react()],
   resolve: {
     alias: {
       '@city-game/shared': path.resolve(__dirname, '../shared/src'),
+    },
+  },
+  build: {
+    chunkSizeWarningLimit: 2000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('mapbox-gl')) {
+            return 'mapbox';
+          }
+
+          return undefined;
+        },
+      },
     },
   },
   server: {
@@ -15,7 +31,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+        rewrite: (requestPath) => requestPath.replace(/^\/api/, ''),
       },
       '/socket.io': {
         target: 'http://localhost:3000',

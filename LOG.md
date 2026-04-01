@@ -12,7 +12,7 @@ Running handoff log. Keep short, high-signal notes here: environment quirks, imp
 - Remote: `origin -> https://github.com/Saamoz/city-game.git`
 - Branch: `master`
 - Date: 2026-03-31
-- Stage: **Phase 27 complete. Backend fully implemented. Next: Phase 28 frontend.**
+- Stage: **Phase 28 complete. Frontend map shell and zone rendering live. Next: Phase 29 realtime client sync.**
 
 ---
 
@@ -77,3 +77,23 @@ These were identified as flexibility improvements before frontend work begins:
 - `challenge.kind`, `challenge.config`, and `completionMode` are stored but not dispatched on — all challenges complete identically in V1 (self-report). Branching on completion mode is post-V1.
 - `filterStateForViewer` is an identity function in Territory. The seam is in place for asymmetric visibility modes (hide-and-seek, tag).
 - `.DS_Store` is tracked in git.
+
+---
+
+## Phase 28 Notes
+
+- Frontend Phase 28 is now live in `client/`:
+  - landing flow auto-discovers `GET /api/v1/game/active`
+  - direct `/game/:id` routing is supported without adding a router dependency yet
+  - player registration and team join hit the real backend with cookie auth and generated `Idempotency-Key` headers
+  - map view initializes from `GET /api/v1/game/:id/map-state`
+  - zones render from authoritative snapshot data with owner-team colors
+- `VITE_MAPBOX_ACCESS_TOKEN` is read from the repo-root `.env` via `client/vite.config.ts` (`envDir: '..'`).
+- Mapbox is intentionally split into its own Rollup chunk. The vendor payload is still large, but it is now isolated from the app shell and lazy-loaded behind the game route.
+- Added `@types/geojson` on the client because `mapbox-gl` layer typing pulls `geojson` module types during TypeScript build.
+- Manual local test loop for frontend work:
+  - `pnpm db:up`
+  - `pnpm db:migrate`
+  - `pnpm dev`
+  - open `http://localhost:5173`
+- Useful WebStorm configs remain: `DB Up`, `DB Migrate`, `Dev All`, `Validate`.

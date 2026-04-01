@@ -1,24 +1,57 @@
-import { PLATFORM_NAME } from '@city-game/shared';
+import { Suspense, lazy, useEffect, useState } from 'react';
+import { Landing } from './features/landing/Landing';
+import { navigateToGame, parseRoute } from './lib/routing';
+
+const GameView = lazy(async () => {
+  const module = await import('./features/game/GameView');
+  return { default: module.GameView };
+});
 
 export function App() {
+  const [route, setRoute] = useState(() => parseRoute(window.location.pathname));
+  const [activeGameId, setActiveGameId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleLocationChange = () => {
+      const nextRoute = parseRoute(window.location.pathname);
+      setRoute(nextRoute);
+      setActiveGameId((currentGameId) => (nextRoute.kind === 'game' && currentGameId === nextRoute.gameId ? currentGameId : null));
+    };
+
+    window.addEventListener('popstate', handleLocationChange);
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+    };
+  }, []);
+
+  const handleEnterGame = (gameId: string) => {
+    setActiveGameId(gameId);
+    if (route.kind !== 'game' || route.gameId !== gameId) {
+      navigateToGame(gameId);
+      return;
+    }
+
+    setRoute({ kind: 'game', gameId });
+  };
+
+  if (route.kind === 'game' && route.gameId && activeGameId === route.gameId) {
+    return (
+      <Suspense fallback={<MapViewLoading />}>
+        <GameView gameId={route.gameId} />
+      </Suspense>
+    );
+  }
+
+  return <Landing initialGameId={route.gameId} onEnterGame={handleEnterGame} />;
+}
+
+function MapViewLoading() {
   return (
-    <main className="flex min-h-screen items-center justify-center px-6">
-      <section className="w-full max-w-3xl rounded-3xl border border-white/10 bg-white/5 p-10 shadow-2xl backdrop-blur">
-        <p className="text-sm uppercase tracking-[0.4em] text-signal">
-          Phase 1 Scaffold
-        </p>
-        <h1 className="mt-4 text-5xl font-semibold text-white">Territory</h1>
-        <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-200">
-          Location-based multiplayer game platform scaffolded with React, Vite,
-          Tailwind, Fastify, and shared TypeScript packages.
-        </p>
-        <p className="mt-6 text-sm text-slate-300">
-          Shared constant loaded from workspace package:{' '}
-          <span className="font-mono text-mist">
-            {PLATFORM_NAME}
-          </span>
-        </p>
-      </section>
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
+      <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-5 text-center shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur">
+        <p className="text-xs uppercase tracking-[0.35em] text-cyan-200/80">Loading Map</p>
+        <p className="mt-3 text-sm text-slate-200">Preparing the game view bundle.</p>
+      </div>
     </main>
   );
 }
