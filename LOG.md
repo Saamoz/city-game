@@ -22,11 +22,25 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-31
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 22 admin override endpoints complete
+- Current implementation stage: Phase 23 win condition evaluation complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 23 Progress
+
+- Added Territory win-condition evaluation in server/src/modes/territory/win-conditions.ts for all_zones, zone_majority, score_threshold, and time_limit, with array-order short-circuiting
+- Added server/src/services/win-condition-service.ts so completion flows and background jobs can evaluate and end games through the same lifecycle path
+- Extended server/src/services/game-service.ts with reusable locked lifecycle helpers and system-authored GAME_ENDED events for win-condition endings
+- Updated server/src/modes/territory/routes.ts so successful completions now trigger post-commit win evaluation and game_ended broadcasts when a condition is met
+- Added server/src/jobs/win-condition.ts and started it from server/src/index.ts for periodic time_limit evaluation
+- Added DB-backed coverage in server/src/services/win-condition-service.test.ts, server/src/jobs/win-condition.test.ts, and server/src/modes/territory/win-condition-routes.test.ts
+- Important implementation note: the evaluator originally used Promise.all() on a single transaction client, which triggered pg deprecation warnings for concurrent queries on one connection; the final version runs those reads sequentially
+- Test note: Fastify inject can observe the HTTP response before the post-commit win-evaluation callback finishes, so route-level assertions should poll the DB for the follow-up game end state rather than assuming it is visible immediately after the 200 response
+
+---
+
 
 ## Phase 22 Progress
 

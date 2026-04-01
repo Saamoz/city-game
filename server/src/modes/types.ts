@@ -6,6 +6,7 @@ import type {
   ResourceDefinition,
   ResourceType,
   ScoreboardEntry,
+  WinCondition,
 } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import type { games } from '../db/schema.js';
@@ -49,6 +50,7 @@ export interface WinCheckResult {
   hasWinner: boolean;
   winnerTeamId?: string | null;
   reason?: string;
+  winCondition?: WinCondition | null;
 }
 
 export interface ModeHandler {
@@ -56,7 +58,7 @@ export interface ModeHandler {
   onGameStart(input: { db: DatabaseClient; game: ModeGameRecord }): Promise<void>;
   onGameEnd(input: { db: DatabaseClient; game: ModeGameRecord }): Promise<void>;
   handleAction(action: ModeActionInput, context: ModeContext): Promise<ModeActionResult>;
-  checkWinCondition(input: { db: DatabaseClient; game: ModeGameRecord }): Promise<WinCheckResult>;
+  checkWinCondition(input: { db: DatabaseClient; game: ModeGameRecord; now?: Date }): Promise<WinCheckResult>;
   registerRoutes(app: FastifyInstance): void;
   getInitialResources(): ModeResourceDefinition[];
   computeScoreboard(input: { db: DatabaseClient; game: ModeGameRecord }): Promise<ScoreboardEntry[]>;

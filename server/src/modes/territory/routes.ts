@@ -10,6 +10,7 @@ import { getModeHandlerForGame } from '../index.js';
 import { buildErrorResponse } from '../../lib/errors.js';
 import { gpsPayloadSchema } from '../../middleware/gps-validation.js';
 import { executeIdempotentMutation } from '../../services/idempotency-service.js';
+import { evaluateConfiguredWinConditions } from '../../services/win-condition-service.js';
 import type { TerritoryPostCommitData } from './handler.js';
 
 const challengeParamsSchema = {
@@ -221,6 +222,24 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
               },
             });
           }
+
+          const winConditionResult = await evaluateConfiguredWinConditions(app.db, app.modeRegistry, {
+            gameId: postCommitData.gameId,
+          });
+
+          if (!winConditionResult.met || !winConditionResult.game || winConditionResult.stateVersion === null) {
+            return;
+          }
+
+          await app.broadcaster.send({
+            gameId: postCommitData.gameId,
+            modeKey: winConditionResult.game.modeKey,
+            eventType: socketServerEventTypes.gameEnded,
+            stateVersion: winConditionResult.stateVersion,
+            payload: {
+              game: winConditionResult.game,
+            },
+          });
         },
       );
     },

@@ -22,6 +22,7 @@ import { claimChallenge } from './claim-service.js';
 import { completeChallenge } from './complete-service.js';
 import { releaseChallenge } from './release-service.js';
 import { territoryRoutes } from './routes.js';
+import { evaluateTerritoryWinCondition } from './win-conditions.js';
 
 const territoryResourceDefinitions: ModeResourceDefinition[] = RESOURCE_TYPE_VALUES.map((resourceType) => ({
   type: resourceType,
@@ -184,11 +185,8 @@ export function createTerritoryModeHandler(): ModeHandler {
         }
       }
     },
-    async checkWinCondition() {
-      return {
-        hasWinner: false,
-        winnerTeamId: null,
-      };
+    async checkWinCondition({ db, game, now }) {
+      return evaluateTerritoryWinCondition(db, game, now ?? new Date());
     },
     registerRoutes(app) {
       app.register(territoryRoutes);

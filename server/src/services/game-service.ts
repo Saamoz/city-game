@@ -1,5 +1,14 @@
 import { eq, sql } from 'drizzle-orm';
-import { eventTypes, errorCodes, type Game, type GameModeKey, type GameStatus } from '@city-game/shared';
+import {
+  eventTypes,
+  errorCodes,
+  type EventActorType,
+  type Game,
+  type GameModeKey,
+  type GameStatus,
+  type JsonObject,
+  type WinCondition,
+} from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { gameEvents, games } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
@@ -11,6 +20,19 @@ export type LifecycleTransition = 'start' | 'pause' | 'resume' | 'end';
 interface TransitionResult {
   game: GameRecord;
   stateVersion: number;
+}
+
+interface TransitionOptions {
+  actorType?: EventActorType;
+  eventMeta?: JsonObject;
+  timestamp?: Date;
+}
+
+export interface WinConditionEndInput {
+  winnerTeamId?: string | null;
+  reason: string;
+  winCondition?: WinCondition | null;
+  now?: Date;
 }
 
 export async function incrementVersion(db: DatabaseClient, gameId: string): Promise<number> {
@@ -40,6 +62,16 @@ export async function getGameById(db: DatabaseClient, gameId: string): Promise<G
   return game;
 }
 
+export async function lockGameById(db: DatabaseClient, gameId: string): Promise<GameRecord> {
+  const [game] = await db.select().from(games).where(eq(games.id, gameId)).limit(1).for('update');
+
+  if (!game) {
+    throw new AppError(errorCodes.gameNotFound);
+  }
+
+  return game;
+}
+
 export async function transitionGameLifecycle(
   db: DatabaseClient,
   registry: ModeRegistry,
@@ -48,57 +80,32 @@ export async function transitionGameLifecycle(
 ): Promise<TransitionResult> {
   return db.transaction(async (tx) => {
     const transactionalDb = tx as unknown as DatabaseClient;
-    const currentGame = await getGameById(transactionalDb, gameId);
-    assertValidTransition(currentGame, transition);
+    const currentGame = await lockGameById(transactionalDb, gameId);
 
-    const modeHandler = registry.get(currentGame.modeKey);
-    const nextTimestamp = new Date();
-    const lifecycleUpdate = buildLifecycleUpdate(currentGame, transition, nextTimestamp);
-
-    const [updatedGame] = await transactionalDb
-      .update(games)
-      .set({
-        ...lifecycleUpdate,
-        updatedAt: nextTimestamp,
-      })
-      .where(eq(games.id, gameId))
-      .returning();
-
-    if (transition === 'start') {
-      await modeHandler.onGameStart({ db: transactionalDb, game: updatedGame });
-    }
-
-    if (transition === 'end') {
-      await modeHandler.onGameEnd({ db: transactionalDb, game: updatedGame });
-    }
-
-    const stateVersion = await incrementVersion(transactionalDb, gameId);
-    const gameForEvent = {
-      ...updatedGame,
-      stateVersion,
-    } satisfies GameRecord;
-
-    await transactionalDb.insert(gameEvents).values({
-      gameId,
-      stateVersion,
-      eventType: getLifecycleEventType(transition),
-      entityType: 'game',
-      entityId: gameId,
+    return applyLifecycleTransition(transactionalDb, registry, currentGame, transition, {
       actorType: 'admin',
-      actorId: null,
-      actorTeamId: null,
-      beforeState: serializeLifecycleState(currentGame),
-      afterState: serializeLifecycleState(gameForEvent),
-      meta: {
+      eventMeta: {
         transition,
-        game: serializeGameRecord(gameForEvent),
       },
     });
+  });
+}
 
-    return {
-      game: gameForEvent,
-      stateVersion,
-    };
+export async function endGameForWinCondition(
+  db: DatabaseClient,
+  registry: ModeRegistry,
+  game: GameRecord,
+  input: WinConditionEndInput,
+): Promise<TransitionResult> {
+  return applyLifecycleTransition(db, registry, game, 'end', {
+    actorType: 'system',
+    eventMeta: {
+      trigger: 'win_condition',
+      reason: input.reason,
+      winnerTeamId: input.winnerTeamId ?? null,
+      winCondition: input.winCondition ?? null,
+    },
+    timestamp: input.now,
   });
 }
 
@@ -120,6 +127,66 @@ export function serializeGameRecord(game: GameRecord): Game {
     endedAt: game.endedAt?.toISOString() ?? null,
     createdAt: game.createdAt.toISOString(),
     updatedAt: game.updatedAt.toISOString(),
+  };
+}
+
+async function applyLifecycleTransition(
+  db: DatabaseClient,
+  registry: ModeRegistry,
+  currentGame: GameRecord,
+  transition: LifecycleTransition,
+  options: TransitionOptions = {},
+): Promise<TransitionResult> {
+  assertValidTransition(currentGame, transition);
+
+  const modeHandler = registry.get(currentGame.modeKey);
+  const nextTimestamp = options.timestamp ?? new Date();
+  const lifecycleUpdate = buildLifecycleUpdate(currentGame, transition, nextTimestamp);
+
+  const [updatedGame] = await db
+    .update(games)
+    .set({
+      ...lifecycleUpdate,
+      updatedAt: nextTimestamp,
+    })
+    .where(eq(games.id, currentGame.id))
+    .returning();
+
+  if (transition === 'start') {
+    await modeHandler.onGameStart({ db, game: updatedGame });
+  }
+
+  if (transition === 'end') {
+    await modeHandler.onGameEnd({ db, game: updatedGame });
+  }
+
+  const stateVersion = await incrementVersion(db, currentGame.id);
+  const gameForEvent = {
+    ...updatedGame,
+    stateVersion,
+  } satisfies GameRecord;
+
+  await db.insert(gameEvents).values({
+    gameId: currentGame.id,
+    stateVersion,
+    eventType: getLifecycleEventType(transition),
+    entityType: 'game',
+    entityId: currentGame.id,
+    actorType: options.actorType ?? 'admin',
+    actorId: null,
+    actorTeamId: null,
+    beforeState: serializeLifecycleState(currentGame),
+    afterState: serializeLifecycleState(gameForEvent),
+    meta: {
+      transition,
+      ...(options.eventMeta ?? {}),
+      game: serializeGameRecord(gameForEvent),
+    },
+  });
+
+  return {
+    game: gameForEvent,
+    stateVersion,
   };
 }
 
