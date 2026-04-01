@@ -509,7 +509,10 @@ describe('player routes', () => {
     });
   });
 
-  it('returns GPS_ERROR_TOO_HIGH when /players/me/location exceeds the max error radius', async () => {
+  it('accepts /players/me/location with high GPS error radius', async () => {
+    // Accuracy enforcement is not the middleware's responsibility. Location updates
+    // record whatever the device reports; accuracy is only checked on claim when
+    // game.settings.require_gps_accuracy is true.
     await seedGame();
     await seedPlayer({ teamId: null, sessionToken: 'bad-accuracy-token' });
     app = await createPlayerTestApp();
@@ -517,7 +520,7 @@ describe('player routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/players/me/location',
-      headers: idempotencyHeaders('player-location-error'),
+      headers: idempotencyHeaders('player-location-high-error'),
       cookies: {
         [SESSION_COOKIE_NAME]: 'bad-accuracy-token',
       },
@@ -529,17 +532,8 @@ describe('player routes', () => {
       },
     });
 
-    expect(response.statusCode).toBe(422);
-    expect(response.json()).toEqual({
-      error: {
-        code: 'GPS_ERROR_TOO_HIGH',
-        message: 'GPS accuracy is too low for this action.',
-        details: {
-          maxErrorMeters: env.gpsMaxErrorMeters,
-          gpsErrorMeters: env.gpsMaxErrorMeters + 1,
-        },
-      },
-    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().gps.gpsErrorMeters).toBe(env.gpsMaxErrorMeters + 1);
   });
 
   async function createPlayerTestApp() {

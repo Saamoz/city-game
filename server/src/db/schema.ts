@@ -90,7 +90,7 @@ export const zones = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     gameId: uuid('game_id').notNull().references(() => games.id),
     name: varchar('name', { length: 255 }).notNull(),
-    geometry: geometryPolygon4326('geometry').notNull(),
+    geometry: geometryGeneric4326('geometry').notNull(),
     centroid: geometryPoint4326('centroid'),
     ownerTeamId: uuid('owner_team_id').references(() => teams.id),
     capturedAt: timestamp('captured_at', { withTimezone: true }),

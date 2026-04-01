@@ -108,6 +108,10 @@ export type GameSettings = JsonObject & {
   location_retention_hours?: number;
   notification_config?: NotificationConfig;
   max_concurrent_claims?: number;
+  claim_timeout_minutes?: number;
+  require_gps_accuracy?: boolean;  // default false. When true, enforces global and per-zone
+                                   // GPS error radius checks on claim. Spatial containment
+                                   // (ST_Covers) always applies regardless of this setting.
 };
 
 export type WinCondition =
@@ -117,7 +121,7 @@ export type WinCondition =
   | { type: 'score_threshold'; target: number };
 
 export type WinConditions = WinCondition[];
-export type ResourceAwardMap = Partial<Record<ResourceType, number>>;
+export type ResourceAwardMap = Partial<Record<string, number>>;
 
 export interface Game {
   id: Uuid;
@@ -168,7 +172,7 @@ export interface Zone {
   id: Uuid;
   gameId: Uuid;
   name: string;
-  geometry: GeoJsonPolygon;
+  geometry: GeoJsonGeometry;
   centroid: GeoJsonPoint | null;
   ownerTeamId: Uuid | null;
   capturedAt: IsoTimestamp | null;

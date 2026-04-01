@@ -97,7 +97,10 @@ CREATE TABLE games (
                                                 -- change. Included in every broadcast.
   win_condition    JSONB NOT NULL DEFAULT '{}',
   settings         JSONB NOT NULL DEFAULT '{}', -- Platform: location_tracking_enabled,
-                                                --   location_retention_hours, notification_config
+                                                --   location_retention_hours, notification_config,
+                                                --   claim_timeout_minutes (overrides env default),
+                                                --   max_concurrent_claims,
+                                                --   require_gps_accuracy (default false)
                                                 -- Mode keys are mode-defined.
   started_at       TIMESTAMPTZ,
   ended_at         TIMESTAMPTZ,
@@ -149,7 +152,11 @@ CREATE TABLE zones (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   game_id               UUID NOT NULL REFERENCES games(id),
   name                  VARCHAR(255) NOT NULL,
-  geometry              GEOMETRY(Polygon, 4326) NOT NULL,
+  geometry              GEOMETRY(Geometry, 4326) NOT NULL,
+                                                        -- Polygon for area-based modes.
+                                                        -- Point for station/landmark modes (buffer = capture radius circle).
+                                                        -- MultiPolygon for complex areas.
+                                                        -- ST_Buffer and ST_Covers work identically across all types.
   centroid              GEOMETRY(Point, 4326),
   owner_team_id         UUID REFERENCES teams(id),   -- NULL = unclaimed.
   captured_at           TIMESTAMPTZ,
@@ -222,7 +229,10 @@ CREATE TABLE resource_ledger (
   game_id         UUID NOT NULL REFERENCES games(id),
   team_id         UUID NOT NULL REFERENCES teams(id),
   player_id       UUID REFERENCES players(id),   -- NULL = team-level.
-  resource_type   VARCHAR(50) NOT NULL,
+  resource_type   VARCHAR(50) NOT NULL,          -- Free-form string. Territory uses 'points'/'coins'.
+                                                -- Other modes define their own resource type keys.
+                                                -- The award loop processes whatever keys appear in
+                                                -- challenge.scoring — not a fixed enum.
   delta           INTEGER NOT NULL,
   balance_after   INTEGER NOT NULL,
   sequence        BIGINT NOT NULL,                -- Monotonic per balance scope. Immune
@@ -352,7 +362,8 @@ CREATE INDEX idx_location_cleanup ON player_location_samples (game_id, recorded_
 ### Key Spatial Queries
 
 ```sql
--- Player inside zone? (buffered ST_Covers)
+-- Player inside zone? (buffered ST_Covers — works for Polygon and Point geometry alike)
+-- For Point zones, ST_Buffer produces a circle; claim_radius_meters sets its radius.
 SELECT z.id, z.name FROM zones z
 WHERE z.game_id = $1 AND z.is_disabled = FALSE
   AND ST_Covers(
@@ -680,12 +691,17 @@ Full-screen map, bottom sheets, 48px min touch targets (56px for claim/complete)
 
 ## 10. GPS Validation
 
-Trust-based. Short-circuit on first failure:
+Trust-based. The platform assumes players are honest; validation catches technical issues (stale fix, impossible jump) rather than policing behaviour.
 
-1. **Freshness:** `capturedAt` within `GPS_MAX_AGE_SECONDS` (30s).
-2. **Error radius:** `gpsErrorMeters` below zone's `max_gps_error_meters` or global `GPS_MAX_ERROR_METERS` (100m). Higher = more permissive.
-3. **Proximity:** `ST_Covers(ST_Buffer(zone.geometry, buffer), point)`. Buffer = zone `claim_radius_meters` or global `GPS_BUFFER_METERS` (40m).
-4. **Velocity (log only):** > `GPS_MAX_VELOCITY_KMH` (200) → log warning, don't block.
+**Middleware** (applies to all GPS endpoints — always enforced):
+
+1. **Freshness:** `capturedAt` within `GPS_MAX_AGE_SECONDS` (30s). A stale fix is technically unreliable regardless of trust. → `GPS_TOO_OLD`
+2. **Velocity (log only):** > `GPS_MAX_VELOCITY_KMH` (200) → log warning, do not block.
+
+**Claim handler** (applies to `POST /challenges/:id/claim`):
+
+3. **Proximity:** `ST_Covers(ST_Buffer(zone.geometry, buffer), point)`. Buffer = zone `claim_radius_meters` or global `GPS_BUFFER_METERS` (40m). Always enforced — physically reaching the zone is the core game mechanic. → `OUTSIDE_ZONE`
+4. **Error radius** *(opt-in)*: Enforced only when `game.settings.require_gps_accuracy = true`. Checks `gpsErrorMeters` against zone's `max_gps_error_meters`, then global `GPS_MAX_ERROR_METERS` (100m). Default is `false` — players in urban canyons with poor reported accuracy are not blocked if they are physically present. → `GPS_ERROR_TOO_HIGH`
 
 ---
 
@@ -697,7 +713,9 @@ Challenges assigned to zones. Claim-then-complete lifecycle. Completion captures
 
 ### Resources
 
-`points` (team, scoring) and `coins` (team, future: shop). Initialized to 0 per team on game start.
+Territory defines two resource types: `points` (team-level, primary scoring) and `coins` (team-level, reserved for future shop mechanics). Both initialize to 0 per team on game start.
+
+Resource types are mode-defined strings stored in `resource_ledger.resource_type`. Future modes may define their own types (e.g. `energy`, `influence`) without schema changes. The platform resource award loop processes whatever keys appear in `challenge.scoring` — it does not validate against a fixed enum.
 
 ### Win Conditions
 
@@ -939,7 +957,7 @@ GPS_BUFFER_METERS=40
 GPS_MAX_ERROR_METERS=100
 GPS_MAX_AGE_SECONDS=30
 GPS_MAX_VELOCITY_KMH=200
-CLAIM_TIMEOUT_MINUTES=10
+CLAIM_TIMEOUT_MINUTES=10          # Server-wide default. Override per game via game.settings.claim_timeout_minutes
 LOCATION_RETENTION_HOURS=48
 ```
 

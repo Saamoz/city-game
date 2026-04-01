@@ -42,7 +42,8 @@ describe('gps validation middleware', () => {
     await app.close();
   });
 
-  it('rejects GPS payloads whose accuracy is outside the configured threshold', async () => {
+  it('passes GPS payloads with high error radius through to the handler', async () => {
+    // Accuracy enforcement is a game-settings concern (require_gps_accuracy), not middleware.
     const app = buildApp();
 
     app.post(
@@ -58,28 +59,20 @@ describe('gps validation middleware', () => {
       },
     );
 
+    const highErrorMeters = env.gpsMaxErrorMeters + 1;
     const response = await app.inject({
       method: 'POST',
       url: '/gps-check',
       payload: {
         lat: 49.8951,
         lng: -97.1384,
-        gpsErrorMeters: env.gpsMaxErrorMeters + 1,
+        gpsErrorMeters: highErrorMeters,
         capturedAt: new Date().toISOString(),
       },
     });
 
-    expect(response.statusCode).toBe(422);
-    expect(response.json()).toEqual({
-      error: {
-        code: 'GPS_ERROR_TOO_HIGH',
-        message: 'GPS accuracy is too low for this action.',
-        details: {
-          maxErrorMeters: env.gpsMaxErrorMeters,
-          gpsErrorMeters: env.gpsMaxErrorMeters + 1,
-        },
-      },
-    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().gps.gpsErrorMeters).toBe(highErrorMeters);
 
     await app.close();
   });

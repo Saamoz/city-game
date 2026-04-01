@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { GeoJsonPolygon } from '@city-game/shared';
+import type { GeoJsonPoint, GeoJsonPolygon } from '@city-game/shared';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { games, teams, zones } from '../db/schema.js';
@@ -82,6 +82,35 @@ describe('zone routes', () => {
 
     expect(detailResponse.statusCode).toBe(200);
     expect(detailResponse.json().zone.id).toBe(createdZone.id);
+  });
+
+
+  it('creates a point zone with a point centroid and configurable capture radius', async () => {
+    await seedGame();
+    app = await createZoneTestApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/game/${GAME_ID}/zones`,
+      headers: adminHeaders('create-point-zone'),
+      payload: {
+        name: 'Transit Stop',
+        geometry: createPointGeometry(),
+        claimRadiusMeters: 60,
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().zone).toMatchObject({
+      name: 'Transit Stop',
+      claimRadiusMeters: 60,
+      geometry: {
+        type: 'Point',
+      },
+      centroid: {
+        type: 'Point',
+      },
+    });
   });
 
   it('rejects self-intersecting geometry with the PostGIS reason', async () => {
@@ -280,5 +309,12 @@ function createSelfIntersectingPolygon(): GeoJsonPolygon {
   return {
     type: 'Polygon',
     coordinates: [ring],
+  };
+}
+
+function createPointGeometry(lng = -97.1395, lat = 49.8952): GeoJsonPoint {
+  return {
+    type: 'Point',
+    coordinates: [lng, lat],
   };
 }

@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { RESOURCE_TYPE_VALUES, STATE_VERSION_HEADER } from '@city-game/shared';
+import { STATE_VERSION_HEADER, type ResourceType } from '@city-game/shared';
 import { executeIdempotentMutation } from '../services/idempotency-service.js';
 import {
   adminAdjustResources,
@@ -71,7 +71,7 @@ const adjustResourcesBodySchema = {
   properties: {
     gameId: { type: 'string', format: 'uuid' },
     teamId: { type: 'string', format: 'uuid' },
-    resourceType: { type: 'string', enum: [...RESOURCE_TYPE_VALUES] },
+    resourceType: { type: 'string', minLength: 1, maxLength: 50 },
     delta: { type: 'integer' },
     reason: { type: 'string', minLength: 1, maxLength: 100 },
     notes: { type: 'string', minLength: 1, maxLength: 500 },
@@ -215,7 +215,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       const body = request.body as {
         gameId: string;
         teamId: string;
-        resourceType: (typeof RESOURCE_TYPE_VALUES)[number];
+        resourceType: ResourceType;
         delta: number;
         reason?: string;
         notes?: string;

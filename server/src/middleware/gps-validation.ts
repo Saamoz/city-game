@@ -29,7 +29,6 @@ export function registerGpsValidation(app: FastifyInstance): void {
     const gpsPayload = getGpsPayloadFromBody(request.body);
 
     assertGpsFresh(gpsPayload.capturedAt);
-    assertGpsErrorWithinLimit(gpsPayload.gpsErrorMeters);
     warnOnImpossibleVelocity(request, gpsPayload);
 
     request.gpsPayload = gpsPayload;
@@ -146,17 +145,6 @@ function assertGpsFresh(capturedAt: string): void {
 
   if (!Number.isFinite(capturedAtMs) || ageMs > env.gpsMaxAgeSeconds * MS_PER_SECOND) {
     throw new AppError(errorCodes.gpsTooOld);
-  }
-}
-
-function assertGpsErrorWithinLimit(gpsErrorMeters: number): void {
-  if (gpsErrorMeters > env.gpsMaxErrorMeters) {
-    throw new AppError(errorCodes.gpsErrorTooHigh, {
-      details: {
-        maxErrorMeters: env.gpsMaxErrorMeters,
-        gpsErrorMeters,
-      },
-    });
   }
 }
 

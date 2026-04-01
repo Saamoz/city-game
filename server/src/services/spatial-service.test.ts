@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { GeoJsonPolygon } from '@city-game/shared';
+import type { GeoJsonPoint, GeoJsonPolygon } from '@city-game/shared';
 import { games } from '../db/schema.js';
 import { createTestGame } from '../test/factories.js';
 import { closeTestDatabase, getTestDatabase, resetTestDatabase } from '../test/test-db.js';
@@ -68,6 +68,24 @@ describe('spatial service', () => {
     expect(withinBuffer).toBe(true);
   });
 
+
+  it('treats point zones as bufferable claim areas', async () => {
+    const zone = await createZone(testDatabase.db, {
+      gameId: GAME_ID,
+      name: 'Transit Stop',
+      geometry: createPointGeometry(),
+      claimRadiusMeters: 60,
+    });
+
+    const withinBuffer = await isPointWithinZoneBuffer(testDatabase.db, {
+      zoneId: zone.id,
+      lat: 49.89535,
+      lng: -97.1391,
+    });
+
+    expect(withinBuffer).toBe(true);
+  });
+
   it('reports distances in meters for points outside the zone', async () => {
     const zone = await createZone(testDatabase.db, {
       gameId: GAME_ID,
@@ -97,5 +115,12 @@ function createSquarePolygon(lng = -97.1395, lat = 49.8952, size = 0.0005): GeoJ
   return {
     type: 'Polygon',
     coordinates: [ring],
+  };
+}
+
+function createPointGeometry(lng = -97.1395, lat = 49.8952): GeoJsonPoint {
+  return {
+    type: 'Point',
+    coordinates: [lng, lat],
   };
 }

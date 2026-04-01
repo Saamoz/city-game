@@ -3,8 +3,9 @@ export const resourceTypes = {
   coins: 'coins',
 } as const;
 
-export type ResourceType = (typeof resourceTypes)[keyof typeof resourceTypes];
-export const RESOURCE_TYPE_VALUES = Object.values(resourceTypes) as ResourceType[];
+export type BuiltInResourceType = (typeof resourceTypes)[keyof typeof resourceTypes];
+export type ResourceType = BuiltInResourceType | (string & {});
+export const RESOURCE_TYPE_VALUES = Object.values(resourceTypes) as BuiltInResourceType[];
 
 export interface ResourceDefinition {
   label: string;
@@ -23,4 +24,4 @@ export const resourceDefinitions = {
     scope: 'team',
     description: 'Secondary team currency reserved for future Territory mechanics.',
   },
-} as const satisfies Record<ResourceType, ResourceDefinition>;
+} as const satisfies Record<BuiltInResourceType, ResourceDefinition>;

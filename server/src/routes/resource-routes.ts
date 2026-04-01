@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { RESOURCE_TYPE_VALUES, errorCodes, type ResourceType } from '@city-game/shared';
+import { errorCodes, type ResourceType } from '@city-game/shared';
 import { and, eq } from 'drizzle-orm';
 import { games, teams } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
@@ -27,7 +27,7 @@ const historyQuerySchema = {
   additionalProperties: false,
   properties: {
     limit: { type: 'integer', minimum: 1, maximum: 200 },
-    resourceType: { type: 'string', enum: [...RESOURCE_TYPE_VALUES] },
+    resourceType: { type: 'string', minLength: 1, maxLength: 50 },
   },
 } as const;
 

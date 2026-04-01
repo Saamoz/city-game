@@ -106,6 +106,37 @@ describe('territory claim route', () => {
     ].sort());
   });
 
+
+  it('uses per-game claim_timeout_minutes when present', async () => {
+    await seedGame({
+      settings: {
+        claim_timeout_minutes: 5,
+      },
+    });
+    await seedTeam();
+    await seedPlayer({ sessionToken: 'claim-timeout-session' });
+    const zone = await seedZone();
+    await seedChallenge({ zoneId: zone.id });
+    app = await createTestApp({ db: testDatabase.db });
+
+    const response = await claimRequest({
+      sessionToken: 'claim-timeout-session',
+      actionId: 'claim-timeout',
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const [storedClaim] = await testDatabase.db
+      .select({ claimedAt: challengeClaims.claimedAt, expiresAt: challengeClaims.expiresAt })
+      .from(challengeClaims)
+      .where(eq(challengeClaims.challengeId, CHALLENGE_ID))
+      .limit(1);
+
+    const claimDurationMs = storedClaim!.expiresAt.getTime() - storedClaim!.claimedAt.getTime();
+    expect(claimDurationMs).toBeGreaterThanOrEqual(290_000);
+    expect(claimDurationMs).toBeLessThanOrEqual(310_000);
+  });
+
   it('replays the same successful claim for the same idempotency key', async () => {
     await seedGame();
     await seedTeam();
@@ -223,8 +254,8 @@ describe('territory claim route', () => {
     expect(response.json().error.details.distanceMeters).toBeGreaterThan(0);
   });
 
-  it('applies the zone-specific GPS accuracy threshold after the global middleware check', async () => {
-    await seedGame();
+  it('applies GPS accuracy threshold when require_gps_accuracy is enabled in game settings', async () => {
+    await seedGame({ settings: { require_gps_accuracy: true } });
     await seedTeam();
     await seedPlayer({ sessionToken: 'zone-gps-session' });
     const zone = await seedZone({ maxGpsErrorMeters: 5 });

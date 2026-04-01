@@ -1,5 +1,5 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
-import type { GeoJsonPoint, GeoJsonPolygon, JsonObject, Zone } from '@city-game/shared';
+import type { GeoJsonGeometry, GeoJsonPoint, JsonObject, Zone } from '@city-game/shared';
 import { DEFAULT_GPS_BUFFER_METERS, errorCodes } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { teams, zones } from '../db/schema.js';
@@ -9,7 +9,7 @@ interface ZoneRow {
   id: string;
   gameId: string;
   name: string;
-  geometry: GeoJsonPolygon;
+  geometry: GeoJsonGeometry;
   centroid: GeoJsonPoint | null;
   ownerTeamId: string | null;
   capturedAt: Date | null;
@@ -25,7 +25,7 @@ interface ZoneRow {
 export interface ZoneInput {
   gameId: string;
   name: string;
-  geometry: GeoJsonPolygon;
+  geometry: GeoJsonGeometry;
   ownerTeamId?: string | null;
   pointValue?: number;
   claimRadiusMeters?: number | null;
@@ -36,7 +36,7 @@ export interface ZoneInput {
 
 export interface ZoneUpdateInput {
   name?: string;
-  geometry?: GeoJsonPolygon;
+  geometry?: GeoJsonGeometry;
   ownerTeamId?: string | null;
   pointValue?: number;
   claimRadiusMeters?: number | null;
@@ -65,7 +65,7 @@ export async function createZone(db: DatabaseClient, input: ZoneInput): Promise<
   await validateZoneGeometry(db, input.geometry);
   await assertOwnerTeamInGame(db, input.gameId, input.ownerTeamId ?? null);
 
-  const geometrySql = buildPolygonGeometrySql(input.geometry);
+  const geometrySql = buildGeometrySql(input.geometry);
   const centroidSql = buildCentroidSql(input.geometry);
 
   const [inserted] = await db
@@ -109,7 +109,7 @@ export async function updateZone(db: DatabaseClient, zoneId: string, input: Zone
   };
 
   if (input.geometry) {
-    updateValues.geometry = buildPolygonGeometrySql(input.geometry);
+    updateValues.geometry = buildGeometrySql(input.geometry);
     updateValues.centroid = buildCentroidSql(input.geometry);
   }
 
@@ -221,7 +221,7 @@ export async function importZones(
   db: DatabaseClient,
   gameId: string,
   features: Array<{
-    geometry: GeoJsonPolygon;
+    geometry: GeoJsonGeometry;
     properties?: {
       name?: string;
       ownerTeamId?: string | null;
@@ -254,8 +254,8 @@ export async function importZones(
   return createdZones;
 }
 
-export async function validateZoneGeometry(db: DatabaseClient, geometry: GeoJsonPolygon): Promise<void> {
-  const geometrySql = buildPolygonGeometrySql(geometry);
+export async function validateZoneGeometry(db: DatabaseClient, geometry: GeoJsonGeometry): Promise<void> {
+  const geometrySql = buildGeometrySql(geometry);
   const validationResult = await db.execute<{ isValid: boolean; reason: string }>(sql`
     SELECT
       ST_IsValid(${geometrySql}) AS "isValid",
@@ -292,12 +292,12 @@ async function assertOwnerTeamInGame(
   }
 }
 
-function buildPolygonGeometrySql(geometry: GeoJsonPolygon) {
-  return sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(geometry)}), 4326)::geometry(Polygon,4326)`;
+function buildGeometrySql(geometry: GeoJsonGeometry) {
+  return sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(geometry)}), 4326)::geometry(Geometry,4326)`;
 }
 
-function buildCentroidSql(geometry: GeoJsonPolygon) {
-  return sql`ST_Centroid(${buildPolygonGeometrySql(geometry)})::geometry(Point,4326)`;
+function buildCentroidSql(geometry: GeoJsonGeometry) {
+  return sql`ST_Centroid(${buildGeometrySql(geometry)})::geometry(Point,4326)`;
 }
 
 function buildPointSql(lng: number, lat: number) {
@@ -308,7 +308,7 @@ const zoneSelectFields = {
   id: zones.id,
   gameId: zones.gameId,
   name: zones.name,
-  geometry: sql<GeoJsonPolygon>`ST_AsGeoJSON(${zones.geometry})::json`,
+  geometry: sql<GeoJsonGeometry>`ST_AsGeoJSON(${zones.geometry})::json`,
   centroid: sql<GeoJsonPoint | null>`CASE WHEN ${zones.centroid} IS NULL THEN NULL ELSE ST_AsGeoJSON(${zones.centroid})::json END`,
   ownerTeamId: zones.ownerTeamId,
   capturedAt: zones.capturedAt,

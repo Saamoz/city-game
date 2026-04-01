@@ -15,6 +15,13 @@
       "when": 1774916387214,
       "tag": "0001_tense_calypso",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1775012017557,
+      "tag": "0002_confused_tusk",
+      "breakpoints": true
     }
   ]
 }

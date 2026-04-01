@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { GeoJsonFeatureCollection, GeoJsonPolygon, JsonObject } from '@city-game/shared';
+import type { GeoJsonFeatureCollection, GeoJsonGeometry, GeoJsonPolygon, JsonObject } from '@city-game/shared';
 import { errorCodes } from '@city-game/shared';
 import { eq } from 'drizzle-orm';
 import type { DatabaseClient } from '../db/connection.js';
@@ -16,6 +16,37 @@ import {
   updateZone,
 } from '../services/spatial-service.js';
 
+const pointPositionSchema = {
+  type: 'array',
+  minItems: 2,
+  maxItems: 3,
+  items: { type: 'number' },
+} as const;
+
+const pointSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'coordinates'],
+  properties: {
+    type: { type: 'string', const: 'Point' },
+    coordinates: pointPositionSchema,
+  },
+} as const;
+
+const lineStringSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'coordinates'],
+  properties: {
+    type: { type: 'string', const: 'LineString' },
+    coordinates: {
+      type: 'array',
+      minItems: 2,
+      items: pointPositionSchema,
+    },
+  },
+} as const;
+
 const polygonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -28,15 +59,36 @@ const polygonSchema = {
       items: {
         type: 'array',
         minItems: 4,
+        items: pointPositionSchema,
+      },
+    },
+  },
+} as const;
+
+const multiPolygonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'coordinates'],
+  properties: {
+    type: { type: 'string', const: 'MultiPolygon' },
+    coordinates: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'array',
+        minItems: 1,
         items: {
           type: 'array',
-          minItems: 2,
-          maxItems: 3,
-          items: { type: 'number' },
+          minItems: 4,
+          items: pointPositionSchema,
         },
       },
     },
   },
+} as const;
+
+const geometrySchema = {
+  oneOf: [pointSchema, lineStringSchema, polygonSchema, multiPolygonSchema],
 } as const;
 
 const zoneBodySchema = {
@@ -45,7 +97,7 @@ const zoneBodySchema = {
   required: ['name', 'geometry'],
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 255 },
-    geometry: polygonSchema,
+    geometry: geometrySchema,
     ownerTeamId: { type: 'string', format: 'uuid' },
     pointValue: { type: 'integer', minimum: 1 },
     claimRadiusMeters: { type: 'integer', minimum: 0 },
@@ -63,7 +115,7 @@ const zoneUpdateBodySchema = {
   additionalProperties: false,
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 255 },
-    geometry: polygonSchema,
+    geometry: geometrySchema,
     ownerTeamId: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
     pointValue: { type: 'integer', minimum: 1 },
     claimRadiusMeters: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
@@ -92,7 +144,7 @@ const zoneImportBodySchema = {
         required: ['type', 'geometry'],
         properties: {
           type: { type: 'string', const: 'Feature' },
-          geometry: polygonSchema,
+          geometry: geometrySchema,
           properties: {
             type: 'object',
             additionalProperties: true,
@@ -157,7 +209,7 @@ export const zoneRoutes: FastifyPluginAsync = async (app) => {
 
         const body = request.body as {
           name: string;
-          geometry: GeoJsonPolygon;
+          geometry: GeoJsonGeometry;
           ownerTeamId?: string;
           pointValue?: number;
           claimRadiusMeters?: number;
@@ -201,7 +253,7 @@ export const zoneRoutes: FastifyPluginAsync = async (app) => {
         const { id } = request.params as { id: string };
         await getGameById(db, id);
 
-        const body = request.body as GeoJsonFeatureCollection<GeoJsonPolygon>;
+        const body = request.body as GeoJsonFeatureCollection<GeoJsonGeometry>;
         const zones = await importZones(db, id, body.features);
 
         return {
@@ -286,7 +338,7 @@ export const zoneRoutes: FastifyPluginAsync = async (app) => {
         const { id } = request.params as { id: string };
         const body = request.body as {
           name?: string;
-          geometry?: GeoJsonPolygon;
+          geometry?: GeoJsonGeometry;
           ownerTeamId?: string | null;
           pointValue?: number;
           claimRadiusMeters?: number | null;

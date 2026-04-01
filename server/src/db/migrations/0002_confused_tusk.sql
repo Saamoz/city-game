@@ -1,0 +1,1 @@
+ALTER TABLE "zones" ALTER COLUMN "geometry" SET DATA TYPE geometry(Geometry,4326);

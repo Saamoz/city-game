@@ -1,6 +1,5 @@
 import { and, eq } from 'drizzle-orm';
 import {
-  RESOURCE_TYPE_VALUES,
   errorCodes,
   eventTypes,
   type Challenge,
@@ -143,10 +142,8 @@ export async function completeChallenge(
   const resourcesAwarded = normalizeResourceAwards(updatedChallenge.scoring as ResourceAwardMap);
   const resourceEntries: ResourceLedgerEntry[] = [];
 
-  for (const resourceType of RESOURCE_TYPE_VALUES) {
-    const delta = resourcesAwarded[resourceType] ?? 0;
-
-    if (delta === 0) {
+  for (const [resourceType, delta] of Object.entries(resourcesAwarded)) {
+    if (typeof delta !== 'number' || !Number.isFinite(delta) || delta === 0) {
       continue;
     }
 
@@ -410,9 +407,11 @@ async function expireClaim(
 function normalizeResourceAwards(scoring: ResourceAwardMap): ResourceAwardMap {
   const awards: ResourceAwardMap = {};
 
-  for (const resourceType of RESOURCE_TYPE_VALUES) {
-    const value = scoring[resourceType];
+  if (!scoring || typeof scoring !== 'object' || Array.isArray(scoring)) {
+    return awards;
+  }
 
+  for (const [resourceType, value] of Object.entries(scoring)) {
     if (typeof value === 'number' && Number.isFinite(value) && value !== 0) {
       awards[resourceType] = value;
     }

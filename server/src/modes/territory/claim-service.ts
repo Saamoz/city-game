@@ -75,11 +75,14 @@ export async function claimChallenge(db: DatabaseClient, input: ClaimChallengeIn
     });
   }
 
-  assertZoneGpsAccuracy(zone.maxGpsErrorMeters, input.gpsPayload.gpsErrorMeters);
+  const gameSettings = game.settings as GameSettings;
+  if (gameSettings.require_gps_accuracy) {
+    assertGpsAccuracy(zone.maxGpsErrorMeters, input.gpsPayload.gpsErrorMeters);
+  }
   await assertPlayerInsideZone(db, zone.id, input.gpsPayload.lat, input.gpsPayload.lng, zone.claimRadiusMeters);
-  await assertClaimCapacity(db, input.gameId, input.teamId, game.settings as GameSettings);
+  await assertClaimCapacity(db, input.gameId, input.teamId, gameSettings);
 
-  const claimExpiresAt = new Date(Date.now() + getClaimTimeoutMinutes() * 60_000);
+  const claimExpiresAt = new Date(Date.now() + getClaimTimeoutMinutes(gameSettings) * 60_000);
   const locationAtClaim = sql`ST_SetSRID(ST_MakePoint(${input.gpsPayload.lng}, ${input.gpsPayload.lat}), 4326)`;
 
   let insertedClaim: typeof challengeClaims.$inferSelect;
@@ -195,17 +198,26 @@ function assertChallengeAvailable(status: string): void {
   }
 }
 
-function assertZoneGpsAccuracy(zoneMaxErrorMeters: number | null, gpsErrorMeters: number): void {
-  if (zoneMaxErrorMeters === null || gpsErrorMeters <= zoneMaxErrorMeters) {
-    return;
+function assertGpsAccuracy(zoneMaxErrorMeters: number | null, gpsErrorMeters: number): void {
+  // Global platform threshold
+  if (gpsErrorMeters > env.gpsMaxErrorMeters) {
+    throw new AppError(errorCodes.gpsErrorTooHigh, {
+      details: {
+        maxErrorMeters: env.gpsMaxErrorMeters,
+        gpsErrorMeters,
+      },
+    });
   }
 
-  throw new AppError(errorCodes.gpsErrorTooHigh, {
-    details: {
-      maxErrorMeters: zoneMaxErrorMeters,
-      gpsErrorMeters,
-    },
-  });
+  // Per-zone override (may be stricter or more permissive than the global threshold)
+  if (zoneMaxErrorMeters !== null && gpsErrorMeters > zoneMaxErrorMeters) {
+    throw new AppError(errorCodes.gpsErrorTooHigh, {
+      details: {
+        maxErrorMeters: zoneMaxErrorMeters,
+        gpsErrorMeters,
+      },
+    });
+  }
 }
 
 async function assertPlayerInsideZone(
@@ -280,7 +292,13 @@ function getMaxConcurrentClaims(settings: GameSettings): number {
   return configuredValue as number;
 }
 
-function getClaimTimeoutMinutes(): number {
+function getClaimTimeoutMinutes(settings: GameSettings): number {
+  const configuredValue = settings.claim_timeout_minutes;
+
+  if (Number.isInteger(configuredValue) && (configuredValue as number) > 0) {
+    return configuredValue as number;
+  }
+
   return Number.isFinite(env.claimTimeoutMinutes) && env.claimTimeoutMinutes > 0
     ? env.claimTimeoutMinutes
     : DEFAULT_CLAIM_TIMEOUT_MINUTES;

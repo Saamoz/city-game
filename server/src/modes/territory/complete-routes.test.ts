@@ -64,7 +64,7 @@ describe('territory complete route', () => {
     await seedTeam();
     await seedPlayer({ sessionToken: 'complete-success-session' });
     const zone = await seedZone();
-    await seedChallenge({ zoneId: zone.id, scoring: { points: 10, coins: 2 } });
+    await seedChallenge({ zoneId: zone.id, scoring: { points: 10, coins: 2, energy: 3 } });
     await seedClaimedChallenge({ expiresAt: new Date(Date.now() + 5 * 60_000) });
     app = await createTestApp({ db: testDatabase.db });
 
@@ -99,6 +99,7 @@ describe('territory complete route', () => {
       resourcesAwarded: {
         points: 10,
         coins: 2,
+        energy: 3,
       },
     });
 
@@ -135,17 +136,23 @@ describe('territory complete route', () => {
       .from(resourceLedger)
       .where(eq(resourceLedger.gameId, GAME_ID))
       .orderBy(asc(resourceLedger.sequence));
-    expect(ledgerRows).toEqual([
-      {
-        resourceType: 'points',
-        delta: 10,
-        balanceAfter: 10,
-        reason: 'challenge_completed',
-      },
+    expect([...ledgerRows].sort((left, right) => left.resourceType.localeCompare(right.resourceType))).toEqual([
       {
         resourceType: 'coins',
         delta: 2,
         balanceAfter: 2,
+        reason: 'challenge_completed',
+      },
+      {
+        resourceType: 'energy',
+        delta: 3,
+        balanceAfter: 3,
+        reason: 'challenge_completed',
+      },
+      {
+        resourceType: 'points',
+        delta: 10,
+        balanceAfter: 10,
         reason: 'challenge_completed',
       },
     ]);
@@ -156,11 +163,12 @@ describe('territory complete route', () => {
       .where(eq(gameEvents.gameId, GAME_ID))
       .orderBy(asc(gameEvents.createdAt));
 
-    expect(storedEvents).toHaveLength(6);
-    expect(storedEvents.map((event) => event.stateVersion)).toEqual([1, 1, 1, 1, 1, 1]);
+    expect(storedEvents).toHaveLength(7);
+    expect(storedEvents.map((event) => event.stateVersion)).toEqual([1, 1, 1, 1, 1, 1, 1]);
     expect(storedEvents.map((event) => event.eventType).sort()).toEqual([
       eventTypes.objectiveStateChanged,
       eventTypes.controlStateChanged,
+      eventTypes.resourceChanged,
       eventTypes.resourceChanged,
       eventTypes.resourceChanged,
       eventTypes.challengeCompleted,
