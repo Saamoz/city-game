@@ -97,3 +97,26 @@ These were identified as flexibility improvements before frontend work begins:
   - `pnpm dev`
   - open `http://localhost:5173`
 - Useful WebStorm configs remain: `DB Up`, `DB Migrate`, `Dev All`, `Validate`.
+
+---
+
+## Dev Seed
+
+- Added `pnpm db:seed:dev` and `DB Seed Dev` WebStorm run config.
+- The seed script creates or reuses a single dev Territory game and avoids creating a second active game if one already exists.
+- Seed data includes:
+  - 1 active game centered on Winnipeg
+  - 3 teams with fixed join codes
+  - 5 zones (mix of polygon and point zones)
+  - 5 available challenges
+- Current seeded game:
+  - game id: `42c74617-f5c6-4bf0-b26f-36f3d1cdf5f2`
+  - direct URL: `http://localhost:5173/game/42c74617-f5c6-4bf0-b26f-36f3d1cdf5f2`
+  - join codes: `RED12345`, `BLUE1234`, `GOLD1234`
+- Implementation note: zone creation in the seed script is intentionally sequential inside the transaction to avoid the `pg` deprecation warning triggered by concurrent queries on a single transaction client.
+- Fixed a Phase 28 dev proxy bug: Vite was stripping `/api` before forwarding, which turned `/api/v1/...` into `/v1/...` and made the frontend look like there was no active game. The client proxy now forwards `/api/v1` unchanged to the Fastify server on port 3000.
+- Phase 28 follow-up fixes:
+  - `ZoneLayer` now receives a real map instance via React state. The previous ref-only wiring meant the layer never mounted against a live `mapbox-gl` instance, so zones were not rendered even though the snapshot loaded.
+  - `Leave Map` now suppresses automatic re-entry on the landing screen for the current browser session. The prior behavior immediately re-opened the map because the existing player session already had a team.
+  - Vite proxy bug and map-instance bug together were the two blockers behind the initial frontend test failures.
+- Frontend visual direction is now explicitly pivoting toward the updated spec: warmer parchment/expedition chrome, serif headers, denser information layout, and quieter map backdrop. This is a starting point, not the final visual system.

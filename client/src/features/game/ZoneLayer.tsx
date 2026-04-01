@@ -22,56 +22,59 @@ export function ZoneLayer({ map, snapshot }: ZoneLayerProps) {
     const syncLayers = () => {
       const collection = buildZoneCollection(snapshot);
 
-      const source = map.getSource(ZONE_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
+      let source = map.getSource(ZONE_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
       if (!source) {
         map.addSource(ZONE_SOURCE_ID, {
           type: 'geojson',
           data: collection,
         });
 
+        source = map.getSource(ZONE_SOURCE_ID) as mapboxgl.GeoJSONSource;
+      }
+
+      source.setData(collection);
+
+      if (!map.getLayer(ZONE_FILL_LAYER_ID)) {
         map.addLayer({
           id: ZONE_FILL_LAYER_ID,
           type: 'fill',
           source: ZONE_SOURCE_ID,
-          filter: ['in', ['geometry-type'], ['literal', ['Polygon', 'MultiPolygon']]],
+          filter: ['==', '$type', 'Polygon'],
           paint: {
-            'fill-color': ['coalesce', ['get', 'ownerColor'], '#334155'],
-            'fill-opacity': 0.28,
+            'fill-color': ['coalesce', ['get', 'ownerColor'], '#d8c3a1'],
+            'fill-opacity': 0.38,
           },
         });
+      }
 
+      if (!map.getLayer(ZONE_LINE_LAYER_ID)) {
         map.addLayer({
           id: ZONE_LINE_LAYER_ID,
           type: 'line',
           source: ZONE_SOURCE_ID,
           paint: {
-            'line-color': ['coalesce', ['get', 'ownerColor'], '#94a3b8'],
-            'line-width': [
-              'case',
-              ['==', ['geometry-type'], 'LineString'],
-              4,
-              2,
-            ],
+            'line-color': ['coalesce', ['get', 'ownerColor'], '#8f6f3d'],
+            'line-width': ['case', ['==', '$type', 'LineString'], 4, 3],
             'line-opacity': 0.95,
           },
         });
+      }
 
+      if (!map.getLayer(ZONE_POINT_LAYER_ID)) {
         map.addLayer({
           id: ZONE_POINT_LAYER_ID,
           type: 'circle',
           source: ZONE_SOURCE_ID,
-          filter: ['==', ['geometry-type'], 'Point'],
+          filter: ['==', '$type', 'Point'],
           paint: {
-            'circle-radius': 12,
-            'circle-color': ['coalesce', ['get', 'ownerColor'], '#f8fafc'],
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#020617',
+            'circle-radius': ['interpolate', ['linear'], ['coalesce', ['get', 'claimRadiusMeters'], 80], 40, 8, 120, 18],
+            'circle-color': ['coalesce', ['get', 'ownerColor'], '#f0dcc0'],
+            'circle-opacity': 0.85,
+            'circle-stroke-width': 3,
+            'circle-stroke-color': '#1f2a2f',
           },
         });
-        return;
       }
-
-      source.setData(collection);
     };
 
     if (map.isStyleLoaded()) {

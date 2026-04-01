@@ -5,9 +5,10 @@ import { ApiError, getActiveGame, getCurrentPlayer, getGame, joinTeam, registerP
 interface LandingProps {
   initialGameId: string | null;
   onEnterGame(gameId: string): void;
+  suppressAutoEnter: boolean;
 }
 
-export function Landing({ initialGameId, onEnterGame }: LandingProps) {
+export function Landing({ initialGameId, onEnterGame, suppressAutoEnter }: LandingProps) {
   const [game, setGame] = useState<Game | null>(null);
   const [player, setPlayer] = useState<Player | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
@@ -45,9 +46,13 @@ export function Landing({ initialGameId, onEnterGame }: LandingProps) {
           if (currentPlayer.gameId === resolvedGame.id) {
             setPlayer(currentPlayer);
 
-            if (currentPlayer.teamId) {
+            if (currentPlayer.teamId && !suppressAutoEnter) {
               onEnterGame(resolvedGame.id);
               return;
+            }
+
+            if (currentPlayer.teamId && suppressAutoEnter) {
+              setMessage('This session is already on a team. Use Return to Map when you want to re-enter the live view.');
             }
           } else {
             setPlayer(null);
@@ -90,7 +95,7 @@ export function Landing({ initialGameId, onEnterGame }: LandingProps) {
       cancelled = true;
       controller.abort();
     };
-  }, [initialGameId, onEnterGame]);
+  }, [initialGameId, onEnterGame, suppressAutoEnter]);
 
   async function handleRegister(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -136,35 +141,35 @@ export function Landing({ initialGameId, onEnterGame }: LandingProps) {
     }
   }
 
-  return (
-    <main className="relative min-h-screen overflow-hidden bg-ink px-5 py-6 text-slate-50 sm:px-8 lg:px-10">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(251,146,60,0.18),transparent_35%),radial-gradient(circle_at_80%_20%,rgba(56,189,248,0.14),transparent_28%),linear-gradient(180deg,#08111f_0%,#030712_100%)]" />
-      <div className="pointer-events-none absolute inset-y-0 right-[-10%] w-[36rem] bg-[linear-gradient(135deg,rgba(248,250,252,0.08),rgba(248,250,252,0.01))] blur-3xl" />
+  const hasJoinedTeam = Boolean(player?.teamId);
 
-      <section className="relative mx-auto grid min-h-[calc(100vh-3rem)] max-w-7xl gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="flex flex-col justify-between rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-[0_32px_80px_rgba(0,0,0,0.35)] backdrop-blur sm:p-8 lg:p-10">
+  return (
+    <main className="relative min-h-screen overflow-hidden bg-[#d9e2e1] px-5 py-6 text-[#1f2a2f] sm:px-8 lg:px-10">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(247,237,215,0.9),transparent_30%),radial-gradient(circle_at_90%_15%,rgba(165,187,191,0.32),transparent_24%),linear-gradient(180deg,#dbe3e2_0%,#cdd7d6_100%)]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-28 border-b border-[#c8b48a]/35 bg-[linear-gradient(180deg,rgba(243,236,220,0.96),rgba(243,236,220,0.4),transparent)]" />
+
+      <section className="relative mx-auto grid min-h-[calc(100vh-3rem)] max-w-7xl gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="flex flex-col justify-between rounded-[2rem] border border-[#c8b48a]/55 bg-[#f3ecd8]/92 p-6 shadow-[0_30px_80px_rgba(45,58,62,0.16)] backdrop-blur sm:p-8 lg:p-10">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.45em] text-amber-300/90">
-              Territory
-            </p>
-            <h1 className="mt-5 max-w-3xl font-['Space_Grotesk',system-ui,sans-serif] text-4xl font-semibold leading-tight text-white sm:text-5xl lg:text-6xl">
-              Live city control, built around the game already running.
+            <p className="text-xs font-semibold uppercase tracking-[0.45em] text-[#9b741f]">Territory Field Guide</p>
+            <h1 className="mt-5 max-w-3xl font-[Georgia,Times_New_Roman,serif] text-4xl font-semibold leading-tight text-[#1f2a2f] sm:text-5xl lg:text-6xl">
+              Active operations, team entry, and city control.
             </h1>
-            <p className="mt-6 max-w-2xl text-base leading-7 text-slate-200 sm:text-lg">
-              Discover the active match, register your player, join a team by code, and move straight into the shared map.
+            <p className="mt-5 max-w-2xl text-base leading-7 text-[#415057] sm:text-lg">
+              The app discovers the live match, issues the browser session, and moves a player from briefing into the shared field map. The UI should feel like a field manual, not a landing page.
             </p>
           </div>
 
           <div className="mt-10 grid gap-4 sm:grid-cols-3">
-            <InfoTile label="Discovery" value={game?.name ?? (status === 'loading' ? 'Looking up game' : 'No active game')} />
+            <InfoTile label="Match" value={game?.name ?? (status === 'loading' ? 'Checking active game' : 'No active game')} />
             <InfoTile label="City" value={game?.city ?? 'Unspecified'} />
             <InfoTile label="Status" value={game?.status ?? (status === 'empty' ? 'Idle' : 'Pending')} />
           </div>
         </div>
 
-        <div className="rounded-[2rem] border border-white/10 bg-slate-950/80 p-6 shadow-[0_32px_80px_rgba(0,0,0,0.35)] backdrop-blur sm:p-8">
+        <div className="rounded-[2rem] border border-[#c8b48a]/55 bg-[#24343a]/94 p-6 text-[#f4ead7] shadow-[0_30px_80px_rgba(45,58,62,0.24)] backdrop-blur sm:p-8">
           {status === 'loading' ? (
-            <Panel title="Preparing game access" subtitle="Checking the route, active game, and current session." />
+            <Panel title="Preparing entry" subtitle="Checking the active game, current route, and browser session." />
           ) : null}
 
           {status === 'empty' ? (
@@ -177,12 +182,12 @@ export function Landing({ initialGameId, onEnterGame }: LandingProps) {
 
           {status === 'ready' && game ? (
             <div>
-              <div className="rounded-3xl border border-cyan-300/15 bg-cyan-300/8 p-5">
-                <p className="text-xs uppercase tracking-[0.3em] text-cyan-200/85">Current Game</p>
-                <h2 className="mt-3 font-['Space_Grotesk',system-ui,sans-serif] text-3xl font-semibold text-white">
+              <div className="rounded-[1.75rem] border border-[#d1b26f]/30 bg-[#31464e]/80 p-5">
+                <p className="text-xs uppercase tracking-[0.3em] text-[#d7b35f]">Current Brief</p>
+                <h2 className="mt-3 font-[Georgia,Times_New_Roman,serif] text-3xl font-semibold text-[#f4ead7]">
                   {game.name}
                 </h2>
-                <p className="mt-3 text-sm leading-6 text-slate-300">
+                <p className="mt-3 text-sm leading-6 text-[#d9d1c0]">
                   {game.city ? `${game.city} · ` : ''}
                   {initialGameId ? 'Opened from a direct game link.' : 'Discovered automatically from /game/active.'}
                 </p>
@@ -193,9 +198,9 @@ export function Landing({ initialGameId, onEnterGame }: LandingProps) {
                   <form className="space-y-4" onSubmit={handleRegister}>
                     <SectionTitle title="Register player" subtitle="Creates the session cookie used by the REST and realtime APIs." />
                     <label className="block">
-                      <span className="mb-2 block text-sm font-medium text-slate-200">Display name</span>
+                      <span className="mb-2 block text-sm font-medium text-[#f4ead7]">Display name</span>
                       <input
-                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-amber-300/60 focus:bg-white/10"
+                        className="w-full rounded-2xl border border-[#d1b26f]/25 bg-[#1d2b30] px-4 py-3 text-base text-[#f4ead7] outline-none transition placeholder:text-[#9ca4a4] focus:border-[#d1b26f]/65 focus:bg-[#23353b]"
                         value={registrationName}
                         onChange={(event) => setRegistrationName(event.target.value)}
                         placeholder="Saad"
@@ -204,7 +209,7 @@ export function Landing({ initialGameId, onEnterGame }: LandingProps) {
                       />
                     </label>
                     <button
-                      className="inline-flex w-full items-center justify-center rounded-2xl bg-amber-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
+                      className="inline-flex w-full items-center justify-center rounded-2xl bg-[#d7b35f] px-4 py-3 text-sm font-semibold text-[#1f2a2f] transition hover:bg-[#e0bf74] disabled:cursor-not-allowed disabled:bg-[#516066] disabled:text-[#d0d5d5]"
                       disabled={submitting !== null || registrationName.trim().length === 0}
                       type="submit"
                     >
@@ -212,22 +217,31 @@ export function Landing({ initialGameId, onEnterGame }: LandingProps) {
                     </button>
                   </form>
                 ) : (
-                  <div className="rounded-3xl border border-emerald-300/20 bg-emerald-300/8 p-5">
-                    <SectionTitle title="Player ready" subtitle="Your session cookie is active in this browser." />
-                    <p className="mt-3 text-lg font-semibold text-white">{player.displayName}</p>
-                    <p className="mt-2 text-sm text-slate-300">
-                      {player.teamId ? 'Team already joined. Opening the game view.' : 'Join a team to enter the live map.'}
+                  <div className="rounded-[1.75rem] border border-[#d1b26f]/25 bg-[#31464e]/70 p-5">
+                    <SectionTitle title="Player ready" subtitle="This browser has an active session in the current game." />
+                    <p className="mt-3 text-lg font-semibold text-[#f4ead7]">{player.displayName}</p>
+                    <p className="mt-2 text-sm text-[#d9d1c0]">
+                      {hasJoinedTeam ? 'This session is already assigned to a team.' : 'Join a team to enter the live map.'}
                     </p>
+                    {hasJoinedTeam ? (
+                      <button
+                        className="mt-4 inline-flex items-center justify-center rounded-2xl bg-[#d7b35f] px-4 py-3 text-sm font-semibold text-[#1f2a2f] transition hover:bg-[#e0bf74]"
+                        onClick={() => onEnterGame(game.id)}
+                        type="button"
+                      >
+                        Return to Map
+                      </button>
+                    ) : null}
                   </div>
                 )}
 
-                {player ? (
+                {player && !hasJoinedTeam ? (
                   <form className="space-y-4" onSubmit={handleJoin}>
-                    <SectionTitle title="Join team" subtitle="Uses the join code created in the admin game setup flow." />
+                    <SectionTitle title="Join team" subtitle="Use a fixed join code from the current game setup." />
                     <label className="block">
-                      <span className="mb-2 block text-sm font-medium text-slate-200">Join code</span>
+                      <span className="mb-2 block text-sm font-medium text-[#f4ead7]">Join code</span>
                       <input
-                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-base uppercase tracking-[0.25em] text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300/60 focus:bg-white/10"
+                        className="w-full rounded-2xl border border-[#d1b26f]/25 bg-[#1d2b30] px-4 py-3 text-base uppercase tracking-[0.25em] text-[#f4ead7] outline-none transition placeholder:text-[#9ca4a4] focus:border-[#d1b26f]/65 focus:bg-[#23353b]"
                         value={joinCode}
                         onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
                         placeholder="TEAM1234"
@@ -236,7 +250,7 @@ export function Landing({ initialGameId, onEnterGame }: LandingProps) {
                       />
                     </label>
                     <button
-                      className="inline-flex w-full items-center justify-center rounded-2xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
+                      className="inline-flex w-full items-center justify-center rounded-2xl bg-[#7ca3b1] px-4 py-3 text-sm font-semibold text-[#162229] transition hover:bg-[#91b6c2] disabled:cursor-not-allowed disabled:bg-[#516066] disabled:text-[#d0d5d5]"
                       disabled={submitting !== null || joinCode.trim().length === 0}
                       type="submit"
                     >
@@ -246,7 +260,7 @@ export function Landing({ initialGameId, onEnterGame }: LandingProps) {
                 ) : null}
 
                 {message ? (
-                  <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+                  <div className="rounded-2xl border border-[#d1b26f]/30 bg-[#1d2b30]/78 px-4 py-3 text-sm text-[#f4ead7] shadow-[0_12px_30px_rgba(17,24,28,0.18)]">
                     {message}
                   </div>
                 ) : null}
@@ -261,9 +275,9 @@ export function Landing({ initialGameId, onEnterGame }: LandingProps) {
 
 function InfoTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-slate-950/45 p-4">
-      <p className="text-xs uppercase tracking-[0.28em] text-slate-400">{label}</p>
-      <p className="mt-3 text-lg font-medium text-white">{value}</p>
+    <div className="rounded-[1.5rem] border border-[#c8b48a]/45 bg-[#fff8eb]/65 p-4">
+      <p className="text-xs uppercase tracking-[0.28em] text-[#7a5e2d]">{label}</p>
+      <p className="mt-3 text-lg font-medium text-[#1f2a2f]">{value}</p>
     </div>
   );
 }
@@ -278,15 +292,15 @@ function Panel({
   tone?: 'default' | 'muted' | 'danger';
 }) {
   const toneClassName = tone === 'danger'
-    ? 'border-rose-400/25 bg-rose-400/10'
+    ? 'border-[#bb4d4d]/30 bg-[#642f33]/40'
     : tone === 'muted'
-      ? 'border-slate-400/20 bg-slate-400/10'
-      : 'border-cyan-300/20 bg-cyan-300/10';
+      ? 'border-[#9aa6a5]/20 bg-[#374b51]/45'
+      : 'border-[#d1b26f]/25 bg-[#31464e]/60';
 
   return (
-    <div className={`rounded-3xl border p-6 ${toneClassName}`}>
-      <h2 className="font-['Space_Grotesk',system-ui,sans-serif] text-2xl font-semibold text-white">{title}</h2>
-      <p className="mt-3 text-sm leading-6 text-slate-300">{subtitle}</p>
+    <div className={`rounded-[1.75rem] border p-6 ${toneClassName}`}>
+      <h2 className="font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#f4ead7]">{title}</h2>
+      <p className="mt-3 text-sm leading-6 text-[#d9d1c0]">{subtitle}</p>
     </div>
   );
 }
@@ -294,8 +308,8 @@ function Panel({
 function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div>
-      <h3 className="font-['Space_Grotesk',system-ui,sans-serif] text-xl font-semibold text-white">{title}</h3>
-      <p className="mt-1 text-sm text-slate-400">{subtitle}</p>
+      <h3 className="font-[Georgia,Times_New_Roman,serif] text-xl font-semibold text-[#f4ead7]">{title}</h3>
+      <p className="mt-1 text-sm text-[#cbbfa8]">{subtitle}</p>
     </div>
   );
 }

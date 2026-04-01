@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { Landing } from './features/landing/Landing';
-import { navigateToGame, parseRoute } from './lib/routing';
+import { navigateToGame, navigateToLanding, parseRoute, shouldSuppressAutoEnter } from './lib/routing';
 
 const GameView = lazy(async () => {
   const module = await import('./features/game/GameView');
@@ -10,12 +10,16 @@ const GameView = lazy(async () => {
 export function App() {
   const [route, setRoute] = useState(() => parseRoute(window.location.pathname));
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
+  const [suppressAutoEnter, setSuppressAutoEnter] = useState(() => shouldSuppressAutoEnter());
 
   useEffect(() => {
     const handleLocationChange = () => {
       const nextRoute = parseRoute(window.location.pathname);
       setRoute(nextRoute);
-      setActiveGameId((currentGameId) => (nextRoute.kind === 'game' && currentGameId === nextRoute.gameId ? currentGameId : null));
+      setSuppressAutoEnter(shouldSuppressAutoEnter());
+      setActiveGameId((currentGameId) =>
+        nextRoute.kind === 'game' && currentGameId === nextRoute.gameId ? currentGameId : null,
+      );
     };
 
     window.addEventListener('popstate', handleLocationChange);
@@ -25,7 +29,9 @@ export function App() {
   }, []);
 
   const handleEnterGame = (gameId: string) => {
+    setSuppressAutoEnter(false);
     setActiveGameId(gameId);
+
     if (route.kind !== 'game' || route.gameId !== gameId) {
       navigateToGame(gameId);
       return;
@@ -34,23 +40,36 @@ export function App() {
     setRoute({ kind: 'game', gameId });
   };
 
+  const handleLeaveMap = () => {
+    setSuppressAutoEnter(true);
+    setActiveGameId(null);
+    setRoute({ kind: 'landing', gameId: null });
+    navigateToLanding({ suppressAutoEnter: true });
+  };
+
   if (route.kind === 'game' && route.gameId && activeGameId === route.gameId) {
     return (
       <Suspense fallback={<MapViewLoading />}>
-        <GameView gameId={route.gameId} />
+        <GameView gameId={route.gameId} onLeaveMap={handleLeaveMap} />
       </Suspense>
     );
   }
 
-  return <Landing initialGameId={route.gameId} onEnterGame={handleEnterGame} />;
+  return (
+    <Landing
+      initialGameId={route.gameId}
+      onEnterGame={handleEnterGame}
+      suppressAutoEnter={suppressAutoEnter}
+    />
+  );
 }
 
 function MapViewLoading() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
-      <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-5 text-center shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur">
-        <p className="text-xs uppercase tracking-[0.35em] text-cyan-200/80">Loading Map</p>
-        <p className="mt-3 text-sm text-slate-200">Preparing the game view bundle.</p>
+    <main className="flex min-h-screen items-center justify-center bg-[#20333a] px-6 text-[#f4ead7]">
+      <div className="rounded-[1.75rem] border border-[#d1b26f]/45 bg-[#24343a]/90 px-6 py-5 text-center shadow-[0_24px_60px_rgba(20,26,29,0.3)] backdrop-blur">
+        <p className="text-xs uppercase tracking-[0.35em] text-[#d7b35f]">Loading Map</p>
+        <p className="mt-3 text-sm text-[#f4ead7]/86">Preparing the expedition view.</p>
       </div>
     </main>
   );
