@@ -48,6 +48,14 @@ export const errorDefinitions = {
     statusCode: 404,
     defaultMessage: 'Game not found.',
   },
+  ANNOTATION_NOT_FOUND: {
+    statusCode: 404,
+    defaultMessage: 'Annotation not found.',
+  },
+  ANNOTATION_FORBIDDEN: {
+    statusCode: 403,
+    defaultMessage: 'Annotation action is not allowed.',
+  },
   NOT_ON_TEAM: {
     statusCode: 403,
     defaultMessage: 'Player must join a team first.',
@@ -108,6 +116,8 @@ export const errorCodes = {
   gameNotActive: 'GAME_NOT_ACTIVE',
   invalidGameStateTransition: 'INVALID_GAME_STATE_TRANSITION',
   gameNotFound: 'GAME_NOT_FOUND',
+  annotationNotFound: 'ANNOTATION_NOT_FOUND',
+  annotationForbidden: 'ANNOTATION_FORBIDDEN',
   notOnTeam: 'NOT_ON_TEAM',
   teamNotFound: 'TEAM_NOT_FOUND',
   zoneDisabled: 'ZONE_DISABLED',

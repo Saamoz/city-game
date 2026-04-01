@@ -460,3 +460,21 @@ These are implementation-level decisions, not product/spec changes.
 - Raw `db.execute(sql...)` result rows do not reliably preserve `Date` instances; timeout-job queries need explicit timestamp normalization before building event metadata or notification payloads.
 - Startup/background jobs are easier to test when they accept a controllable clock and expose `runNow()` / `stop()` handles instead of burying timing entirely inside `setInterval`.
 - The same challenge/claim serializers used by HTTP routes are worth reusing in background jobs; otherwise broadcast payloads and event metadata drift from the authoritative API shape.
+
+## Phase 25 Notes
+
+- Phase 25 is complete: added `server/src/routes/annotation-routes.ts` and registered it in `server/src/app.ts`.
+- Added `POST /game/:id/annotations`, `GET /game/:id/annotations`, and `DELETE /annotations/:id`.
+- Player rules are now enforced server-side: players may only create `marker` annotations and may only delete annotations they created.
+- Admin rules are now enforced server-side: admins may create any supported annotation type (`marker`, `line`, `polygon`, `circle`, `note`) and may delete any annotation.
+- Annotation create/delete mutations now append authoritative `ANNOTATION_ADDED` / `ANNOTATION_REMOVED` events, set `X-State-Version`, and broadcast `annotation_added` / `annotation_removed` after commit.
+- `GET /game/:id/annotations` now reuses the same annotation visibility filtering as map-state; admins receive the full list, players receive `all` plus same-team `team` annotations.
+- Exported `filterAnnotationsForViewer()` and `serializeAnnotationRow()` from `server/src/services/state-service.ts` so annotation list responses and map-state snapshots share the same visibility logic.
+- Added `ANNOTATION_NOT_FOUND` and `ANNOTATION_FORBIDDEN` to `shared/src/errors.ts`.
+- Added DB-backed route coverage in `server/src/routes/annotation-routes.test.ts` for player marker creation, player non-marker rejection, admin non-marker creation, visibility filtering, owner delete, and forbidden delete.
+
+### Phase 25 Learnings
+
+- Team-only annotation visibility is currently derived from the creator player's current `teamId`, because the `annotations` table does not store an explicit team owner. That matches the Phase 17 map-state implementation and keeps list/broadcast behavior consistent.
+- Because admin-created annotations do not have a player/team owner in the schema, team-only admin annotations would have no stable audience. The route currently rejects `visibility: 'team'` for admin-created annotations and only allows admin annotations with `visibility: 'all'`.
+- Reusing the map-state annotation serializer/filter seam is better than duplicating visibility rules in each route; otherwise team visibility would drift between `/map-state`, `/game/:id/annotations`, and realtime updates.

@@ -50,7 +50,7 @@ export async function buildGameStateSnapshot(
   const serializedPlayers = playerRows.map((player) => serializePlayerRow(player));
   const viewerPlayer = serializedPlayers.find((player) => player.id == input.playerId) ?? serializePlayerRow(viewerPlayerRow);
   const viewerTeam = viewerPlayer.teamId ? serializedTeams.find((team) => team.id == viewerPlayer.teamId) ?? null : null;
-  const filteredAnnotations = filterAnnotations(annotationRows, playerRows, viewerPlayer.teamId).map((annotation) =>
+  const filteredAnnotations = filterAnnotationsForViewer(annotationRows, playerRows, viewerPlayer.teamId).map((annotation) =>
     serializeAnnotationRow(annotation),
   );
 
@@ -73,7 +73,7 @@ export async function buildGameStateSnapshot(
   });
 }
 
-function filterAnnotations(
+export function filterAnnotationsForViewer(
   rows: Array<typeof annotations.$inferSelect>,
   playerRows: Array<typeof players.$inferSelect>,
   viewerTeamId: string | null,
@@ -161,7 +161,7 @@ function serializeClaimRow(row: typeof challengeClaims.$inferSelect): ChallengeC
   };
 }
 
-function serializeAnnotationRow(row: typeof annotations.$inferSelect): Annotation {
+export function serializeAnnotationRow(row: typeof annotations.$inferSelect): Annotation {
   return {
     id: row.id,
     gameId: row.gameId,
