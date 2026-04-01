@@ -612,7 +612,41 @@ Client updates Zustand immediately. Success → apply authoritative state. Error
 
 ---
 
-## 9. Frontend
+## 9. Design Language
+
+### Principles
+
+1. **Cartographic warmth.** The visual language of navigation, expedition, and discovery. Warm earthy tones, typographic confidence, and a couple of steps toward skeuomorphism — without full material simulation. Think field guide or expedition manual, not fantasy RPG.
+
+2. **Information density over negative space.** Closer to a well-designed reference book or game manual than a tech product landing page. Players mid-game want data, not hero images. Denser layouts, confident hierarchy, comfortable with text.
+
+3. **Functionality first, motifs where they fit.** The map stays a map. Forms stay forms. The adventure aesthetic enhances panels, cards, and chrome but never compromises usability — especially on mobile.
+
+4. **Playful.** Warm expressive typography, satisfying micro-interactions (bounce on zone capture, pulse on active claim, celebration on completion), visual personality in icons and challenge markers. This is a game; it should feel like one.
+
+### Map
+
+Custom Mapbox Standard derivative: faded theme, muted blue-gray roads, minimal labels (no road names, no POI, no admin boundaries), League Mono typeface. Designed as a quiet backdrop so game elements — zone polygons, challenge markers, team colors — own the visual foreground.
+
+Style: `mapbox://styles/saamoz/cmng3j80c004001s831aw5e3b/draft`
+
+### Palette
+
+- **UI chrome**: warm and earthy — cream, aged-paper off-whites, amber accents, deep navy or forest green for contrast.
+- **Team colors**: vivid and user-defined (red, blue, gold, etc.). The UI steps back to let them dominate zone fills and scoreboards.
+- **Map base**: cool and faded. Provides spatial context without competing for attention.
+
+### Typography
+
+Typographic warmth and color over texture. Serif or semi-serif for display and headers to carry heritage character; clean readable type for body and UI controls. The map itself uses League Mono.
+
+### Admin Panel
+
+Utilitarian. The admin panel prioritizes speed and clarity over visual personality. Standard clean UI patterns — the cartographic aesthetic is not required here.
+
+---
+
+## 10. Frontend
 
 ### Pages
 
@@ -689,7 +723,7 @@ Full-screen map, bottom sheets, 48px min touch targets (56px for claim/complete)
 
 ---
 
-## 10. GPS Validation
+## 11. GPS Validation
 
 Trust-based. The platform assumes players are honest; validation catches technical issues (stale fix, impossible jump) rather than policing behaviour.
 
@@ -705,7 +739,7 @@ Trust-based. The platform assumes players are honest; validation catches technic
 
 ---
 
-## 11. Territory Mode
+## 12. Territory Mode
 
 ### Rules
 
@@ -824,7 +858,7 @@ Resource types are mode-defined strings stored in `resource_ledger.resource_type
 
 ---
 
-## 12. Zone Management
+## 13. Zone Management
 
 **Auto-import:** Overpass API for admin boundaries (level 9/10). Preview → select → import.
 
@@ -834,7 +868,7 @@ Resource types are mode-defined strings stored in `resource_ledger.resource_type
 
 ---
 
-## 13. Notifications
+## 14. Notifications
 
 Web Push via `web-push`. Requires HTTPS (Caddy).
 
@@ -844,7 +878,7 @@ Max 1 push/player/60s. Players can mute individual categories.
 
 ---
 
-## 14. Deployment
+## 15. Deployment
 
 ```
 Proxmox LXC (Ubuntu 24.04, 2GB RAM, 2 cores)
@@ -857,7 +891,7 @@ Create LXC → install deps → create DB + PostGIS → clone → install → mi
 
 ---
 
-## 15. Project Structure
+## 16. Project Structure
 
 ```
 territory/
@@ -905,7 +939,7 @@ territory/
 
 ---
 
-## 16. Build Phases
+## 17. Build Phases
 
 ### Phase 1 — Foundation (Week 1–2)
 - Monorepo, Drizzle schema (with circular FK migration), all indexes
@@ -940,7 +974,7 @@ territory/
 
 ---
 
-## 17. Environment Variables
+## 18. Environment Variables
 
 ```bash
 DATABASE_URL=postgresql://territory:password@localhost:5432/territory
@@ -963,7 +997,7 @@ LOCATION_RETENTION_HOURS=48
 
 ---
 
-## 18. Technical Risks
+## 19. Technical Risks
 
 | Risk | Mitigation |
 |---|---|
