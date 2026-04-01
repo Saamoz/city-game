@@ -22,11 +22,20 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-31
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 21 Territory release action complete
+- Current implementation stage: Phase 22 admin override endpoints complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 22 Progress
+
+- Added admin override routes in `server/src/routes/admin-routes.ts` for force-complete, reset, assign-owner, move-team, rebroadcast-state, and resource adjustments
+- Added `server/src/services/admin-override-service.ts` to centralize override mutations and ensure every override logs `ADMIN_OVERRIDE` with `actor_type = 'admin'`
+- Added full-state rebroadcast helpers in `server/src/socket/admin-sync.ts` so admin overrides can push authoritative `game_state_sync` snapshots after commit
+- Registered the admin route module in `server/src/app.ts` and covered all override endpoints in `server/src/routes/admin-routes.test.ts`
+
+---
 
 ## Phase 21 Progress
 
