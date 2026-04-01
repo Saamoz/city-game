@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import {
   socketServerEventTypes,
-  type GeoJsonGeometry,
   type GameStateSnapshot,
   type SocketEventPayloadMap,
   type SocketServerEventType,
@@ -14,10 +13,11 @@ import {
   directRealtimeEventTypes,
   joinRealtimeGame,
   leaveRealtimeGame,
-  type GameRealtimeSocket,
 } from '../../lib/realtime';
 import { useGameStore, type RealtimeConnectionStatus } from '../../store/gameStore';
+import { ChallengeDeck } from './ChallengeDeck';
 import { ZoneLayer } from './ZoneLayer';
+import { collectGeometryPositions } from './mapGeometry';
 
 interface GameViewProps {
   gameId: string;
@@ -30,11 +30,12 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const didFitBoundsRef = useRef(false);
-  const socketRef = useRef<GameRealtimeSocket | null>(null);
   const fullSyncAbortRef = useRef<AbortController | null>(null);
   const appliedRealtimeKeysRef = useRef<Map<number, Set<string>>>(new Map());
   const hasConnectedRef = useRef(false);
   const [mapForLayer, setMapForLayer] = useState<mapboxgl.Map | null>(null);
+  const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
+  const [isDeckOpen, setIsDeckOpen] = useState(true);
 
   const snapshot = useGameStore((state) => state.snapshot);
   const status = useGameStore((state) => state.status);
@@ -53,6 +54,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   useEffect(() => {
     const controller = new AbortController();
     setLoading(gameId);
+    setSelectedChallengeId(null);
 
     void getMapState(gameId, controller.signal)
       .then((nextSnapshot) => {
@@ -80,7 +82,6 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     }
 
     const socket = createRealtimeSocket();
-    socketRef.current = socket;
     hasConnectedRef.current = false;
     appliedRealtimeKeysRef.current.clear();
     setConnectionState('connecting', 'Connecting live feed.');
@@ -216,7 +217,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
         return;
       }
 
-      setConnectionState('reconnecting', `Live feed disconnected (${formatSocketReason(reason)}).`);
+      setConnectionState('reconnecting', 'Live feed disconnected (' + formatSocketReason(reason) + ').');
     };
 
     const handleReconnectAttempt = () => {
@@ -224,7 +225,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     };
 
     const handleReconnectError = (error: Error) => {
-      setConnectionState('reconnecting', `Reconnect failed: ${error.message}`);
+      setConnectionState('reconnecting', 'Reconnect failed: ' + error.message);
     };
 
     socket.on('connect', connectToGame);
@@ -257,7 +258,6 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       }
 
       socket.disconnect();
-      socketRef.current = null;
       setConnectionState('idle', null);
     };
   }, [
@@ -314,39 +314,54 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     didFitBoundsRef.current = true;
   }, [snapshot]);
 
+  useEffect(() => {
+    if (!snapshot?.challenges.length) {
+      setSelectedChallengeId(null);
+      return;
+    }
+
+    if (selectedChallengeId && snapshot.challenges.some((challenge) => challenge.id === selectedChallengeId)) {
+      return;
+    }
+
+    const nextChallenge = [...snapshot.challenges].sort(compareChallengeOrder)[0] ?? null;
+    setSelectedChallengeId(nextChallenge?.id ?? null);
+  }, [selectedChallengeId, snapshot]);
+
   const missingToken = mapboxToken.length === 0;
   const team = snapshot?.team ?? null;
-  const teamZoneCounts = useMemo(() => buildTeamZoneCounts(snapshot), [snapshot]);
+  const challengeCounts = useMemo(() => buildChallengeCounts(snapshot), [snapshot]);
+  const controlledZoneCount = useMemo(() => buildControlledZoneCount(snapshot, team?.id ?? null), [snapshot, team?.id]);
 
   return (
     <main className="relative h-screen overflow-hidden bg-[#dfe6e8] text-[#1f2a2f]">
       <div ref={mapContainerRef} className="absolute inset-0" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,234,215,0.26),transparent_28%),linear-gradient(180deg,rgba(223,230,232,0.06),rgba(223,230,232,0.2))]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,234,215,0.16),transparent_28%),linear-gradient(180deg,rgba(223,230,232,0.04),rgba(223,230,232,0.16))]" />
       <ZoneLayer map={mapForLayer} snapshot={snapshot} />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-[linear-gradient(180deg,rgba(243,236,220,0.9),rgba(243,236,220,0))] px-4 pb-10 pt-4 sm:px-6 lg:px-8">
         <div className="pointer-events-auto mx-auto flex max-w-7xl flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f3ecd8]/92 px-5 py-4 shadow-[0_20px_60px_rgba(46,58,62,0.18)] backdrop-blur">
+          <div className="rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] px-5 py-4 shadow-[0_20px_60px_rgba(46,58,62,0.18)]">
             <p className="text-[11px] uppercase tracking-[0.35em] text-[#936718]">Field Brief</p>
             <h1 className="mt-2 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#1f2a2f] sm:text-3xl">
               {snapshot?.game.name ?? 'Loading game'}
             </h1>
             <p className="mt-1 text-sm text-[#44545c]">
               {snapshot?.player?.displayName ?? 'Checking session'}
-              {team ? ` · ${team.name}` : ''}
+              {team ? ' · ' + team.name : ''}
             </p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
-            <StatusCard label="Teams" value={String(snapshot?.teams.length ?? 0)} />
-            <StatusCard label="Zones" value={String(snapshot?.zones.length ?? 0)} />
+            <StatusCard label="Controlled" value={String(controlledZoneCount)} />
+            <StatusCard label="Deck" value={String(challengeCounts.available)} />
             <StatusCard label="Version" value={String(snapshot?.game.stateVersion ?? 0)} />
           </div>
         </div>
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-4 pb-4 sm:px-6 lg:px-8">
-        <div className="pointer-events-auto mx-auto max-w-7xl rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f3ecd8]/92 p-4 shadow-[0_20px_60px_rgba(46,58,62,0.18)] backdrop-blur">
+        <div className="pointer-events-auto mx-auto flex max-w-7xl flex-col gap-3">
           {missingToken ? (
             <Banner title="Mapbox token required" body="Add VITE_MAPBOX_ACCESS_TOKEN to the root .env file, then restart the client." tone="warning" />
           ) : null}
@@ -368,36 +383,47 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           ) : null}
 
           {snapshot ? (
-            <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
-              <div>
-                <p className="text-xs uppercase tracking-[0.28em] text-[#6b7280]">Zone ownership</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {snapshot.teams.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="inline-flex items-center gap-3 rounded-full border border-[#bba06d]/45 bg-[#fff8eb]/90 px-3 py-2 text-sm text-[#1f2a2f]"
-                    >
-                      <span className="h-3 w-3 rounded-full border border-[#24343a]/55" style={{ backgroundColor: entry.color }} />
-                      <span className="font-medium">{entry.name}</span>
-                      <span className="rounded-full bg-[#24343a] px-2 py-0.5 text-xs font-semibold text-[#f4ead7]">
-                        {teamZoneCounts.get(entry.id) ?? 0}
-                      </span>
-                    </div>
-                  ))}
-                  {!snapshot.teams.length ? (
-                    <span className="text-sm text-[#59686f]">No teams configured yet.</span>
-                  ) : null}
+            <section className="rounded-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8]/96 p-4 shadow-[0_22px_60px_rgba(46,58,62,0.18)] backdrop-blur-sm sm:p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">Field Deck</p>
+                  <p className="mt-2 text-sm leading-6 text-[#44545c]">
+                    {challengeCounts.available} ready · {challengeCounts.claimed} claimed · {challengeCounts.completed} complete
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#f2ead6]"
+                    onClick={() => startTransition(() => setIsDeckOpen((value) => !value))}
+                    type="button"
+                  >
+                    {isDeckOpen ? 'Hide Deck' : 'Show Deck'}
+                  </button>
+                  <button
+                    className="rounded-2xl border border-[#29414b] bg-[#24343a] px-4 py-3 text-sm font-medium text-[#f4ead7] transition hover:bg-[#1d2b30]"
+                    onClick={onLeaveMap}
+                    type="button"
+                  >
+                    Back to Lobby
+                  </button>
                 </div>
               </div>
 
-              <button
-                className="rounded-2xl border border-[#29414b] bg-[#24343a] px-4 py-3 text-sm font-medium text-[#f4ead7] transition hover:bg-[#1d2b30]"
-                onClick={onLeaveMap}
-                type="button"
+              <div
+                className={[
+                  'grid transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+                  isDeckOpen
+                    ? 'mt-4 max-h-[28rem] translate-y-0 opacity-100'
+                    : 'pointer-events-none mt-0 max-h-0 translate-y-8 overflow-hidden opacity-0',
+                ].join(' ')}
               >
-                Back to Lobby
-              </button>
-            </div>
+                <ChallengeDeck
+                  challenges={snapshot.challenges}
+                  selectedChallengeId={selectedChallengeId}
+                  onSelectChallenge={setSelectedChallengeId}
+                />
+              </div>
+            </section>
           ) : null}
         </div>
       </div>
@@ -407,7 +433,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
 function StatusCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[1.4rem] border border-[#c9ae6d]/55 bg-[#f3ecd8]/92 px-4 py-3 text-right shadow-[0_20px_60px_rgba(46,58,62,0.18)] backdrop-blur">
+    <div className="rounded-[1.4rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] px-4 py-3 text-right shadow-[0_20px_60px_rgba(46,58,62,0.18)]">
       <p className="text-[11px] uppercase tracking-[0.28em] text-[#7a5e2d]">{label}</p>
       <p className="mt-2 text-2xl font-semibold text-[#1f2a2f]">{value}</p>
     </div>
@@ -430,29 +456,11 @@ function Banner({
       : 'border-[#6e8e95]/35 bg-[#e1edf0] text-[#29414b]';
 
   return (
-    <div className={`rounded-2xl border px-4 py-3 ${toneClassName}`}>
+    <div className={'rounded-2xl border px-4 py-3 ' + toneClassName}>
       <p className="text-sm font-semibold">{title}</p>
       <p className="mt-1 text-sm text-current/85">{body}</p>
     </div>
   );
-}
-
-function buildTeamZoneCounts(snapshot: GameStateSnapshot | null): Map<string, number> {
-  const counts = new Map<string, number>();
-
-  if (!snapshot) {
-    return counts;
-  }
-
-  for (const zone of snapshot.zones) {
-    if (!zone.ownerTeamId) {
-      continue;
-    }
-
-    counts.set(zone.ownerTeamId, (counts.get(zone.ownerTeamId) ?? 0) + 1);
-  }
-
-  return counts;
 }
 
 function getGameViewError(error: unknown): string {
@@ -468,7 +476,7 @@ function getGameViewError(error: unknown): string {
 }
 
 function getBoundsFromSnapshot(snapshot: GameStateSnapshot): mapboxgl.LngLatBoundsLike | null {
-  const positions = snapshot.zones.flatMap((zone) => collectPositions(zone.geometry));
+  const positions = snapshot.zones.flatMap((zone) => collectGeometryPositions(zone.geometry));
 
   if (!positions.length) {
     return null;
@@ -480,19 +488,6 @@ function getBoundsFromSnapshot(snapshot: GameStateSnapshot): mapboxgl.LngLatBoun
   }
 
   return bounds;
-}
-
-function collectPositions(geometry: GeoJsonGeometry): Array<[number, number]> {
-  switch (geometry.type) {
-    case 'Point':
-      return [[geometry.coordinates[0], geometry.coordinates[1]]];
-    case 'LineString':
-      return geometry.coordinates.map((position) => [position[0], position[1]] as [number, number]);
-    case 'Polygon':
-      return geometry.coordinates.flat().map((position) => [position[0], position[1]] as [number, number]);
-    case 'MultiPolygon':
-      return geometry.coordinates.flat(2).map((position) => [position[0], position[1]] as [number, number]);
-  }
 }
 
 function pruneRealtimeKeys(appliedKeys: Map<number, Set<string>>, currentVersion: number): void {
@@ -560,4 +555,48 @@ function formatSocketReason(reason: string): string {
     default:
       return reason;
   }
+}
+
+function buildControlledZoneCount(snapshot: GameStateSnapshot | null, teamId: string | null): number {
+  if (!snapshot || !teamId) {
+    return 0;
+  }
+
+  return snapshot.zones.filter((zone) => zone.ownerTeamId === teamId).length;
+}
+
+function buildChallengeCounts(snapshot: GameStateSnapshot | null): {
+  available: number;
+  claimed: number;
+  completed: number;
+} {
+  if (!snapshot) {
+    return {
+      available: 0,
+      claimed: 0,
+      completed: 0,
+    };
+  }
+
+  return snapshot.challenges.reduce(
+    (counts, challenge) => {
+      counts[challenge.status] += 1;
+      return counts;
+    },
+    {
+      available: 0,
+      claimed: 0,
+      completed: 0,
+    },
+  );
+}
+
+function compareChallengeOrder(left: GameStateSnapshot['challenges'][number], right: GameStateSnapshot['challenges'][number]): number {
+  const statusOrder = { available: 0, claimed: 1, completed: 2 } as const;
+  const byStatus = statusOrder[left.status] - statusOrder[right.status];
+  if (byStatus !== 0) {
+    return byStatus;
+  }
+
+  return left.title.localeCompare(right.title);
 }

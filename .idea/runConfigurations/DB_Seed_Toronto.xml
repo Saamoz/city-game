@@ -1,9 +1,9 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="DB Logs" type="js.build_tools.npm">
+  <configuration default="false" name="DB Seed Toronto" type="js.build_tools.npm">
     <package-json value="$PROJECT_DIR$/package.json" />
     <command value="run" />
     <scripts>
-      <script value="db:logs" />
+      <script value="db:seed:toronto" />
     </scripts>
     <node-interpreter value="wsl://Ubuntu@/home/saamo/.nvm/versions/node/v20.20.2/bin/node" />
     <envs />

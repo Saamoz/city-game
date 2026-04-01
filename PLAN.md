@@ -107,33 +107,37 @@ All backend phases are implemented, tested, and passing. Summary of what exists:
 
 ---
 
-## Phase 30: Frontend — Challenge Markers & Zone Info
+## Phase 30: Frontend — Portable Challenge Deck
 
-**Goal:** Challenge markers, zone info bottom sheet.
+**Goal:** Replace map markers and zone detail with a challenge deck-first play surface.
 
 ### Work
 
-- ChallengeMarkers, ZoneInfoPanel, BottomSheet, distance display
+- Remove challenge pins and zone detail bottom sheet from the main map view
+- Render a compact challenge deck of card-style objectives
+- Keep the map focused on colored zone ownership only
+- Preserve live state sync and lightweight deck selection state
 
 ### Validation
 
-- Markers visible. Tap zone → info. Distance shown. Real-time updates
+- No challenge pins on the map. No zone info sheet. Deck cards render and are selectable. Real-time updates still reconnect correctly
 
 ---
 
-## Phase 31: Frontend — Claim & Complete UI
+## Phase 31: Frontend — Portable Completion UI
 
-**Goal:** Gameplay actions with optimistic UI.
+**Goal:** Complete a selected challenge card against the zone the player is currently in.
 
 ### Work
 
-- ChallengeCard with claim/complete/release, countdown timer, submission forms
+- Card-driven complete flow instead of zone-bound claim markers
+- Selected challenge actions, submission controls, countdown state, and optimistic UI
 - useIdempotentAction, useGeolocation (adaptive intervals)
 - Optimistic updates with rollback
 
 ### Validation
 
-- Claim/complete/release work. Errors show toast + rollback. Double-tap idempotent. GPS adaptive
+- Selecting a card and completing it applies to the player’s current zone. Errors show toast + rollback. Double-tap idempotent. GPS adaptive
 
 ---
 

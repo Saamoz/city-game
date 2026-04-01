@@ -15,7 +15,9 @@
     "db:studio": "drizzle-kit studio --config drizzle.config.ts",
     "db:test:create": "node --import tsx src/db/scripts/create-test-db.ts",
     "db:test:drop": "node --import tsx src/db/scripts/drop-test-db.ts",
-    "db:seed:dev": "node --import tsx src/db/scripts/seed-dev.ts"
+    "db:seed:dev": "node --import tsx src/db/scripts/seed-dev.ts",
+    "db:seed:toronto": "node --import tsx src/db/scripts/seed-toronto.ts",
+    "db:seed:chicago": "node --import tsx src/db/scripts/seed-chicago.ts"
   },
   "dependencies": {
     "@city-game/shared": "workspace:*",

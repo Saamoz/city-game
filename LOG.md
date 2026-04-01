@@ -11,8 +11,8 @@ Running handoff log. Keep short, high-signal notes here: environment quirks, imp
 - Repo: `E:\city game` / WSL: `/mnt/e/city game`
 - Remote: `origin -> https://github.com/Saamoz/city-game.git`
 - Branch: `master`
-- Date: 2026-03-31
-- Stage: **Phase 28 complete. Frontend map shell and zone rendering live. Next: Phase 29 realtime client sync.**
+- Date: 2026-04-01
+- Stage: **Phase 30 in progress. Frontend map view is being simplified around a portable challenge deck instead of map markers and zone detail.**
 
 ---
 
@@ -109,9 +109,7 @@ These were identified as flexibility improvements before frontend work begins:
   - 3 teams with fixed join codes
   - 5 zones (mix of polygon and point zones)
   - 5 available challenges
-- Current seeded game:
-  - game id: `42c74617-f5c6-4bf0-b26f-36f3d1cdf5f2`
-  - direct URL: `http://localhost:5173/game/42c74617-f5c6-4bf0-b26f-36f3d1cdf5f2`
+- Current seeded game: created or reused on demand by `pnpm db:seed:dev`; the game id is intentionally not fixed anymore because completed seeds are replaced with a fresh active game.
   - join codes: `RED12345`, `BLUE1234`, `GOLD1234`
 - Implementation note: zone creation in the seed script is intentionally sequential inside the transaction to avoid the `pg` deprecation warning triggered by concurrent queries on a single transaction client.
 - Fixed a Phase 28 dev proxy bug: Vite was stripping `/api` before forwarding, which turned `/api/v1/...` into `/v1/...` and made the frontend look like there was no active game. The client proxy now forwards `/api/v1` unchanged to the Fastify server on port 3000.
@@ -136,3 +134,20 @@ These were identified as flexibility improvements before frontend work begins:
 - The client keeps a small per-version dedupe map for direct realtime payloads. This prevents duplicate processing during reconnect jitter without dropping legitimate same-version sibling events.
 - Connection state is surfaced in the map UI with explicit `connecting`, `reconnecting`, and `error` banners so manual testing does not depend on browser devtools.
 - `socket.io-client` was added to the client workspace for Phase 29.
+
+---
+
+## Phase 30 Notes
+
+- Product direction changed before Phase 30 stabilized: the first playable Territory draft now uses a **portable challenge deck** instead of challenge markers tied to map locations.
+- Main map view requirements now are:
+  - colored ownership zones only
+  - no challenge pins
+  - no zone detail bottom sheet
+  - compact card-style challenge deck over the map chrome
+- The deck is selectable in the client so Phase 31 can attach completion actions to the chosen card without reintroducing map marker selection.
+- Spec and plan were updated at the same time as the client so future phases build against the new loop rather than the earlier marker-based design.
+- Live state sync remains in place; the Phase 30 pivot is a gameplay/UI change, not a realtime architecture change.
+- Phase 30 follow-up polish: zone fills were desaturated, the separate selected-card summary was removed, the deck became a collapsible dock, explicit Prev/Next deck controls were added, and challenge details moved into a modal instead of permanent inline chrome.
+- WebStorm shared run configs now use native npm run configurations with the WSL Node interpreter instead of shell scripts. The example `dev.xml` is the template; other configs point at root scripts such as `build`, `typecheck`, `db:migrate`, and `validate`.
+- Added city seed scripts for `db:seed:toronto` and `db:seed:chicago`, with matching WebStorm npm run configs. These two scripts are destructive by design: each truncates live game data before seeding its city demo, so run them one at a time.

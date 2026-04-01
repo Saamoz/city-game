@@ -11,11 +11,13 @@ A platform for location-based multiplayer games played across a real city. The p
 
 **Territory**, the first mode: teams physically travel to city zones, complete challenges, and capture territory. A live map updates in real time for all players.
 
+**First playable draft:** challenges are presented as a shared portable deck rather than pinned to map locations. Players move into a zone, choose a card, and the completed card applies to the zone they are currently standing in. Location-bound challenge markers can return later as a more advanced variant.
+
 The architecture supports future modes (scavenger hunt, hide-and-seek, tag, currency bidding) without changes to platform tables or services. Each mode is a pluggable handler.
 
 ### Gameplay Loop (Territory)
 
-Admin creates a game → draws/imports zones → creates challenges → creates teams. Players join via code, open the app, travel to zones, claim and complete challenges to capture territory. Challenges are consumed on completion. Game ends when a win condition is met.
+Admin creates a game → draws/imports zones → creates a limited challenge deck → creates teams. Players join via code, open the app, travel to zones, choose a challenge card, and complete it to capture the zone they are currently in. Challenges are consumed on completion. Game ends when a win condition is met.
 
 ### Future Modes (Not Built in V1)
 
@@ -622,11 +624,11 @@ Client updates Zustand immediately. Success → apply authoritative state. Error
 
 3. **Functionality first, motifs where they fit.** The map stays a map. Forms stay forms. The adventure aesthetic enhances panels, cards, and chrome but never compromises usability — especially on mobile.
 
-4. **Playful.** Warm expressive typography, satisfying micro-interactions (bounce on zone capture, pulse on active claim, celebration on completion), visual personality in icons and challenge markers. This is a game; it should feel like one.
+4. **Playful.** Warm expressive typography, satisfying micro-interactions (bounce on zone capture, pulse on active claim, celebration on completion), visual personality in icons and challenge cards. This is a game; it should feel like one.
 
 ### Map
 
-Custom Mapbox Standard derivative: faded theme, muted blue-gray roads, minimal labels (no road names, no POI, no admin boundaries), League Mono typeface. Designed as a quiet backdrop so game elements — zone polygons, challenge markers, team colors — own the visual foreground.
+Custom Mapbox Standard derivative: faded theme, muted blue-gray roads, minimal labels (no road names, no POI, no admin boundaries), League Mono typeface. Designed as a quiet backdrop so game elements — zone polygons, deck chrome, team colors — own the visual foreground.
 
 Style: `mapbox://styles/saamoz/cmng3j80c004001s831aw5e3b/draft`
 
@@ -666,15 +668,14 @@ Utilitarian. The admin panel prioritizes speed and clarity over visual personali
 ```
 <GameView>
 ├── <MapContainer>              Mapbox GL JS
-│   ├── <ZoneLayer>             Colored polygons
-│   ├── <ChallengeMarkers>      Icons per kind
+│   ├── <ZoneLayer>             Colored polygons only
 │   ├── <PlayerLocationMarker>  Pulsing blue dot
 │   ├── <AnnotationLayer>       Team + all annotations
 │   └── <DistanceTool>          Tap → distance in mi/km
 ├── <GameHUD>
 │   ├── <TeamBanner>            Name, color, resources
-│   ├── <ZoneInfoPanel>         Bottom sheet on zone tap
-│   ├── <ChallengeCard>         Detail + actions
+│   ├── <ChallengeDeck>         Card tray for portable objectives
+│   ├── <SelectedChallenge>     Detail + actions for the chosen card
 │   └── <MiniScoreboard>
 ├── <LiveFeed>
 └── <NotificationToast>
@@ -743,7 +744,7 @@ Trust-based. The platform assumes players are honest; validation catches technic
 
 ### Rules
 
-Challenges assigned to zones. Claim-then-complete lifecycle. Completion captures zone, awards resources, consumes challenge. Claims auto-expire after timeout. Max concurrent claims: configurable (default 1).
+First playable draft: challenges come from a shared portable deck. Players physically enter a zone, choose a card, and complete it against their current zone. Location-pinned challenges can return later as an advanced variant. Completion captures zone, awards resources, consumes challenge. Claims auto-expire after timeout. Max concurrent claims: configurable (default 1).
 
 ### Resources
 

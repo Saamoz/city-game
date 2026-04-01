@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import type { Feature, FeatureCollection, GeoJsonProperties } from 'geojson';
 import mapboxgl from 'mapbox-gl';
-import type { GameStateSnapshot, GeoJsonGeometry, GeoJsonPoint, GeoJsonPolygon, Zone } from '@city-game/shared';
+import type { GameStateSnapshot, GeoJsonGeometry, Zone } from '@city-game/shared';
+import { buildRenderedZoneGeometry } from './mapGeometry';
 
 interface ZoneLayerProps {
   map: mapboxgl.Map | null;
@@ -11,9 +12,9 @@ interface ZoneLayerProps {
 const ZONE_SOURCE_ID = 'zones-source';
 const ZONE_FILL_LAYER_ID = 'zones-fill-layer';
 const ZONE_LINE_LAYER_ID = 'zones-line-layer';
-const DEFAULT_POINT_ZONE_RADIUS_METERS = 80;
-const EARTH_RADIUS_METERS = 6_378_137;
-const CIRCLE_SEGMENTS = 48;
+const NEUTRAL_FILL = '#b8b9b3';
+const NEUTRAL_LINE = '#7d817b';
+const DESATURATED_BASE = '#c9c0af';
 
 export function ZoneLayer({ map, snapshot }: ZoneLayerProps) {
   useEffect(() => {
@@ -43,8 +44,8 @@ export function ZoneLayer({ map, snapshot }: ZoneLayerProps) {
           source: ZONE_SOURCE_ID,
           filter: ['==', '$type', 'Polygon'],
           paint: {
-            'fill-color': ['coalesce', ['get', 'ownerColor'], '#d8c3a1'],
-            'fill-opacity': 0.38,
+            'fill-color': ['coalesce', ['get', 'fillColor'], NEUTRAL_FILL],
+            'fill-opacity': ['coalesce', ['get', 'fillOpacity'], 0.18],
           },
         });
       }
@@ -55,9 +56,9 @@ export function ZoneLayer({ map, snapshot }: ZoneLayerProps) {
           type: 'line',
           source: ZONE_SOURCE_ID,
           paint: {
-            'line-color': ['coalesce', ['get', 'ownerColor'], '#8f6f3d'],
-            'line-width': ['case', ['==', '$type', 'LineString'], 4, 3],
-            'line-opacity': 0.95,
+            'line-color': ['coalesce', ['get', 'lineColor'], NEUTRAL_LINE],
+            'line-width': ['case', ['==', '$type', 'LineString'], 3.5, 2.2],
+            'line-opacity': ['coalesce', ['get', 'lineOpacity'], 0.72],
           },
         });
       }
@@ -72,6 +73,7 @@ export function ZoneLayer({ map, snapshot }: ZoneLayerProps) {
 
     return () => {
       map.off('load', syncLayers);
+      map.getCanvas().style.cursor = '';
     };
   }, [map, snapshot]);
 
@@ -83,84 +85,69 @@ function buildZoneCollection(snapshot: GameStateSnapshot): FeatureCollection<Geo
 
   return {
     type: 'FeatureCollection',
-    features: snapshot.zones.map((zone) => buildZoneFeature(zone, teamColorById.get(zone.ownerTeamId ?? '') ?? null)),
+    features: snapshot.zones.map((zone) => buildZoneFeature(
+      zone,
+      teamColorById.get(zone.ownerTeamId ?? '') ?? null,
+    )),
   };
 }
 
-function buildZoneFeature(zone: Zone, ownerColor: string | null): Feature<GeoJsonGeometry, GeoJsonProperties> {
-  const geometry = buildRenderedZoneGeometry(zone);
+function buildZoneFeature(
+  zone: Zone,
+  ownerColor: string | null,
+): Feature<GeoJsonGeometry, GeoJsonProperties> {
+  const fillColor = ownerColor ? blendHex(ownerColor, DESATURATED_BASE, 0.62) : NEUTRAL_FILL;
+  const lineColor = ownerColor ? blendHex(ownerColor, '#596166', 0.48) : NEUTRAL_LINE;
 
   return {
     type: 'Feature',
     id: zone.id,
-    geometry,
+    geometry: buildRenderedZoneGeometry(zone),
     properties: {
       id: zone.id,
       name: zone.name,
       pointValue: zone.pointValue,
       ownerTeamId: zone.ownerTeamId,
-      ownerColor,
+      fillColor,
+      lineColor,
+      fillOpacity: zone.ownerTeamId ? 0.24 : 0.14,
+      lineOpacity: zone.ownerTeamId ? 0.82 : 0.58,
       isDisabled: zone.isDisabled,
       claimRadiusMeters: zone.claimRadiusMeters,
-      originalGeometryType: zone.geometry.type,
     },
   };
 }
 
-function buildRenderedZoneGeometry(zone: Zone): GeoJsonGeometry {
-  if (zone.geometry.type !== 'Point') {
-    return zone.geometry;
+function blendHex(sourceColor: string, targetColor: string, targetWeight: number): string {
+  const source = parseHexColor(sourceColor);
+  const target = parseHexColor(targetColor);
+
+  if (!source || !target) {
+    return sourceColor;
   }
 
-  return bufferPointToPolygon(zone.geometry, zone.claimRadiusMeters ?? DEFAULT_POINT_ZONE_RADIUS_METERS);
+  const weight = clamp(targetWeight, 0, 1);
+  const mix = source.map((value, index) => Math.round((value * (1 - weight)) + (target[index] * weight)));
+  return '#' + mix.map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
-function bufferPointToPolygon(point: GeoJsonPoint, radiusMeters: number): GeoJsonPolygon {
-  const [lng, lat] = point.coordinates;
-  const lngLatCoordinates: Array<[number, number]> = [];
+function parseHexColor(color: string): [number, number, number] | null {
+  const normalized = color.trim().replace('#', '');
+  const expanded = normalized.length === 3
+    ? normalized.split('').map((part) => part + part).join('')
+    : normalized;
 
-  for (let index = 0; index <= CIRCLE_SEGMENTS; index += 1) {
-    const bearingRadians = (index / CIRCLE_SEGMENTS) * Math.PI * 2;
-    lngLatCoordinates.push(destinationPoint(lng, lat, radiusMeters, bearingRadians));
+  if (!/^[0-9a-fA-F]{6}$/.test(expanded)) {
+    return null;
   }
 
-  return {
-    type: 'Polygon',
-    coordinates: [lngLatCoordinates],
-  };
+  return [
+    Number.parseInt(expanded.slice(0, 2), 16),
+    Number.parseInt(expanded.slice(2, 4), 16),
+    Number.parseInt(expanded.slice(4, 6), 16),
+  ];
 }
 
-function destinationPoint(
-  lngDegrees: number,
-  latDegrees: number,
-  distanceMeters: number,
-  bearingRadians: number,
-): [number, number] {
-  const angularDistance = distanceMeters / EARTH_RADIUS_METERS;
-  const latRadians = toRadians(latDegrees);
-  const lngRadians = toRadians(lngDegrees);
-
-  const nextLat = Math.asin(
-    Math.sin(latRadians) * Math.cos(angularDistance)
-      + Math.cos(latRadians) * Math.sin(angularDistance) * Math.cos(bearingRadians),
-  );
-
-  const nextLng = lngRadians + Math.atan2(
-    Math.sin(bearingRadians) * Math.sin(angularDistance) * Math.cos(latRadians),
-    Math.cos(angularDistance) - Math.sin(latRadians) * Math.sin(nextLat),
-  );
-
-  return [normalizeLongitude(toDegrees(nextLng)), toDegrees(nextLat)];
-}
-
-function toRadians(value: number): number {
-  return (value * Math.PI) / 180;
-}
-
-function toDegrees(value: number): number {
-  return (value * 180) / Math.PI;
-}
-
-function normalizeLongitude(value: number): number {
-  return ((value + 540) % 360) - 180;
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
