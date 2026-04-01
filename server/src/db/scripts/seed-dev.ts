@@ -29,8 +29,8 @@ async function main() {
 
   try {
     const existingSeedGame = await findExistingSeedGame(db);
-    if (existingSeedGame) {
-      await printSummary(db, existingSeedGame.id, 'Existing dev seed found. Reusing it.');
+    if (existingSeedGame?.status === 'active') {
+      await printSummary(db, existingSeedGame.id, 'Existing active dev seed found. Reusing it.');
       return;
     }
 
@@ -173,10 +173,12 @@ async function main() {
 async function findExistingSeedGame(db: DatabaseClient) {
   const allGames = await db.select().from(games);
 
-  return allGames.find((game) => {
-    const settings = (game.settings ?? {}) as Record<string, unknown>;
-    return settings.seed_key === DEV_SEED_KEY;
-  }) ?? null;
+  return allGames
+    .filter((game) => {
+      const settings = (game.settings ?? {}) as Record<string, unknown>;
+      return settings.seed_key === DEV_SEED_KEY;
+    })
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0] ?? null;
 }
 
 async function findActiveGame(db: DatabaseClient) {

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import type { Feature, FeatureCollection, GeoJsonProperties } from 'geojson';
 import mapboxgl from 'mapbox-gl';
-import type { GameStateSnapshot, GeoJsonGeometry, Zone } from '@city-game/shared';
+import type { GameStateSnapshot, GeoJsonGeometry, GeoJsonPoint, GeoJsonPolygon, Zone } from '@city-game/shared';
 
 interface ZoneLayerProps {
   map: mapboxgl.Map | null;
@@ -11,7 +11,9 @@ interface ZoneLayerProps {
 const ZONE_SOURCE_ID = 'zones-source';
 const ZONE_FILL_LAYER_ID = 'zones-fill-layer';
 const ZONE_LINE_LAYER_ID = 'zones-line-layer';
-const ZONE_POINT_LAYER_ID = 'zones-point-layer';
+const DEFAULT_POINT_ZONE_RADIUS_METERS = 80;
+const EARTH_RADIUS_METERS = 6_378_137;
+const CIRCLE_SEGMENTS = 48;
 
 export function ZoneLayer({ map, snapshot }: ZoneLayerProps) {
   useEffect(() => {
@@ -59,22 +61,6 @@ export function ZoneLayer({ map, snapshot }: ZoneLayerProps) {
           },
         });
       }
-
-      if (!map.getLayer(ZONE_POINT_LAYER_ID)) {
-        map.addLayer({
-          id: ZONE_POINT_LAYER_ID,
-          type: 'circle',
-          source: ZONE_SOURCE_ID,
-          filter: ['==', '$type', 'Point'],
-          paint: {
-            'circle-radius': ['interpolate', ['linear'], ['coalesce', ['get', 'claimRadiusMeters'], 80], 40, 8, 120, 18],
-            'circle-color': ['coalesce', ['get', 'ownerColor'], '#f0dcc0'],
-            'circle-opacity': 0.85,
-            'circle-stroke-width': 3,
-            'circle-stroke-color': '#1f2a2f',
-          },
-        });
-      }
     };
 
     if (map.isStyleLoaded()) {
@@ -102,10 +88,12 @@ function buildZoneCollection(snapshot: GameStateSnapshot): FeatureCollection<Geo
 }
 
 function buildZoneFeature(zone: Zone, ownerColor: string | null): Feature<GeoJsonGeometry, GeoJsonProperties> {
+  const geometry = buildRenderedZoneGeometry(zone);
+
   return {
     type: 'Feature',
     id: zone.id,
-    geometry: zone.geometry,
+    geometry,
     properties: {
       id: zone.id,
       name: zone.name,
@@ -114,6 +102,65 @@ function buildZoneFeature(zone: Zone, ownerColor: string | null): Feature<GeoJso
       ownerColor,
       isDisabled: zone.isDisabled,
       claimRadiusMeters: zone.claimRadiusMeters,
+      originalGeometryType: zone.geometry.type,
     },
   };
+}
+
+function buildRenderedZoneGeometry(zone: Zone): GeoJsonGeometry {
+  if (zone.geometry.type !== 'Point') {
+    return zone.geometry;
+  }
+
+  return bufferPointToPolygon(zone.geometry, zone.claimRadiusMeters ?? DEFAULT_POINT_ZONE_RADIUS_METERS);
+}
+
+function bufferPointToPolygon(point: GeoJsonPoint, radiusMeters: number): GeoJsonPolygon {
+  const [lng, lat] = point.coordinates;
+  const lngLatCoordinates: Array<[number, number]> = [];
+
+  for (let index = 0; index <= CIRCLE_SEGMENTS; index += 1) {
+    const bearingRadians = (index / CIRCLE_SEGMENTS) * Math.PI * 2;
+    lngLatCoordinates.push(destinationPoint(lng, lat, radiusMeters, bearingRadians));
+  }
+
+  return {
+    type: 'Polygon',
+    coordinates: [lngLatCoordinates],
+  };
+}
+
+function destinationPoint(
+  lngDegrees: number,
+  latDegrees: number,
+  distanceMeters: number,
+  bearingRadians: number,
+): [number, number] {
+  const angularDistance = distanceMeters / EARTH_RADIUS_METERS;
+  const latRadians = toRadians(latDegrees);
+  const lngRadians = toRadians(lngDegrees);
+
+  const nextLat = Math.asin(
+    Math.sin(latRadians) * Math.cos(angularDistance)
+      + Math.cos(latRadians) * Math.sin(angularDistance) * Math.cos(bearingRadians),
+  );
+
+  const nextLng = lngRadians + Math.atan2(
+    Math.sin(bearingRadians) * Math.sin(angularDistance) * Math.cos(latRadians),
+    Math.cos(angularDistance) - Math.sin(latRadians) * Math.sin(nextLat),
+  );
+
+  return [normalizeLongitude(toDegrees(nextLng)), toDegrees(nextLat)];
+}
+
+function toRadians(value: number): number {
+  return (value * Math.PI) / 180;
+}
+
+function toDegrees(value: number): number {
+  return (value * 180) / Math.PI;
+}
+
+function normalizeLongitude(value: number): number {
+  return ((value + 540) % 360) - 180;
 }

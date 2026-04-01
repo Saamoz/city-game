@@ -195,12 +195,12 @@ export function Landing({ initialGameId, onEnterGame, suppressAutoEnter }: Landi
 
               <div className="mt-6 space-y-4">
                 {!player ? (
-                  <form className="space-y-4" onSubmit={handleRegister}>
+                  <form className="space-y-4 rounded-[1.75rem] border border-[#c8b48a]/55 bg-[#f3ecd8]/96 p-5 shadow-[0_18px_40px_rgba(24,32,36,0.12)]" onSubmit={handleRegister}>
                     <SectionTitle title="Register player" subtitle="Creates the session cookie used by the REST and realtime APIs." />
                     <label className="block">
-                      <span className="mb-2 block text-sm font-medium text-[#f4ead7]">Display name</span>
+                      <span className="mb-2 block text-sm font-medium text-[#24343a]">Display name</span>
                       <input
-                        className="w-full rounded-2xl border border-[#d1b26f]/25 bg-[#1d2b30] px-4 py-3 text-base text-[#f4ead7] outline-none transition placeholder:text-[#9ca4a4] focus:border-[#d1b26f]/65 focus:bg-[#23353b]"
+                        className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-base text-[#1f2a2f] outline-none transition placeholder:text-[#7b8588] focus:border-[#b98a2f] focus:bg-[#fffdf7]"
                         value={registrationName}
                         onChange={(event) => setRegistrationName(event.target.value)}
                         placeholder="Saad"
@@ -217,10 +217,10 @@ export function Landing({ initialGameId, onEnterGame, suppressAutoEnter }: Landi
                     </button>
                   </form>
                 ) : (
-                  <div className="rounded-[1.75rem] border border-[#d1b26f]/25 bg-[#31464e]/70 p-5">
+                  <div className="rounded-[1.75rem] border border-[#c8b48a]/55 bg-[#f3ecd8]/96 p-5 shadow-[0_18px_40px_rgba(24,32,36,0.12)]">
                     <SectionTitle title="Player ready" subtitle="This browser has an active session in the current game." />
-                    <p className="mt-3 text-lg font-semibold text-[#f4ead7]">{player.displayName}</p>
-                    <p className="mt-2 text-sm text-[#d9d1c0]">
+                    <p className="mt-3 text-lg font-semibold text-[#1f2a2f]">{player.displayName}</p>
+                    <p className="mt-2 text-sm text-[#4c5d64]">
                       {hasJoinedTeam ? 'This session is already assigned to a team.' : 'Join a team to enter the live map.'}
                     </p>
                     {hasJoinedTeam ? (
@@ -236,12 +236,12 @@ export function Landing({ initialGameId, onEnterGame, suppressAutoEnter }: Landi
                 )}
 
                 {player && !hasJoinedTeam ? (
-                  <form className="space-y-4" onSubmit={handleJoin}>
+                  <form className="space-y-4 rounded-[1.75rem] border border-[#c8b48a]/55 bg-[#f3ecd8]/96 p-5 shadow-[0_18px_40px_rgba(24,32,36,0.12)]" onSubmit={handleJoin}>
                     <SectionTitle title="Join team" subtitle="Use a fixed join code from the current game setup." />
                     <label className="block">
-                      <span className="mb-2 block text-sm font-medium text-[#f4ead7]">Join code</span>
+                      <span className="mb-2 block text-sm font-medium text-[#24343a]">Join code</span>
                       <input
-                        className="w-full rounded-2xl border border-[#d1b26f]/25 bg-[#1d2b30] px-4 py-3 text-base uppercase tracking-[0.25em] text-[#f4ead7] outline-none transition placeholder:text-[#9ca4a4] focus:border-[#d1b26f]/65 focus:bg-[#23353b]"
+                        className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-base uppercase tracking-[0.25em] text-[#1f2a2f] outline-none transition placeholder:text-[#7b8588] focus:border-[#b98a2f] focus:bg-[#fffdf7]"
                         value={joinCode}
                         onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
                         placeholder="TEAM1234"
@@ -260,7 +260,7 @@ export function Landing({ initialGameId, onEnterGame, suppressAutoEnter }: Landi
                 ) : null}
 
                 {message ? (
-                  <div className="rounded-2xl border border-[#d1b26f]/30 bg-[#1d2b30]/78 px-4 py-3 text-sm text-[#f4ead7] shadow-[0_12px_30px_rgba(17,24,28,0.18)]">
+                  <div className="rounded-2xl border border-[#c8b48a]/55 bg-[#f3ecd8]/96 px-4 py-3 text-sm text-[#24343a] shadow-[0_12px_30px_rgba(24,32,36,0.12)]">
                     {message}
                   </div>
                 ) : null}
@@ -308,8 +308,8 @@ function Panel({
 function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div>
-      <h3 className="font-[Georgia,Times_New_Roman,serif] text-xl font-semibold text-[#f4ead7]">{title}</h3>
-      <p className="mt-1 text-sm text-[#cbbfa8]">{subtitle}</p>
+      <h3 className="font-[Georgia,Times_New_Roman,serif] text-xl font-semibold text-[#1f2a2f]">{title}</h3>
+      <p className="mt-1 text-sm leading-6 text-[#4c5d64]">{subtitle}</p>
     </div>
   );
 }

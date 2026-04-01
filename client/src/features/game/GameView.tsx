@@ -282,6 +282,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       zoom: snapshot.game.defaultZoom,
       pitchWithRotate: false,
       attributionControl: false,
+      performanceMetricsCollection: false,
     });
 
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
