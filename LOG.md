@@ -120,3 +120,19 @@ These were identified as flexibility improvements before frontend work begins:
   - `Leave Map` now suppresses automatic re-entry on the landing screen for the current browser session. The prior behavior immediately re-opened the map because the existing player session already had a team.
   - Vite proxy bug and map-instance bug together were the two blockers behind the initial frontend test failures.
 - Frontend visual direction is now explicitly pivoting toward the updated spec: warmer parchment/expedition chrome, serif headers, denser information layout, and quieter map backdrop. This is a starting point, not the final visual system.
+
+---
+
+## Phase 29 Notes
+
+- Frontend realtime sync is now wired through `socket.io-client` in the game view:
+  - client connects only after the initial `/game/:id/map-state` snapshot succeeds
+  - every socket `connect` re-emits `join_game` with the latest known `stateVersion`
+  - reconnects therefore restore room membership correctly instead of silently staying unsubscribed
+- Client-side sync behavior now follows the platform rule with one important nuance:
+  - delta batches ignore events older than the current version and request a full sync on a version gap
+  - direct socket payloads also force a full sync on a version gap
+  - exact same-version direct payloads are still allowed once per event key because the server may emit multiple sibling realtime events with the same `stateVersion` for a single transaction (for example `challenge_completed` + `zone_captured` + multiple `resource_changed` payloads)
+- The client keeps a small per-version dedupe map for direct realtime payloads. This prevents duplicate processing during reconnect jitter without dropping legitimate same-version sibling events.
+- Connection state is surfaced in the map UI with explicit `connecting`, `reconnecting`, and `error` banners so manual testing does not depend on browser devtools.
+- `socket.io-client` was added to the client workspace for Phase 29.

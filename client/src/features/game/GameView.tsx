@@ -1,8 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
-import type { GeoJsonGeometry, GameStateSnapshot } from '@city-game/shared';
+import {
+  socketServerEventTypes,
+  type GeoJsonGeometry,
+  type GameStateSnapshot,
+  type SocketEventPayloadMap,
+  type SocketServerEventType,
+} from '@city-game/shared';
 import { ApiError, getMapState } from '../../lib/api';
-import { useGameStore } from '../../store/gameStore';
+import {
+  buildRealtimePayloadKey,
+  createRealtimeSocket,
+  directRealtimeEventTypes,
+  joinRealtimeGame,
+  leaveRealtimeGame,
+  type GameRealtimeSocket,
+} from '../../lib/realtime';
+import { useGameStore, type RealtimeConnectionStatus } from '../../store/gameStore';
 import { ZoneLayer } from './ZoneLayer';
 
 interface GameViewProps {
@@ -16,8 +30,25 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const didFitBoundsRef = useRef(false);
+  const socketRef = useRef<GameRealtimeSocket | null>(null);
+  const fullSyncAbortRef = useRef<AbortController | null>(null);
+  const appliedRealtimeKeysRef = useRef<Map<number, Set<string>>>(new Map());
+  const hasConnectedRef = useRef(false);
   const [mapForLayer, setMapForLayer] = useState<mapboxgl.Map | null>(null);
-  const { snapshot, status, errorMessage, setLoading, initializeSnapshot, setError, reset } = useGameStore();
+
+  const snapshot = useGameStore((state) => state.snapshot);
+  const status = useGameStore((state) => state.status);
+  const errorMessage = useGameStore((state) => state.errorMessage);
+  const connectionStatus = useGameStore((state) => state.connectionStatus);
+  const connectionMessage = useGameStore((state) => state.connectionMessage);
+  const setLoading = useGameStore((state) => state.setLoading);
+  const initializeSnapshot = useGameStore((state) => state.initializeSnapshot);
+  const applyRealtimeSync = useGameStore((state) => state.applyRealtimeSync);
+  const applyRealtimeDelta = useGameStore((state) => state.applyRealtimeDelta);
+  const applyRealtimePayload = useGameStore((state) => state.applyRealtimePayload);
+  const setError = useGameStore((state) => state.setError);
+  const setConnectionState = useGameStore((state) => state.setConnectionState);
+  const reset = useGameStore((state) => state.reset);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -28,6 +59,10 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
         initializeSnapshot(gameId, nextSnapshot);
       })
       .catch((error) => {
+        if (isAbortError(error)) {
+          return;
+        }
+
         setError(gameId, getGameViewError(error));
       });
 
@@ -37,6 +72,203 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     };
   }, [gameId, initializeSnapshot, reset, setError, setLoading]);
 
+  const canStartRealtime = status === 'ready' && Boolean(snapshot);
+
+  useEffect(() => {
+    if (!canStartRealtime) {
+      return;
+    }
+
+    const socket = createRealtimeSocket();
+    socketRef.current = socket;
+    hasConnectedRef.current = false;
+    appliedRealtimeKeysRef.current.clear();
+    setConnectionState('connecting', 'Connecting live feed.');
+
+    const requestFullSync = async (message: string) => {
+      fullSyncAbortRef.current?.abort();
+      const controller = new AbortController();
+      fullSyncAbortRef.current = controller;
+      setConnectionState('reconnecting', message);
+
+      try {
+        const nextSnapshot = await getMapState(gameId, controller.signal);
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        applyRealtimeSync(gameId, nextSnapshot);
+        pruneRealtimeKeys(appliedRealtimeKeysRef.current, nextSnapshot.game.stateVersion);
+        setConnectionState(socket.connected ? 'live' : 'reconnecting', socket.connected ? null : message);
+      } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
+
+        setConnectionState('error', getRealtimeErrorMessage(error));
+      }
+    };
+
+    const connectToGame = () => {
+      const currentVersion = useGameStore.getState().snapshot?.game.stateVersion;
+      const isReconnect = hasConnectedRef.current;
+
+      setConnectionState(
+        isReconnect ? 'reconnecting' : 'connecting',
+        isReconnect ? 'Socket reconnected. Catching up live state.' : 'Joining live feed.',
+      );
+
+      joinRealtimeGame(socket, gameId, currentVersion, (response) => {
+        if (!isJoinAckSuccess(response)) {
+          setConnectionState('error', getJoinAckErrorMessage(response));
+          return;
+        }
+
+        hasConnectedRef.current = true;
+        setConnectionState('live', null);
+      });
+    };
+
+    const handleSync = (payload: SocketEventPayloadMap['game_state_sync']) => {
+      if (payload.gameId !== gameId) {
+        return;
+      }
+
+      appliedRealtimeKeysRef.current.clear();
+      applyRealtimeSync(gameId, payload.snapshot);
+      pruneRealtimeKeys(appliedRealtimeKeysRef.current, payload.stateVersion);
+      setConnectionState('live', null);
+    };
+
+    const handleDelta = (payload: SocketEventPayloadMap['game_state_delta']) => {
+      if (payload.gameId !== gameId) {
+        return;
+      }
+
+      if (payload.fullSyncRequired) {
+        void requestFullSync('Live feed fell behind. Refreshing full state.');
+        return;
+      }
+
+      const result = applyRealtimeDelta(gameId, payload.events);
+      if (result === 'gap') {
+        void requestFullSync('Version gap detected. Refreshing full state.');
+        return;
+      }
+
+      if (result === 'applied') {
+        const currentVersion = useGameStore.getState().snapshot?.game.stateVersion ?? payload.stateVersion;
+        pruneRealtimeKeys(appliedRealtimeKeysRef.current, currentVersion);
+        setConnectionState('live', null);
+      }
+    };
+
+    const directHandlers = new Map<SocketServerEventType, (payload: SocketEventPayloadMap[SocketServerEventType]) => void>();
+
+    for (const eventType of directRealtimeEventTypes) {
+      const handler = (payload: SocketEventPayloadMap[typeof eventType]) => {
+        if (payload.gameId !== gameId) {
+          return;
+        }
+
+        const currentVersion = useGameStore.getState().snapshot?.game.stateVersion ?? 0;
+        if (payload.stateVersion < currentVersion) {
+          return;
+        }
+
+        if (payload.stateVersion > currentVersion + 1) {
+          void requestFullSync('Live feed missed updates. Refreshing full state.');
+          return;
+        }
+
+        const payloadKey = buildRealtimePayloadKey(eventType, payload);
+        const versionKeys = appliedRealtimeKeysRef.current.get(payload.stateVersion) ?? new Set<string>();
+        if (versionKeys.has(payloadKey)) {
+          return;
+        }
+
+        const result = applyRealtimePayload(gameId, eventType, payload);
+        if (result !== 'applied') {
+          return;
+        }
+
+        versionKeys.add(payloadKey);
+        appliedRealtimeKeysRef.current.set(payload.stateVersion, versionKeys);
+        const nextVersion = useGameStore.getState().snapshot?.game.stateVersion ?? payload.stateVersion;
+        pruneRealtimeKeys(appliedRealtimeKeysRef.current, nextVersion);
+        setConnectionState('live', null);
+      };
+
+      directHandlers.set(eventType, handler as (payload: SocketEventPayloadMap[SocketServerEventType]) => void);
+      socket.on(eventType, handler);
+    }
+
+    const handleConnectError = (error: Error) => {
+      setConnectionState(
+        socket.active ? 'reconnecting' : 'error',
+        socket.active ? 'Unable to reach the live feed. Retrying.' : error.message || 'Failed to connect to the live feed.',
+      );
+    };
+
+    const handleDisconnect = (reason: string) => {
+      if (reason === 'io client disconnect') {
+        setConnectionState('idle', null);
+        return;
+      }
+
+      setConnectionState('reconnecting', `Live feed disconnected (${formatSocketReason(reason)}).`);
+    };
+
+    const handleReconnectAttempt = () => {
+      setConnectionState('reconnecting', 'Reconnecting live feed.');
+    };
+
+    const handleReconnectError = (error: Error) => {
+      setConnectionState('reconnecting', `Reconnect failed: ${error.message}`);
+    };
+
+    socket.on('connect', connectToGame);
+    socket.on('connect_error', handleConnectError);
+    socket.on('disconnect', handleDisconnect);
+    socket.on(socketServerEventTypes.gameStateSync, handleSync);
+    socket.on(socketServerEventTypes.gameStateDelta, handleDelta);
+    socket.io.on('reconnect_attempt', handleReconnectAttempt);
+    socket.io.on('reconnect_error', handleReconnectError);
+    socket.connect();
+
+    return () => {
+      fullSyncAbortRef.current?.abort();
+      fullSyncAbortRef.current = null;
+      appliedRealtimeKeysRef.current.clear();
+      socket.off('connect', connectToGame);
+      socket.off('connect_error', handleConnectError);
+      socket.off('disconnect', handleDisconnect);
+      socket.off(socketServerEventTypes.gameStateSync, handleSync);
+      socket.off(socketServerEventTypes.gameStateDelta, handleDelta);
+      socket.io.off('reconnect_attempt', handleReconnectAttempt);
+      socket.io.off('reconnect_error', handleReconnectError);
+
+      for (const [eventType, handler] of directHandlers) {
+        socket.off(eventType, handler);
+      }
+
+      if (socket.connected) {
+        leaveRealtimeGame(socket, gameId);
+      }
+
+      socket.disconnect();
+      socketRef.current = null;
+      setConnectionState('idle', null);
+    };
+  }, [
+    canStartRealtime,
+    gameId,
+    applyRealtimeDelta,
+    applyRealtimePayload,
+    applyRealtimeSync,
+    setConnectionState,
+  ]);
+
   useEffect(() => {
     if (!snapshot || !mapContainerRef.current || !mapboxToken || mapRef.current) {
       return;
@@ -45,7 +277,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     mapboxgl.accessToken = mapboxToken;
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
-      style: 'mapbox://styles/mapbox/light-v11',
+      style: 'mapbox://styles/saamoz/cmng3j80c004001s831aw5e3b',
       center: [snapshot.game.centerLng, snapshot.game.centerLat],
       zoom: snapshot.game.defaultZoom,
       pitchWithRotate: false,
@@ -124,6 +356,14 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
           {status === 'error' ? (
             <Banner title="Unable to load map state" body={errorMessage ?? 'The snapshot request failed.'} tone="danger" />
+          ) : null}
+
+          {status === 'ready' && connectionStatus !== 'idle' && connectionStatus !== 'live' ? (
+            <Banner
+              title={getConnectionBannerTitle(connectionStatus)}
+              body={connectionMessage ?? 'The live feed is reconnecting.'}
+              tone={connectionStatus === 'error' ? 'danger' : connectionStatus === 'reconnecting' ? 'warning' : 'default'}
+            />
           ) : null}
 
           {snapshot ? (
@@ -251,5 +491,72 @@ function collectPositions(geometry: GeoJsonGeometry): Array<[number, number]> {
       return geometry.coordinates.flat().map((position) => [position[0], position[1]] as [number, number]);
     case 'MultiPolygon':
       return geometry.coordinates.flat(2).map((position) => [position[0], position[1]] as [number, number]);
+  }
+}
+
+function pruneRealtimeKeys(appliedKeys: Map<number, Set<string>>, currentVersion: number): void {
+  for (const version of appliedKeys.keys()) {
+    if (version < currentVersion) {
+      appliedKeys.delete(version);
+    }
+  }
+}
+
+function getConnectionBannerTitle(status: RealtimeConnectionStatus): string {
+  switch (status) {
+    case 'connecting':
+      return 'Connecting live feed';
+    case 'reconnecting':
+      return 'Reconnecting live feed';
+    case 'error':
+      return 'Live feed offline';
+    default:
+      return 'Live feed status';
+  }
+}
+
+function isJoinAckSuccess(response: unknown): response is { ok: true } {
+  return typeof response === 'object' && response !== null && 'ok' in response && (response as { ok: unknown }).ok === true;
+}
+
+function getJoinAckErrorMessage(response: unknown): string {
+  if (typeof response === 'object' && response !== null && 'error' in response) {
+    const error = (response as { error?: { message?: unknown } }).error;
+    if (error && typeof error.message === 'string') {
+      return error.message;
+    }
+  }
+
+  return 'Failed to join the live feed.';
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function getRealtimeErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return 'Live sync failed.';
+}
+
+function formatSocketReason(reason: string): string {
+  switch (reason) {
+    case 'transport close':
+      return 'transport closed';
+    case 'transport error':
+      return 'transport error';
+    case 'ping timeout':
+      return 'ping timeout';
+    case 'io server disconnect':
+      return 'server closed the connection';
+    default:
+      return reason;
   }
 }
