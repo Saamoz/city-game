@@ -259,6 +259,60 @@ describe('player routes', () => {
     expect(response.json().player.sessionToken).toBeUndefined();
   });
 
+
+  it('stores a web push subscription for the current player', async () => {
+    await seedGame();
+    await seedPlayer({ teamId: null, sessionToken: 'push-subscribe-token' });
+    app = await createPlayerTestApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/push-subscribe',
+      headers: idempotencyHeaders('player-push-subscribe'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'push-subscribe-token',
+      },
+      payload: {
+        endpoint: 'https://push.example/subscriptions/abc',
+        expirationTime: null,
+        keys: {
+          p256dh: 'p256dh-key',
+          auth: 'auth-key',
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      player: {
+        id: PLAYER_ID,
+        pushSubscription: {
+          endpoint: 'https://push.example/subscriptions/abc',
+          expirationTime: null,
+          keys: {
+            p256dh: 'p256dh-key',
+            auth: 'auth-key',
+          },
+        },
+      },
+    });
+
+    const [storedPlayer] = await testDatabase.db
+      .select({ pushSubscription: players.pushSubscription })
+      .from(players)
+      .where(eq(players.id, PLAYER_ID))
+      .limit(1);
+
+    expect(storedPlayer?.pushSubscription).toEqual({
+      endpoint: 'https://push.example/subscriptions/abc',
+      expirationTime: null,
+      keys: {
+        p256dh: 'p256dh-key',
+        auth: 'auth-key',
+      },
+    });
+  });
+
   it('updates the current player location without storing a sample when tracking is disabled', async () => {
     await seedGame();
     await seedPlayer({ teamId: null, sessionToken: 'location-session-token' });

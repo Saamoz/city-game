@@ -13,6 +13,7 @@ import {
   zones,
 } from '../../db/schema.js';
 import { createZone } from '../../services/spatial-service.js';
+import type { NotificationService, TeamNotificationInput } from '../../services/notification-service.js';
 import { createTestApp } from '../../test/create-test-app.js';
 import { createTestChallenge, createTestGame, createTestPlayer, createTestTeam } from '../../test/factories.js';
 import { closeTestDatabase, getTestDatabase, resetTestDatabase } from '../../test/test-db.js';
@@ -24,6 +25,8 @@ const PLAYER_ONE_ID = '33333333-3333-4333-8333-333333333333';
 const PLAYER_TWO_ID = 'bbbbbbbb-3333-4333-8333-bbbbbbbbbbbb';
 const CHALLENGE_ID = '55555555-5555-4555-8555-555555555555';
 const CLAIM_ID = '77777777-7777-4777-8777-777777777777';
+const OUTSIDE_GAME_ID = '99999999-1111-4111-8111-999999999999';
+const OUTSIDE_GAME_TEAM_ID = '99999999-2222-4222-8222-999999999999';
 
 const ZONE_GEOMETRY = {
   type: 'Polygon',
@@ -267,6 +270,67 @@ describe('territory complete route', () => {
     });
   });
 
+
+  it('sends capture notifications to the capturing team and same-game rivals only', async () => {
+    const notifications: TeamNotificationInput[] = [];
+    await seedGame();
+    await seedTeam();
+    await seedTeam({ id: TEAM_TWO_ID, name: 'Other Team', color: '#2563eb', joinCode: 'TEAM9999' });
+    await testDatabase.db.insert(games).values(createTestGame({ id: OUTSIDE_GAME_ID, name: 'Outside Game' }));
+    await testDatabase.db.insert(teams).values(createTestTeam({
+      id: OUTSIDE_GAME_TEAM_ID,
+      gameId: OUTSIDE_GAME_ID,
+      name: 'Outside Team',
+      color: '#16a34a',
+      joinCode: 'TEAM7777',
+    }));
+    await seedPlayer({ sessionToken: 'complete-notify-session' });
+    const zone = await seedZone();
+    await seedChallenge({ zoneId: zone.id, scoring: { points: 5 } });
+    await seedClaimedChallenge({ expiresAt: new Date(Date.now() + 5 * 60_000) });
+    app = await createTestApp({
+      db: testDatabase.db,
+      notificationService: notificationRecorder(notifications),
+    });
+
+    const response = await completeRequest({
+      sessionToken: 'complete-notify-session',
+      actionId: 'complete-notify',
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    await waitFor(async () => notifications.length === 2);
+
+    expect(notifications).toEqual([
+      {
+        gameId: GAME_ID,
+        teamId: TEAM_ONE_ID,
+        title: 'Zone captured',
+        body: 'Your team captured Downtown Zone.',
+        priority: 'high',
+        meta: {
+          zoneId: zone.id,
+          challengeId: CHALLENGE_ID,
+          eventType: 'zone_captured',
+        },
+      },
+      {
+        gameId: GAME_ID,
+        teamId: TEAM_TWO_ID,
+        title: 'Rival zone captured',
+        body: 'Another team captured Downtown Zone.',
+        priority: 'medium',
+        meta: {
+          zoneId: zone.id,
+          challengeId: CHALLENGE_ID,
+          eventType: 'zone_captured',
+        },
+      },
+    ]);
+  });
+
   it('replays the same successful completion for the same idempotency key', async () => {
     await seedGame();
     await seedTeam();
@@ -351,6 +415,31 @@ describe('territory complete route', () => {
       gameId: GAME_ID,
       ...overrides,
     }));
+  }
+
+
+  function notificationRecorder(collected: TeamNotificationInput[]): NotificationService {
+    return {
+      async sendTeamNotification(input) {
+        collected.push(input);
+      },
+    };
+  }
+
+  async function waitFor(check: () => Promise<boolean>, timeoutMs = 2_000): Promise<void> {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      if (await check()) {
+        return;
+      }
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    }
+
+    throw new Error('Timed out waiting for notification side effects.');
   }
 
   async function seedClaimedChallenge(overrides: { expiresAt: Date }) {

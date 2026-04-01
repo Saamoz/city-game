@@ -35,6 +35,25 @@ const joinTeamBodySchema = {
   },
 } as const;
 
+const pushSubscribeBodySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['endpoint', 'expirationTime', 'keys'],
+  properties: {
+    endpoint: { type: 'string', minLength: 1, maxLength: 2000 },
+    expirationTime: { anyOf: [{ type: 'null' }, { type: 'number' }] },
+    keys: {
+      type: 'object',
+      additionalProperties: true,
+      required: ['p256dh', 'auth'],
+      properties: {
+        p256dh: { type: 'string', minLength: 1 },
+        auth: { type: 'string', minLength: 1 },
+      },
+    },
+  },
+} as const;
+
 export const playerRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/game/:id/players',
@@ -133,6 +152,48 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       reply.send({ player: serializePlayer(request.player!) });
+    },
+  );
+
+  app.post(
+    '/players/me/push-subscribe',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        body: pushSubscribeBodySchema,
+      },
+    },
+    async (request, reply) => {
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const body = request.body as {
+          endpoint: string;
+          expirationTime: number | null;
+          keys: { p256dh: string; auth: string; [key: string]: string };
+        };
+
+        const [player] = await db
+          .update(players)
+          .set({
+            pushSubscription: {
+              endpoint: body.endpoint,
+              expirationTime: body.expirationTime,
+              keys: body.keys,
+            },
+          })
+          .where(eq(players.id, request.player!.id))
+          .returning();
+
+        request.player = player;
+
+        return {
+          gameId: player.gameId,
+          playerId: player.id,
+          statusCode: 200,
+          body: {
+            player: serializePlayer(player),
+          },
+        };
+      });
     },
   );
 

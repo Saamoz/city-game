@@ -1,4 +1,5 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
+import { and, eq, ne } from 'drizzle-orm';
 import {
   socketServerEventTypes,
   type Challenge,
@@ -7,6 +8,7 @@ import {
   type JsonObject,
 } from '@city-game/shared';
 import { getModeHandlerForGame } from '../index.js';
+import { teams } from '../../db/schema.js';
 import { buildErrorResponse } from '../../lib/errors.js';
 import { gpsPayloadSchema } from '../../middleware/gps-validation.js';
 import { executeIdempotentMutation } from '../../services/idempotency-service.js';
@@ -223,6 +225,8 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
             });
           }
 
+          await sendZoneCaptureNotifications(app, postCommitData);
+
           const winConditionResult = await evaluateConfiguredWinConditions(app.db, app.modeRegistry, {
             gameId: postCommitData.gameId,
           });
@@ -341,4 +345,43 @@ function isClaimActionBody(value: unknown): value is {
 
 function isTerritoryPostCommitData(value: unknown): value is TerritoryPostCommitData {
   return Boolean(value && typeof value === 'object' && 'type' in value && 'stateVersion' in value && 'gameId' in value);
+}
+
+async function sendZoneCaptureNotifications(app: FastifyInstance, data: Extract<TerritoryPostCommitData, { type: 'challenge_completed' }>) {
+  if (!data.zone) {
+    return;
+  }
+
+  await app.notificationService.sendTeamNotification({
+    gameId: data.gameId,
+    teamId: data.claim.teamId,
+    title: 'Zone captured',
+    body: `Your team captured ${data.zone.name}.`,
+    priority: 'high',
+    meta: {
+      zoneId: data.zone.id,
+      challengeId: data.challenge.id,
+      eventType: 'zone_captured',
+    },
+  });
+
+  const rivalTeams = await app.db
+    .select({ id: teams.id })
+    .from(teams)
+    .where(and(eq(teams.gameId, data.gameId), ne(teams.id, data.claim.teamId)));
+
+  for (const team of rivalTeams) {
+    await app.notificationService.sendTeamNotification({
+      gameId: data.gameId,
+      teamId: team.id,
+      title: 'Rival zone captured',
+      body: `Another team captured ${data.zone.name}.`,
+      priority: 'medium',
+      meta: {
+        zoneId: data.zone.id,
+        challengeId: data.challenge.id,
+        eventType: 'zone_captured',
+      },
+    });
+  }
 }

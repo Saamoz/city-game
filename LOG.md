@@ -22,11 +22,25 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-31
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 24 player location updates complete
+- Current implementation stage: Phase 27 web push notifications complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 27 Progress
+
+- Added real web push delivery in `server/src/services/notification-service.ts` using `web-push`, VAPID configuration, per-player rate limiting, and automatic invalid-subscription cleanup on `404`/`410` responses
+- Added `POST /players/me/push-subscribe` in `server/src/routes/player-routes.ts` so authenticated players can store their browser push subscription through the existing idempotent mutation path
+- Wired notification service construction through `buildApp()` and extended env parsing with `PUSH_RATE_LIMIT_MS` for explicit rate-limit tuning
+- Updated Territory completion post-commit flow so zone capture sends push notifications to the capturing team and same-game rivals
+- Added coverage for subscription storage, push delivery, rate limiting, invalid subscription cleanup, and Territory capture notification fanout
+- Important implementation note: Territory rival-team notifications must be scoped by both `gameId` and `teamId != capturingTeamId`; filtering by team ID alone would leak notifications across separate games
+- Environment note: placeholder or malformed VAPID values should not fail app startup; the notification service now disables push delivery cleanly until valid keys are configured
+- Schema note: `expirationTime` must validate `null` before `number` in the Fastify body schema, otherwise AJV coerces `null` to `0`
+
+---
+
 
 ## Phase 24 Progress
 
