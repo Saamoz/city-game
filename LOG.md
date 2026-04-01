@@ -478,3 +478,19 @@ These are implementation-level decisions, not product/spec changes.
 - Team-only annotation visibility is currently derived from the creator player's current `teamId`, because the `annotations` table does not store an explicit team owner. That matches the Phase 17 map-state implementation and keeps list/broadcast behavior consistent.
 - Because admin-created annotations do not have a player/team owner in the schema, team-only admin annotations would have no stable audience. The route currently rejects `visibility: 'team'` for admin-created annotations and only allows admin annotations with `visibility: 'all'`.
 - Reusing the map-state annotation serializer/filter seam is better than duplicating visibility rules in each route; otherwise team visibility would drift between `/map-state`, `/game/:id/annotations`, and realtime updates.
+
+## Phase 26 Notes
+
+- Phase 26 is complete: added generic scoreboard resolution in `server/src/services/scoreboard-service.ts` and a public `GET /game/:id/scoreboard` route in `server/src/routes/scoreboard-routes.ts`.
+- Registered the new scoreboard route in `server/src/app.ts`.
+- Territory mode now implements `computeScoreboard()` in `server/src/modes/territory/handler.ts`.
+- Territory standings now include every team in the game, even if the team has no owned zones or no ledger rows yet.
+- Ranking is deterministic: sort by `points` descending, then `zoneCount` descending, then `coins` descending, then team name ascending, then team id ascending.
+- Zone counts only include enabled zones with a non-null `owner_team_id`.
+- Added DB-backed route coverage in `server/src/routes/scoreboard-routes.test.ts` for ranking, tiebreaks, and empty-game behavior.
+
+### Phase 26 Learnings
+
+- The mode-level `computeScoreboard()` seam was already in place and is the correct abstraction to preserve for future non-Territory modes; the route should stay mode-agnostic.
+- `points` should drive standings because the shared resource definition already labels it as the primary scoring resource for standings; zone ownership is better treated as a Territory tiebreak than the top-level score.
+- Scoreboards should include zero-balance and zero-zone teams rather than omitting them, otherwise the standings UI would silently hide valid participants until they score.

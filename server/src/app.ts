@@ -14,6 +14,7 @@ import { eventRoutes } from './routes/event-routes.js';
 import { gameRoutes } from './routes/game-routes.js';
 import { playerRoutes } from './routes/player-routes.js';
 import { resourceRoutes } from './routes/resource-routes.js';
+import { scoreboardRoutes } from './routes/scoreboard-routes.js';
 import { stateRoutes } from './routes/state-routes.js';
 import { zoneRoutes } from './routes/zone-routes.js';
 import { createOsmImportService, type OsmImportService } from './services/osm-import-service.js';
@@ -67,6 +68,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.register(gameRoutes, { prefix: '/api/v1' });
   app.register(playerRoutes, { prefix: '/api/v1' });
   app.register(resourceRoutes, { prefix: '/api/v1' });
+  app.register(scoreboardRoutes, { prefix: '/api/v1' });
   app.register(stateRoutes, { prefix: '/api/v1' });
   app.register(zoneRoutes, { prefix: '/api/v1' });
   app.register(challengeRoutes, { prefix: '/api/v1' });
