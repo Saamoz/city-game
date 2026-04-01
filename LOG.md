@@ -22,11 +22,23 @@ If the product direction or implementation plan changes in a major way, update [
 - Current local branch: `master`
 - Date of latest update: 2026-03-31
 - Product goal: location-based multiplayer game platform, with Territory as the first mode
-- Current implementation stage: Phase 23 win condition evaluation complete
+- Current implementation stage: Phase 24 player location updates complete
 
 ---
 
 ## What Has Been Done
+
+## Phase 24 Progress
+
+- Updated server/src/routes/player-routes.ts so POST /players/me/location still updates the player record but now also reports tracking metadata in the response
+- Added server/src/services/player-location-service.ts to centralize location updates, optional player_location_samples inserts, tracking settings parsing, and retention cleanup logic
+- Added server/src/jobs/player-location-cleanup.ts and started it from server/src/index.ts so retained samples are pruned in the background
+- Extended server/src/routes/player-routes.test.ts with tracking-off, tracking-on, and idempotent replay coverage for location updates
+- Added server/src/jobs/player-location-cleanup.test.ts to verify retention cleanup deletes stale samples and keeps recent ones
+- Implementation note: location tracking is controlled by game.settings.location_tracking_enabled, while retention defaults to 24 hours when location_retention_hours is missing or invalid
+
+---
+
 
 ## Phase 23 Progress
 

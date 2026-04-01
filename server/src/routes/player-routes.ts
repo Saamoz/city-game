@@ -7,6 +7,7 @@ import { generateSessionToken, getSerializedSessionCookie } from '../lib/auth.js
 import { AppError } from '../lib/errors.js';
 import { gpsPayloadSchema } from '../middleware/gps-validation.js';
 import { executeIdempotentMutation } from '../services/idempotency-service.js';
+import { updatePlayerLocation } from '../services/player-location-service.js';
 
 const paramsWithGameIdSchema = {
   type: 'object',
@@ -146,26 +147,25 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       await executeIdempotentMutation(app, request, reply, async (db) => {
         const gpsPayload = request.gpsPayload!;
-        const [player] = await db
-          .update(players)
-          .set({
-            lastLat: gpsPayload.lat.toString(),
-            lastLng: gpsPayload.lng.toString(),
-            lastGpsError: gpsPayload.gpsErrorMeters,
-            lastSeenAt: new Date(gpsPayload.capturedAt),
-          })
-          .where(eq(players.id, request.player!.id))
-          .returning();
+        const result = await updatePlayerLocation(db, {
+          playerId: request.player!.id,
+          gpsPayload,
+        });
 
-        request.player = player;
+        request.player = result.player;
 
         return {
-          gameId: player.gameId,
-          playerId: player.id,
+          gameId: result.player.gameId,
+          playerId: result.player.id,
           statusCode: 200,
           body: {
-            player: serializePlayer(player),
+            player: serializePlayer(result.player),
             gps: gpsPayload,
+            tracking: {
+              enabled: result.tracking.enabled,
+              sampleStored: result.sampleStored,
+              retentionHours: result.tracking.retentionHours,
+            },
           },
         };
       });

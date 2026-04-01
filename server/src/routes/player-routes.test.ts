@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { and, eq } from 'drizzle-orm';
 import { SESSION_COOKIE_NAME } from '@city-game/shared';
 import { env } from '../db/env.js';
-import { games, players, teams } from '../db/schema.js';
+import { games, playerLocationSamples, players, teams } from '../db/schema.js';
 import { createTestApp } from '../test/create-test-app.js';
 import { createTestGame, createTestPlayer, createTestTeam } from '../test/factories.js';
 import { closeTestDatabase, getTestDatabase, resetTestDatabase } from '../test/test-db.js';
@@ -11,6 +11,8 @@ import { closeTestDatabase, getTestDatabase, resetTestDatabase } from '../test/t
 const GAME_ID = '11111111-1111-4111-8111-111111111111';
 const TEAM_ID = '22222222-2222-4222-8222-222222222222';
 const PLAYER_ID = '33333333-3333-4333-8333-333333333333';
+
+const DEFAULT_LOCATION_RETENTION_HOURS = 24;
 
 describe('player routes', () => {
   let app: FastifyInstance;
@@ -257,7 +259,7 @@ describe('player routes', () => {
     expect(response.json().player.sessionToken).toBeUndefined();
   });
 
-  it('updates the current player location when the GPS payload is valid', async () => {
+  it('updates the current player location without storing a sample when tracking is disabled', async () => {
     await seedGame();
     await seedPlayer({ teamId: null, sessionToken: 'location-session-token' });
     app = await createPlayerTestApp();
@@ -295,6 +297,11 @@ describe('player routes', () => {
         headingDegrees: null,
         capturedAt,
       },
+      tracking: {
+        enabled: false,
+        sampleStored: false,
+        retentionHours: DEFAULT_LOCATION_RETENTION_HOURS,
+      },
     });
 
     const [storedPlayer] = await testDatabase.db
@@ -307,6 +314,116 @@ describe('player routes', () => {
     expect(storedPlayer?.lastLng).toBe('-97.1384000');
     expect(storedPlayer?.lastGpsError).toBe(7);
     expect(storedPlayer?.lastSeenAt?.toISOString()).toBe(capturedAt);
+
+    const storedSamples = await testDatabase.db.select().from(playerLocationSamples).where(eq(playerLocationSamples.playerId, PLAYER_ID));
+    expect(storedSamples).toHaveLength(0);
+  });
+
+  it('stores a location sample when tracking is enabled for the game', async () => {
+    await seedGame({
+      settings: {
+        location_tracking_enabled: true,
+        location_retention_hours: 12,
+      },
+    });
+    await seedPlayer({ teamId: null, sessionToken: 'tracked-location-token' });
+    app = await createPlayerTestApp();
+
+    const capturedAt = new Date().toISOString();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/location',
+      headers: idempotencyHeaders('player-location-tracked'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'tracked-location-token',
+      },
+      payload: {
+        lat: 49.8951,
+        lng: -97.1384,
+        gpsErrorMeters: 5,
+        speedMps: 2.5,
+        headingDegrees: 90,
+        capturedAt,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      tracking: {
+        enabled: true,
+        sampleStored: true,
+        retentionHours: 12,
+      },
+    });
+
+    const [storedSample] = await testDatabase.db
+      .select({
+        gameId: playerLocationSamples.gameId,
+        playerId: playerLocationSamples.playerId,
+        recordedAt: playerLocationSamples.recordedAt,
+        gpsErrorMeters: playerLocationSamples.gpsErrorMeters,
+        speedMps: playerLocationSamples.speedMps,
+        headingDegrees: playerLocationSamples.headingDegrees,
+        source: playerLocationSamples.source,
+      })
+      .from(playerLocationSamples)
+      .where(eq(playerLocationSamples.playerId, PLAYER_ID))
+      .limit(1);
+
+    expect(storedSample).toMatchObject({
+      gameId: GAME_ID,
+      playerId: PLAYER_ID,
+      gpsErrorMeters: 5,
+      speedMps: 2.5,
+      headingDegrees: 90,
+      source: 'browser',
+    });
+    expect(storedSample?.recordedAt.toISOString()).toBe(capturedAt);
+  });
+
+  it('replays a tracked location update without inserting a duplicate sample', async () => {
+    await seedGame({
+      settings: {
+        location_tracking_enabled: true,
+        location_retention_hours: 6,
+      },
+    });
+    await seedPlayer({ teamId: null, sessionToken: 'location-replay-token' });
+    app = await createPlayerTestApp();
+
+    const payload = {
+      lat: 49.8951,
+      lng: -97.1384,
+      gpsErrorMeters: 4,
+      capturedAt: new Date().toISOString(),
+    };
+
+    const firstResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/location',
+      headers: idempotencyHeaders('player-location-replay'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'location-replay-token',
+      },
+      payload,
+    });
+
+    const secondResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/location',
+      headers: idempotencyHeaders('player-location-replay'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'location-replay-token',
+      },
+      payload,
+    });
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(secondResponse.statusCode).toBe(200);
+    expect(secondResponse.json()).toEqual(firstResponse.json());
+
+    const storedSamples = await testDatabase.db.select().from(playerLocationSamples).where(eq(playerLocationSamples.playerId, PLAYER_ID));
+    expect(storedSamples).toHaveLength(1);
   });
 
   it('returns GPS_TOO_OLD when /players/me/location is called with stale GPS', async () => {

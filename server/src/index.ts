@@ -1,5 +1,6 @@
 import { buildApp } from './app.js';
 import { startClaimTimeoutJob } from './jobs/claim-timeout.js';
+import { startPlayerLocationCleanupJob } from './jobs/player-location-cleanup.js';
 import { startWinConditionJob } from './jobs/win-condition.js';
 
 const port = Number(process.env.PORT ?? 3000);
@@ -8,6 +9,7 @@ const host = process.env.HOST ?? '0.0.0.0';
 const app = buildApp();
 startClaimTimeoutJob(app);
 startWinConditionJob(app);
+startPlayerLocationCleanupJob(app);
 
 app
   .listen({ port, host })
