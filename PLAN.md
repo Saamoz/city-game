@@ -179,32 +179,57 @@ All backend phases are implemented, tested, and passing. Summary of what exists:
 
 ---
 
-## Phase 33: Frontend — Admin Zone Editor (`/admin/zones`)
+## Phase 33: Frontend — Admin Zone Editor (`/admin/zones`) ✅
 
-**Goal:** Terra Draw editor for reusable authored maps and their zone layouts.
+**Done.** Full-screen Mapbox editor for authoring reusable maps and zone layouts.
 
-### Work
-
-- Full-screen Mapbox with desktop-first left tool panel
-- Authored map list + map metadata form (name, city, center, zoom)
-- Create/select reusable maps independent from games
-- Tool modes: Select, Draw Polygon, Edit Vertices, Delete, Import OSM, Import File
-- Select → sidebar with authored zone name + claim parameters; edit + save (`PATCH /map-zones/:id`)
-- Draw → click vertices, double-click to close → `POST /maps/:id/zones`
-- Delete → confirm modal → `DELETE /map-zones/:id`
-- Import OSM → preview → confirm bulk import into authored map
-- Import File → drag-drop GeoJSON FeatureCollection → preview → `POST /maps/:id/zones/import`
-- Export current authored zone configuration as GeoJSON
-- Zone name labels always visible in editor mode
-
-### Validation
-- Authored maps persist independently from games.
-- A game can be created with a `mapId`, started, and receives cloned runtime zones from that authored map.
-- CRUD/import/export all work against authored maps without mutating already-running games.
+- Authored map list (create/select/rename); maps are independent of any running game
+- Tool modes: Select, Draw Polygon, Draw Split Line, Edit Vertices, Delete
+- Draw polygon → auto-clips against existing zones (turf.difference) so zones never overlap
+- Draw split line → PostGIS ST_Split cuts the selected zone exactly where drawn
+- Vertex snap indicator: amber dot on mousemove snaps new vertices to nearby zone edges
+- Vertex delete: click vertex in direct_select mode → Delete/Backspace
+- Simplified merge: select zone A → "Merge with…" → click zone B → Confirm
+- File import: drag-drop GeoJSON FeatureCollection → preview on map → Import (sanitized before POST to strip fields rejected by strict schema)
+- OSM import: preview administrative boundaries for map city → confirm bulk import
+- Export: download current authored zones as GeoJSON
+- All mutations update local state from API response — no full-refresh round trips
+- Backend: `map_definitions` + `map_zones` tables (migration 0003); full CRUD routes; `onGameStart` clones authored zones into runtime zones
+- Fastify body limit raised to 50 MB to handle city-level GeoJSON files
 
 ---
 
-## Phase 34: Frontend — Admin Panel (`/admin`)
+## Phase 34: Frontend — Challenge Keeper (`/admin/challenges`)
+
+**Goal:** Authoring UI for reusable challenge sets, analogous to the zone editor for maps.
+
+### Why
+
+Challenges need the same authored-vs-runtime separation that maps now have. A challenge set is created once, stored independently, and attached to a game at creation time. When the game starts, set items are cloned into runtime challenges — exactly like map zones. This lets the same challenge set be reused across multiple playtests and edited between games without touching a running session.
+
+### Work
+
+**Backend:**
+- `challenge_sets` table: `id`, `name`, `description`, `metadata`, timestamps
+- `challenge_set_items` table: `id`, `set_id` (FK), `map_zone_id` (nullable FK to `map_zones` — NULL means portable), `title`, `description`, `kind`, `config`, `completion_mode`, `scoring`, `difficulty`, `sort_order`, `metadata`, timestamps
+- `games.challenge_set_id` nullable FK — set at game creation, resolved on start
+- `onGameStart` hook: if `challenge_set_id` is set, clone `challenge_set_items` into runtime `challenges`; location-specific items resolve `zone_id` by matching `map_zone_id` to the corresponding cloned runtime zone
+- Routes: `GET/POST /challenge-sets`, `GET/PATCH/DELETE /challenge-sets/:id`, `GET/POST /challenge-sets/:id/items`, `PATCH/DELETE /set-items/:id`
+
+**Frontend (`/admin/challenges`):**
+- Left panel: list of challenge sets + "New Set" button
+- Right panel: set name/description editor + scrollable item list
+- Each item row: title, kind badge, difficulty, zone tag (or "Portable"), drag to reorder
+- Item editor (slide-in or inline): title, description, kind selector, difficulty, `map_zone_id` picker (shows zones from a chosen authored map — optional; leave blank for portable)
+- Import/export: JSON bulk load/dump of a full set
+- No map chrome — this is a form-based admin tool
+
+### Validation
+- Challenge sets persist independently. A game created with a `challengeSetId` starts with the correct cloned runtime challenges. Location-specific items resolve to the right zone. Portable items have `zone_id = null`. Editing the set after game start does not affect the running game.
+
+---
+
+## Phase 35: Frontend — Admin Panel (`/admin`)
 
 **Goal:** Game management and overrides UI.
 
@@ -212,19 +237,18 @@ All backend phases are implemented, tested, and passing. Summary of what exists:
 
 Clean sidebar navigation (no cartographic chrome). Sections:
 
-- **Game Settings**: name, city, win condition picker + config, claim timeout, max concurrent claims, GPS accuracy toggle, location tracking toggle
+- **New Game wizard**: name, mode, map picker (from authored maps), challenge set picker (from challenge sets), win condition, claim timeout, GPS accuracy
 - **Lifecycle**: Start / Pause / Resume / End with confirm modals + status badge
 - **Teams**: list with join codes + player counts; create team form; edit name/color inline
-- **Challenges**: table (title, kind, status, zone); create/edit form; delete with confirm; filter by status
 - **Overrides**: force-complete, reset, assign zone owner, adjust resources (team + type + delta + reason), rebroadcast state
 - **Scoreboard**: read-only live view
 
 ### Validation
-- All lifecycle controls work. Challenge CRUD persists. Overrides apply and broadcast. Scoreboard live.
+- Game created with chosen map + challenge set starts with correct cloned zones and challenges. Lifecycle controls work. Overrides apply and broadcast. Scoreboard live.
 
 ---
 
-## Phase 35: PWA & Service Worker
+## Phase 36: PWA & Service Worker
 
 **Goal:** Installable, offline-capable, push-enabled.
 
@@ -240,7 +264,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 36: Rate Limiting
+## Phase 37: Rate Limiting
 
 **Goal:** Prevent abuse.
 
@@ -254,22 +278,22 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 37: End-to-End Integration Test
+## Phase 38: End-to-End Integration Test
 
 **Goal:** Full game scenario automated.
 
 ### Work
 
-- Script: create game → zones → challenges → teams → register → join → start → claim → complete → expire → admin override → scoreboard → end
+- Script: create game (with map + challenge set) → start → teams join → complete challenges → zone captures → admin override → scoreboard → end
 - Socket.IO broadcast verification, idempotency replay, delta sync, receipt atomicity
 
 ### Validation
 
-- All assertions pass. Events and ownership are correct; Territory V1 does not depend on separate points/coins balances.
+- All assertions pass. Zones cloned from authored map. Challenges cloned from challenge set. Events and ownership correct.
 
 ---
 
-## Phase 38: Mobile Testing & Polish
+## Phase 39: Mobile Testing & Polish
 
 **Goal:** Works on real phones.
 
@@ -283,7 +307,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 39: Deployment
+## Phase 40: Deployment
 
 **Goal:** Production on Proxmox.
 
@@ -298,13 +322,13 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 40: Playtest Prep
+## Phase 41: Playtest Prep
 
 **Goal:** Game configured for real play.
 
 ### Work
 
-- Chicago zones, GPS tuning, 20-30 challenges, 4 teams, mobile flow test, join instructions
+- Chicago zones in authored map, challenge set with 20-30 challenges, GPS tuning, 4 teams, mobile flow test, join instructions
 
 ### Validation
 
@@ -312,7 +336,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 41: Playtest & Post-Mortem
+## Phase 42: Playtest & Post-Mortem
 
 **Goal:** Real game, real data, real learning.
 

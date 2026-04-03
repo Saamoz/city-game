@@ -17,7 +17,7 @@ The architecture supports future modes (scavenger hunt, hide-and-seek, tag, curr
 
 ### Gameplay Loop (Territory)
 
-Admin first authors a reusable city map and its zones, then creates a game from that map, adds a limited challenge deck, and creates teams. When the game starts, the authored map zones are cloned into live runtime zones for that game. Players join via code, open the app, travel to zones, choose a challenge card, and complete it to capture the zone they are currently in. Challenges are consumed on completion. Game ends when a win condition is met.
+Admin first authors a reusable city map and its zones (Zone Editor), then authors a challenge set (Challenge Keeper), then creates a game that references both. When the game starts, authored map zones are cloned into live runtime zones and authored challenge set items are cloned into runtime challenges for that game. Players join via code, open the app, travel to zones, choose a challenge card, and complete it to capture the zone they are currently in. Challenges are consumed on completion. Game ends when a win condition is met.
 
 ### Future Modes (Not Built in V1)
 
@@ -81,33 +81,108 @@ All tables are platform core (mode-agnostic) unless noted.
 2. Create `challenge_claims` with its FK to `challenges`.
 3. `ALTER TABLE challenges ADD CONSTRAINT fk_current_claim FOREIGN KEY (current_claim_id) REFERENCES challenge_claims(id);`
 
+### `map_definitions`
+
+```sql
+CREATE TABLE map_definitions (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name         VARCHAR(255) NOT NULL,
+  city         VARCHAR(255),
+  center_lat   DECIMAL(10,7) NOT NULL,
+  center_lng   DECIMAL(10,7) NOT NULL,
+  default_zoom INTEGER NOT NULL,
+  boundary     GEOMETRY(Polygon, 4326),
+  metadata     JSONB NOT NULL DEFAULT '{}',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### `map_zones`
+
+```sql
+CREATE TABLE map_zones (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  map_id               UUID NOT NULL REFERENCES map_definitions(id) ON DELETE CASCADE,
+  name                 VARCHAR(255) NOT NULL,
+  geometry             GEOMETRY(Geometry, 4326) NOT NULL,
+  point_value          INTEGER NOT NULL DEFAULT 1,
+  claim_radius_meters  INTEGER,
+  max_gps_error_meters INTEGER,
+  is_disabled          BOOLEAN NOT NULL DEFAULT FALSE,
+  metadata             JSONB NOT NULL DEFAULT '{}',
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### `challenge_sets`
+
+```sql
+CREATE TABLE challenge_sets (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        VARCHAR(255) NOT NULL,
+  description TEXT,
+  metadata    JSONB NOT NULL DEFAULT '{}',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### `challenge_set_items`
+
+```sql
+CREATE TABLE challenge_set_items (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  set_id           UUID NOT NULL REFERENCES challenge_sets(id) ON DELETE CASCADE,
+  map_zone_id      UUID REFERENCES map_zones(id) ON DELETE SET NULL,
+                   -- NULL = portable (not location-specific).
+                   -- When set, onGameStart resolves the corresponding cloned runtime zone.
+  title            VARCHAR(255) NOT NULL,
+  description      TEXT NOT NULL,
+  kind             VARCHAR(50) NOT NULL DEFAULT 'self_report',
+  config           JSONB NOT NULL DEFAULT '{}',
+  completion_mode  VARCHAR(20) NOT NULL DEFAULT 'self_report',
+  scoring          JSONB NOT NULL DEFAULT '{}',
+  difficulty       VARCHAR(10),
+  sort_order       INTEGER NOT NULL DEFAULT 0,
+  metadata         JSONB NOT NULL DEFAULT '{}',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
 ### `games`
 
 ```sql
 CREATE TABLE games (
-  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name             VARCHAR(255) NOT NULL,
-  mode_key         VARCHAR(50) NOT NULL,       -- 'territory', 'scavenger_hunt', etc.
-  city             VARCHAR(255),
-  center_lat       DECIMAL(10,7) NOT NULL,
-  center_lng       DECIMAL(10,7) NOT NULL,
-  default_zoom     INTEGER NOT NULL,
-  boundary         GEOMETRY(Polygon, 4326),
-  status           VARCHAR(20) NOT NULL DEFAULT 'setup',
-                                                -- 'setup' | 'active' | 'paused' | 'completed'
-  state_version    BIGINT NOT NULL DEFAULT 0,   -- Incremented atomically with every state
-                                                -- change. Included in every broadcast.
-  win_condition    JSONB NOT NULL DEFAULT '{}',
-  settings         JSONB NOT NULL DEFAULT '{}', -- Platform: location_tracking_enabled,
-                                                --   location_retention_hours, notification_config,
-                                                --   claim_timeout_minutes (overrides env default),
-                                                --   max_concurrent_claims,
-                                                --   require_gps_accuracy (default false)
-                                                -- Mode keys are mode-defined.
-  started_at       TIMESTAMPTZ,
-  ended_at         TIMESTAMPTZ,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name               VARCHAR(255) NOT NULL,
+  mode_key           VARCHAR(50) NOT NULL,         -- 'territory', 'scavenger_hunt', etc.
+  map_id             UUID REFERENCES map_definitions(id),
+                                                   -- Authored map. Zones cloned on start.
+  challenge_set_id   UUID REFERENCES challenge_sets(id),
+                                                   -- Authored challenge set. Items cloned on start.
+  city               VARCHAR(255),
+  center_lat         DECIMAL(10,7) NOT NULL,
+  center_lng         DECIMAL(10,7) NOT NULL,
+  default_zoom       INTEGER NOT NULL,
+  boundary           GEOMETRY(Polygon, 4326),
+  status             VARCHAR(20) NOT NULL DEFAULT 'setup',
+                                                   -- 'setup' | 'active' | 'paused' | 'completed'
+  state_version      BIGINT NOT NULL DEFAULT 0,    -- Incremented atomically with every state
+                                                   -- change. Included in every broadcast.
+  win_condition      JSONB NOT NULL DEFAULT '{}',
+  settings           JSONB NOT NULL DEFAULT '{}',  -- Platform: location_tracking_enabled,
+                                                   --   location_retention_hours, notification_config,
+                                                   --   claim_timeout_minutes (overrides env default),
+                                                   --   max_concurrent_claims,
+                                                   --   require_gps_accuracy (default false)
+                                                   -- Mode keys are mode-defined.
+  started_at         TIMESTAMPTZ,
+  ended_at           TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
 
@@ -481,12 +556,26 @@ Maps (admin/authored):
   POST   /maps/:id/zones/import-osm      Preview OSM zones for authored map
   PATCH  /map-zones/:id                  Update authored zone
   DELETE /map-zones/:id                  Delete authored zone
+  POST   /map-zones/:id/split            Split authored zone (optional splitLine body)
+  POST   /map-zones/merge                Merge two authored zones
+
+Challenge Sets (admin/authored):
+  GET    /challenge-sets                 List reusable challenge sets
+  POST   /challenge-sets                 Create challenge set
+  GET    /challenge-sets/:id             Get challenge set
+  PATCH  /challenge-sets/:id             Update challenge set metadata
+  DELETE /challenge-sets/:id             Delete challenge set (and all items)
+  GET    /challenge-sets/:id/items       List items in set (ordered by sort_order)
+  POST   /challenge-sets/:id/items       Create item in set
+  PATCH  /set-items/:id                  Update item
+  DELETE /set-items/:id                  Delete item
 
 Game (admin):
-  POST   /game                           Create game (optionally with map_id)
+  POST   /game                           Create game (optionally with map_id, challenge_set_id)
   GET    /game/:id                       Get game state
-  PATCH  /game/:id                       Update config / chosen map while in setup
-  POST   /game/:id/start|pause|end       Lifecycle (start clones authored map zones into runtime zones)
+  PATCH  /game/:id                       Update config / chosen map / challenge set while in setup
+  POST   /game/:id/start|pause|end       Lifecycle (start clones authored map zones + challenge set
+                                         items into runtime zones + challenges)
 
 Teams:
   POST   /game/:id/teams                 Create team (admin)
@@ -689,9 +778,9 @@ Utilitarian. The admin panel prioritizes speed and clarity over visual personali
 /game/:id              Main game view (implemented)
 /game/:id/feed         Event feed (Phase 32)
 /game/:id/scores       Scoreboard (Phase 32)
-/admin                 Admin panel (Phase 34)
-/admin/zones           Zone editor (Phase 33)
-/admin/challenges      Challenge manager (Phase 34)
+/admin/zones           Zone editor — authored maps + zones (Phase 33 ✅)
+/admin/challenges      Challenge keeper — authored challenge sets + items (Phase 34)
+/admin                 Admin panel — game lifecycle + teams + overrides (Phase 35)
 ```
 
 ### Main Game View — Current Structure (Phase 31)
