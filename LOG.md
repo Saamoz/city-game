@@ -160,3 +160,44 @@ Dev seed join codes: Winnipeg `RED12345`/`BLUE1234`/`GOLD1234`, Chicago `CHIBLUE
 - Standings, feed, and the mobile hamburger sheet all support swipe-down-to-close from their sheet header / grab area.
 - Completed cards now show a team-color dot and clicking a completed card pans the map to the captured zone.
 
+## Planning Notes
+
+- Distance tool is deferred out of the active sequence. It remains documented as future work because it is useful for other map-based modes, but it is not required for Territory V1 and should not block the next active frontend/admin phase.
+
+
+## Phase 33 Notes
+
+**Admin zone editor:**
+- Architecture shift: reusable `maps` and `map_zones` are now first-class authored data. Running games no longer own the source-of-truth zone layout.
+- Games can store `mapId`; when a setup game starts, authored `map_zones` are cloned into runtime `zones` for that game. Already-running games are unaffected by later edits to the authored map.
+- New backend map APIs: `/maps`, `/maps/:id`, `/maps/:id/zones`, `/map-zones/:id`, plus import/OSM preview variants.
+- `client/src/features/admin-zones/AdminZoneEditor.tsx` now operates on reusable maps (`/admin/zones?mapId=<uuid>`) instead of game-bound zones. It supports authored map selection/creation, map metadata editing, zone CRUD, OSM/file import preview, and GeoJSON export.
+- Seed scripts now create a reusable map first, then create a game with `mapId`, start it, and verify runtime zones are cloned from the authored map before challenges are inserted.
+- Territory V1 sample seeds were aligned with zone-only scoring by removing seeded points/coins rewards from challenge scoring.
+
+**Implementation notes:**
+- The authored-layer editor intentionally has no team ownership editing; ownership belongs to runtime game zones only.
+- Export remains client-side GeoJSON generated from persisted authored zones, which provides an immediate save/share artifact for future game setups.
+- Draw/edit flow remains polygon-first because final Territory maps are expected to be full-coverage area zones.
+- The Codex `apply_patch` tool failed against this workspace path in this session, so file edits were performed with scripted shell/python writes as a fallback.
+
+**Phase 33 follow-up (desktop authoring pass):**
+- Map authoring write auth was removed for now. The editor no longer asks for an admin token and authored-map routes are public write endpoints until auth is reintroduced deliberately.
+- The original save/import failure root cause was backend, not the UI: authored-map mutations were using gameplay idempotency receipts, but `action_receipts.game_id` references `games.id`, not `maps.id`. Result: every map write failed at the DB layer. Fix was to remove idempotency from authored-map mutations entirely.
+- New map creation now uses built-in base-city presets (`Toronto`, `Chicago`) instead of raw center lat/lng entry. Custom maps still fall back to the current map viewport when saved.
+- The zone editor UI was simplified for Territory V1: advanced zone fields are hidden, zone save only edits the authored name/geometry, and imports always refresh from persisted authored data after write.
+- Added authored-zone split and merge operations. Split uses a straight cut through the selected polygon's longer bounding-box axis; merge unions two staged authored zones into one.
+- Regression coverage added in `server/src/routes/map-routes.test.ts` for create/update map without auth and authored zone import/split/merge.
+- Follow-up bug: the first version of `server/src/routes/map-routes.test.ts` accidentally used the live dev DB instead of `territory_test`, which polluted the authored map list with duplicate `Chicago Template` / `Toronto Template Updated` rows. Fixed by injecting `testDatabase.db` + `testDatabase.pool` into `createTestApp()` and cleaning the leaked live rows.
+
+**Validation:**
+- `pnpm --filter @city-game/server exec tsc -b --pretty false`
+- `pnpm --filter @city-game/client exec tsc -b --pretty false`
+- `pnpm --filter @city-game/server db:generate`
+- `pnpm db:migrate`
+- `pnpm db:seed:toronto`
+- `pnpm --filter @city-game/server exec vitest run src/routes/map-routes.test.ts`
+- `pnpm --filter @city-game/server test`
+- `pnpm -r typecheck`
+- `pnpm -r build`
+- Seed sanity check: Toronto sample game `2aa10a6b-019f-4a7d-b573-e47e91cbf053` uses authored map `a0d5f7e1-194d-4704-9ae6-3a91ed5c3448` with `5` authored zones and `5` cloned runtime zones.

@@ -7,6 +7,11 @@ const GameView = lazy(async () => {
   return { default: module.GameView };
 });
 
+const AdminZoneEditor = lazy(async () => {
+  const module = await import('./features/admin-zones/AdminZoneEditor');
+  return { default: module.AdminZoneEditor };
+});
+
 export function App() {
   const [route, setRoute] = useState(() => parseRoute(window.location.pathname));
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
@@ -37,15 +42,23 @@ export function App() {
       return;
     }
 
-    setRoute({ kind: 'game', gameId });
+    setRoute({ kind: 'game', gameId, mapId: null });
   };
 
   const handleLeaveMap = () => {
     setSuppressAutoEnter(true);
     setActiveGameId(null);
-    setRoute({ kind: 'landing', gameId: null });
+    setRoute({ kind: 'landing', gameId: null, mapId: null });
     navigateToLanding({ suppressAutoEnter: true });
   };
+
+  if (route.kind === 'admin-zones') {
+    return (
+      <Suspense fallback={<MapViewLoading />}>
+        <AdminZoneEditor initialMapId={route.mapId} />
+      </Suspense>
+    );
+  }
 
   if (route.kind === 'game' && route.gameId && activeGameId === route.gameId) {
     return (

@@ -1,9 +1,11 @@
 export interface ParsedRoute {
-  kind: 'landing' | 'game';
+  kind: 'landing' | 'game' | 'admin-zones';
   gameId: string | null;
+  mapId: string | null;
 }
 
 const GAME_PATH_PATTERN = /^\/game\/([0-9a-fA-F-]+)$/;
+const ADMIN_ZONES_PATH = '/admin/zones';
 const SUPPRESS_AUTO_ENTER_KEY = 'city-game:suppress-auto-enter';
 
 export function parseRoute(pathname: string): ParsedRoute {
@@ -13,12 +15,23 @@ export function parseRoute(pathname: string): ParsedRoute {
     return {
       kind: 'game',
       gameId: match[1] ?? null,
+      mapId: null,
+    };
+  }
+
+  if (pathname === ADMIN_ZONES_PATH) {
+    const searchParams = new URLSearchParams(window.location.search);
+    return {
+      kind: 'admin-zones',
+      gameId: null,
+      mapId: searchParams.get('mapId'),
     };
   }
 
   return {
     kind: 'landing',
     gameId: null,
+    mapId: null,
   };
 }
 
@@ -32,7 +45,7 @@ export function shouldSuppressAutoEnter(): boolean {
 
 export function navigateToGame(gameId: string): void {
   setSuppressAutoEnter(false);
-  window.history.pushState({}, '', `/game/${gameId}`);
+  window.history.pushState({}, '', '/game/' + gameId);
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 

@@ -15,6 +15,8 @@ const TRUNCATE_TABLES = [
   'players',
   'teams',
   'games',
+  'map_zones',
+  'maps',
 ] as const;
 
 let testDatabase: { db: DatabaseClient; pool: DatabasePool } | null = null;

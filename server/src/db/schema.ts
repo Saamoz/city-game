@@ -22,10 +22,49 @@ const defaultJsonObject = sql`'{}'::jsonb`;
 const defaultJsonArray = sql`'[]'::jsonb`;
 const defaultChallengeScoring = sql`'{"points":10}'::jsonb`;
 
+export const maps = pgTable(
+  'maps',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: varchar('name', { length: 255 }).notNull(),
+    city: varchar('city', { length: 255 }),
+    centerLat: decimal('center_lat', { precision: 10, scale: 7 }).notNull(),
+    centerLng: decimal('center_lng', { precision: 10, scale: 7 }).notNull(),
+    defaultZoom: integer('default_zoom').notNull(),
+    boundary: geometryPolygon4326('boundary'),
+    metadata: jsonb('metadata').notNull().default(defaultJsonObject),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+export const mapZones = pgTable(
+  'map_zones',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    mapId: uuid('map_id').notNull().references(() => maps.id),
+    name: varchar('name', { length: 255 }).notNull(),
+    geometry: geometryGeneric4326('geometry').notNull(),
+    centroid: geometryPoint4326('centroid'),
+    pointValue: integer('point_value').notNull().default(1),
+    claimRadiusMeters: integer('claim_radius_meters'),
+    maxGpsErrorMeters: integer('max_gps_error_meters'),
+    isDisabled: boolean('is_disabled').notNull().default(false),
+    metadata: jsonb('metadata').notNull().default(defaultJsonObject),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    mapZonesGeometryIdx: index('idx_map_zones_geometry').using('gist', table.geometry),
+    mapZonesMapIdx: index('idx_map_zones_map').on(table.mapId),
+  }),
+);
+
 export const games = pgTable(
   'games',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    mapId: uuid('map_id').references(() => maps.id),
     name: varchar('name', { length: 255 }).notNull(),
     modeKey: varchar('mode_key', { length: 50 }).notNull(),
     city: varchar('city', { length: 255 }),
@@ -279,6 +318,8 @@ export const playerLocationSamples = pgTable(
 );
 
 export const schema = {
+  maps,
+  mapZones,
   games,
   teams,
   players,

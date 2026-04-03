@@ -17,7 +17,7 @@ The architecture supports future modes (scavenger hunt, hide-and-seek, tag, curr
 
 ### Gameplay Loop (Territory)
 
-Admin creates a game → draws/imports zones → creates a limited challenge deck → creates teams. Players join via code, open the app, travel to zones, choose a challenge card, and complete it to capture the zone they are currently in. Challenges are consumed on completion. Game ends when a win condition is met.
+Admin first authors a reusable city map and its zones, then creates a game from that map, adds a limited challenge deck, and creates teams. When the game starts, the authored map zones are cloned into live runtime zones for that game. Players join via code, open the app, travel to zones, choose a challenge card, and complete it to capture the zone they are currently in. Challenges are consumed on completion. Game ends when a win condition is met.
 
 ### Future Modes (Not Built in V1)
 
@@ -470,11 +470,23 @@ All routes prefixed `/api/v1`. Mutating endpoints accept `Idempotency-Key`. Resp
 ### Platform Endpoints
 
 ```
+Maps (admin/authored):
+  GET    /maps                           List reusable maps
+  POST   /maps                           Create reusable map
+  GET    /maps/:id                       Get authored map
+  PATCH  /maps/:id                       Update authored map
+  GET    /maps/:id/zones                 List authored zones
+  POST   /maps/:id/zones                 Create authored zone
+  POST   /maps/:id/zones/import          Bulk import authored zones
+  POST   /maps/:id/zones/import-osm      Preview OSM zones for authored map
+  PATCH  /map-zones/:id                  Update authored zone
+  DELETE /map-zones/:id                  Delete authored zone
+
 Game (admin):
-  POST   /game                           Create game
+  POST   /game                           Create game (optionally with map_id)
   GET    /game/:id                       Get game state
-  PATCH  /game/:id                       Update config
-  POST   /game/:id/start|pause|end       Lifecycle
+  PATCH  /game/:id                       Update config / chosen map while in setup
+  POST   /game/:id/start|pause|end       Lifecycle (start clones authored map zones into runtime zones)
 
 Teams:
   POST   /game/:id/teams                 Create team (admin)
@@ -677,9 +689,9 @@ Utilitarian. The admin panel prioritizes speed and clarity over visual personali
 /game/:id              Main game view (implemented)
 /game/:id/feed         Event feed (Phase 32)
 /game/:id/scores       Scoreboard (Phase 32)
-/admin                 Admin panel (Phase 35)
-/admin/zones           Zone editor (Phase 34)
-/admin/challenges      Challenge manager (Phase 35)
+/admin                 Admin panel (Phase 34)
+/admin/zones           Zone editor (Phase 33)
+/admin/challenges      Challenge manager (Phase 34)
 ```
 
 ### Main Game View — Current Structure (Phase 31)
@@ -834,7 +846,7 @@ Bottom-center, stacked if multiple. Types:
 
 ---
 
-### Phase 33 Frontend Design — Distance Tool
+### Future Work — Distance Tool (Deferred from active phase sequence)
 
 A toggleable ruler mode for measuring distances on the map. Activated from a toolbar button (desktop) or the ☰ menu (mobile).
 
@@ -850,25 +862,27 @@ A toggleable ruler mode for measuring distances on the map. Activated from a too
 
 ---
 
-### Phase 34 Frontend Design — Admin Zone Editor (`/admin/zones`)
+### Phase 33 Frontend Design — Admin Zone Editor (`/admin/zones`)
 
 Powered by Terra Draw. Full-screen map view (same Mapbox style) with a tool panel on the left (desktop) or bottom sheet (mobile).
 
+Desktop-first authored map workflow. `/admin/zones` operates on reusable maps, not running games. The left panel lets admins select an existing map or create a new one, edit map metadata (name, city, center, zoom), then author zones inside that map.
+
 **Modes (mutually exclusive toolbar buttons):**
-- **Select**: click to select an existing zone polygon. Sidebar shows zone name, point value, claim radius. Edit in-place and save.
-- **Draw Polygon**: click to place vertices, double-click to close. Committed polygon sent to `POST /game/:id/zones`.
-- **Edit**: drag vertices of selected polygon. Save commits a PATCH.
-- **Delete**: select then delete — confirm modal before `DELETE /zones/:id`.
-- **Import OSM**: text field for a place name or OSM relation ID. Preview footprint, confirm to import.
-- **Import File**: drag-drop a GeoJSON FeatureCollection. Preview all polygons, bulk import via `/zones/import`.
+- **Select**: click to select an existing authored zone polygon. Sidebar shows zone name and claim parameters. Edit in-place and save.
+- **Draw Polygon**: click to place vertices, double-click to close. Committed polygon is saved to `POST /maps/:id/zones`.
+- **Edit**: drag vertices of selected polygon. Save commits `PATCH /map-zones/:id`.
+- **Delete**: select then delete — confirm modal before `DELETE /map-zones/:id`.
+- **Import OSM**: text field for a place name. Preview footprint, confirm to import into the authored map.
+- **Import File**: drag-drop a GeoJSON FeatureCollection. Preview all polygons, bulk import via `/maps/:id/zones/import`.
 
-**Buffer visualization**: when a zone is selected, a translucent ring shows the claim radius buffer around the zone boundary — helping admins calibrate whether the buffer makes physical sense at the location.
+**Save/export model**: authored maps persist in the database independently from games, and the editor can export the current authored zone set as GeoJSON for backup or reuse.
 
-**Zone styling in editor**: owned zones show fill with 50% opacity; selected zone gets a dashed animated border. Zone name labels always visible in editor mode (hidden in player map view).
+**Zone styling in editor**: authored zones use neutral utilitarian fills; selected zone gets a dashed animated border. Zone name labels stay visible in editor mode.
 
 ---
 
-### Phase 35 Frontend Design — Admin Panel (`/admin`)
+### Phase 34 Frontend Design — Admin Panel (`/admin`)
 
 Utilitarian. Clean sidebar navigation, no cartographic chrome. Sections:
 
@@ -886,7 +900,7 @@ Utilitarian. Clean sidebar navigation, no cartographic chrome. Sections:
 
 ---
 
-### Phase 36 — PWA
+### Phase 35 — PWA
 
 - `manifest.json`: name "Territory", short_name "Territory", `display: standalone`, theme color amber `#c8b48a`, background color cream `#f5f0e8`, icons at 192px and 512px.
 - Service worker: cache-first for app shell (HTML, JS, CSS), network-first for API calls. Offline shows a cached "You're offline — reconnect to play" screen.

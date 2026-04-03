@@ -2,10 +2,10 @@ import { eq, sql } from 'drizzle-orm';
 import type { GameSettings, GeoJsonGeometry, GeoJsonPoint, GeoJsonPolygon, WinConditions } from '@city-game/shared';
 import type { DatabaseClient } from '../connection.js';
 import { createDb } from '../connection.js';
-import { challenges, games, teams } from '../schema.js';
+import { challenges, games, teams, zones } from '../schema.js';
 import { createModeRegistry } from '../../modes/index.js';
-import { createZone } from '../../services/spatial-service.js';
 import { transitionGameLifecycle } from '../../services/game-service.js';
+import { createMap, createMapZone } from '../../services/map-service.js';
 
 const DEV_GAME_URL_BASE = 'http://localhost:5173';
 const RESET_TABLES = [
@@ -17,9 +17,11 @@ const RESET_TABLES = [
   'challenge_claims',
   'challenges',
   'zones',
+  'map_zones',
   'players',
   'teams',
   'games',
+  'maps',
 ] as const;
 
 export interface TeamSeed {
@@ -77,8 +79,8 @@ export async function runSampleSeed(config: SampleSeedConfig, options?: { clearE
 
       const activeGame = await findActiveGame(db);
       if (activeGame) {
-        console.log(`An active game already exists: ${activeGame.name} (${activeGame.id}).`);
-        console.log(`Open ${DEV_GAME_URL_BASE}/game/${activeGame.id} or end that game before seeding a sample.`);
+        console.log('An active game already exists: ' + activeGame.name + ' (' + activeGame.id + ').');
+        console.log('Open ' + DEV_GAME_URL_BASE + '/game/' + activeGame.id + ' or end that game before seeding a sample.');
         return;
       }
     }
@@ -87,9 +89,36 @@ export async function runSampleSeed(config: SampleSeedConfig, options?: { clearE
     const created = await db.transaction(async (tx) => {
       const transactionalDb = tx as unknown as DatabaseClient;
 
+      const map = await createMap(transactionalDb, {
+        name: config.city + ' Base Map',
+        city: config.city,
+        centerLat: config.centerLat,
+        centerLng: config.centerLng,
+        defaultZoom: config.defaultZoom,
+        metadata: {
+          seed_key: config.seedKey,
+          source: 'sample_seed',
+        },
+      });
+
+      for (const zone of config.zones) {
+        await createMapZone(transactionalDb, {
+          mapId: map.id,
+          name: zone.name,
+          geometry: zone.geometry,
+          pointValue: zone.pointValue,
+          claimRadiusMeters: zone.claimRadiusMeters ?? null,
+          metadata: {
+            seed_key: config.seedKey,
+            ...(zone.metadata ?? {}),
+          },
+        });
+      }
+
       const [game] = await transactionalDb
         .insert(games)
         .values({
+          mapId: map.id,
           name: config.name,
           modeKey: 'territory',
           city: config.city,
@@ -101,6 +130,7 @@ export async function runSampleSeed(config: SampleSeedConfig, options?: { clearE
           settings: {
             ...config.settings,
             seed_key: config.seedKey,
+            map_id: map.id,
           },
         } as typeof games.$inferInsert)
         .returning();
@@ -117,29 +147,41 @@ export async function runSampleSeed(config: SampleSeedConfig, options?: { clearE
         .returning();
 
       const teamByName = new Map(insertedTeams.map((team) => [team.name, team]));
-      const insertedZones: Array<{ id: string; name: string }> = [];
 
-      for (const zone of config.zones) {
-        insertedZones.push(await createZone(transactionalDb, {
-          gameId: game.id,
-          name: zone.name,
-          geometry: zone.geometry,
-          ownerTeamId: zone.ownerTeamName ? (teamByName.get(zone.ownerTeamName)?.id ?? null) : null,
-          pointValue: zone.pointValue,
-          claimRadiusMeters: zone.claimRadiusMeters,
-          metadata: {
-            seed_key: config.seedKey,
-            ...(zone.metadata ?? {}),
-          },
-        }));
+      await transitionGameLifecycle(transactionalDb, registry, game.id, 'start');
+
+      const runtimeZones = await transactionalDb.select().from(zones).where(eq(zones.gameId, game.id));
+      const runtimeZoneByName = new Map(runtimeZones.map((zone) => [zone.name, zone]));
+      const capturedAt = new Date();
+
+      for (const zoneSeed of config.zones) {
+        if (!zoneSeed.ownerTeamName) {
+          continue;
+        }
+
+        const runtimeZone = runtimeZoneByName.get(zoneSeed.name);
+        const ownerTeam = teamByName.get(zoneSeed.ownerTeamName);
+        if (!runtimeZone || !ownerTeam) {
+          continue;
+        }
+
+        await transactionalDb
+          .update(zones)
+          .set({
+            ownerTeamId: ownerTeam.id,
+            capturedAt,
+            updatedAt: capturedAt,
+          })
+          .where(eq(zones.id, runtimeZone.id));
       }
 
-      const zoneByName = new Map(insertedZones.map((zone) => [zone.name, zone]));
+      const refreshedRuntimeZones = await transactionalDb.select().from(zones).where(eq(zones.gameId, game.id));
+      const refreshedRuntimeZoneByName = new Map(refreshedRuntimeZones.map((zone) => [zone.name, zone]));
 
       await transactionalDb.insert(challenges).values(config.challenges.map((challenge) => {
-        const zoneId = challenge.zoneName ? zoneByName.get(challenge.zoneName)?.id ?? null : null;
+        const zoneId = challenge.zoneName ? (refreshedRuntimeZoneByName.get(challenge.zoneName)?.id ?? null) : null;
         if (challenge.zoneName && !zoneId) {
-          throw new Error(`Challenge ${challenge.title} references missing zone ${challenge.zoneName}.`);
+          throw new Error('Challenge ' + challenge.title + ' references missing zone ' + challenge.zoneName + '.');
         }
 
         const shortDescription = challenge.shortDescription?.trim() || challenge.title;
@@ -165,8 +207,6 @@ export async function runSampleSeed(config: SampleSeedConfig, options?: { clearE
         };
       }));
 
-      await transitionGameLifecycle(transactionalDb, registry, game.id, 'start');
-
       return { gameId: game.id };
     });
 
@@ -179,7 +219,7 @@ export async function runSampleSeed(config: SampleSeedConfig, options?: { clearE
 export async function resetDatabase(db: DatabaseClient) {
   await db.execute(sql`CREATE EXTENSION IF NOT EXISTS pgcrypto`);
   await db.execute(sql`CREATE EXTENSION IF NOT EXISTS postgis`);
-  await db.execute(sql.raw(`TRUNCATE TABLE ${RESET_TABLES.join(', ')} RESTART IDENTITY CASCADE`));
+  await db.execute(sql.raw('TRUNCATE TABLE ' + RESET_TABLES.join(', ') + ' RESTART IDENTITY CASCADE'));
 }
 
 async function findExistingSeedGame(db: DatabaseClient, seedKey: string) {
@@ -203,18 +243,19 @@ async function printSummary(db: DatabaseClient, gameId: string, title: string) {
   const gameTeams = await db.select().from(teams).where(eq(teams.gameId, gameId));
 
   if (!game) {
-    throw new Error(`Seeded game ${gameId} not found.`);
+    throw new Error('Seeded game ' + gameId + ' not found.');
   }
 
   console.log(title);
-  console.log(`Game: ${game.name}`);
-  console.log(`Game ID: ${game.id}`);
-  console.log(`Status: ${game.status}`);
-  console.log(`Open: ${DEV_GAME_URL_BASE}/game/${game.id}`);
+  console.log('Game: ' + game.name);
+  console.log('Game ID: ' + game.id);
+  console.log('Map ID: ' + (game.mapId ?? 'none'));
+  console.log('Status: ' + game.status);
+  console.log('Open: ' + DEV_GAME_URL_BASE + '/game/' + game.id);
   console.log('Join codes:');
 
   for (const team of gameTeams) {
-    console.log(`- ${team.name}: ${team.joinCode}`);
+    console.log('- ' + team.name + ': ' + team.joinCode);
   }
 }
 

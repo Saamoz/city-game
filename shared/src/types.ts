@@ -123,8 +123,37 @@ export type WinCondition =
 export type WinConditions = WinCondition[];
 export type ResourceAwardMap = Partial<Record<string, number>>;
 
+export interface MapDefinition {
+  id: Uuid;
+  name: string;
+  city: string | null;
+  centerLat: number;
+  centerLng: number;
+  defaultZoom: number;
+  boundary: GeoJsonPolygon | null;
+  metadata: JsonObject;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+}
+
+export interface MapZone {
+  id: Uuid;
+  mapId: Uuid;
+  name: string;
+  geometry: GeoJsonGeometry;
+  centroid: GeoJsonPoint | null;
+  pointValue: number;
+  claimRadiusMeters: number | null;
+  maxGpsErrorMeters: number | null;
+  isDisabled: boolean;
+  metadata: JsonObject;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+}
+
 export interface Game {
   id: Uuid;
+  mapId: Uuid | null;
   name: string;
   modeKey: GameModeKey;
   city: string | null;

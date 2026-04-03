@@ -43,3 +43,16 @@ input {
 .mapboxgl-ctrl-group {
   box-shadow: 0 10px 30px rgba(31, 42, 47, 0.18);
 }
+
+
+.mapboxgl-ctrl-group .mapbox-gl-draw_ctrl-draw-btn {
+  background-color: rgba(248, 246, 240, 0.96);
+}
+
+.mapboxgl-ctrl-group .mapbox-gl-draw_ctrl-draw-btn:hover {
+  background-color: #ffffff;
+}
+
+.mapboxgl-ctrl-group .mapbox-gl-draw_trash {
+  border-top: 1px solid rgba(31, 42, 47, 0.08);
+}

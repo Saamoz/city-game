@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
-import { desc, eq, ne } from "drizzle-orm";
+import { desc, eq, ne, sql } from "drizzle-orm";
 import { GAME_MODE_KEYS, STATE_VERSION_HEADER, errorCodes, socketServerEventTypes } from "@city-game/shared";
 import type { DatabaseClient } from "../db/connection.js";
 import { games, teams } from "../db/schema.js";
@@ -12,6 +12,7 @@ import {
   transitionGameLifecycle,
   type LifecycleTransition,
 } from "../services/game-service.js";
+import { applyMapDefaultsToGame } from "../services/map-service.js";
 
 const winConditionItemSchema = {
   type: "object",
@@ -31,11 +32,12 @@ const winConditionItemSchema = {
 const gameCreateBodySchema = {
   type: "object",
   additionalProperties: false,
-  required: ["name", "modeKey", "centerLat", "centerLng", "defaultZoom"],
+  required: ["name", "modeKey"],
   properties: {
     name: { type: "string", minLength: 1, maxLength: 255 },
     modeKey: { type: "string", enum: [...GAME_MODE_KEYS] },
     city: { type: "string", minLength: 1, maxLength: 255 },
+    mapId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }] },
     centerLat: { type: "number" },
     centerLng: { type: "number" },
     defaultZoom: { type: "integer" },
@@ -56,6 +58,7 @@ const gameUpdateBodySchema = {
   properties: {
     name: { type: "string", minLength: 1, maxLength: 255 },
     city: { type: "string", minLength: 1, maxLength: 255 },
+    mapId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }] },
     centerLat: { type: "number" },
     centerLng: { type: "number" },
     defaultZoom: { type: "integer" },
@@ -125,24 +128,38 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
           name: string;
           modeKey: string;
           city?: string;
-          centerLat: number;
-          centerLng: number;
-          defaultZoom: number;
+          mapId?: string | null;
+          centerLat?: number;
+          centerLng?: number;
+          defaultZoom?: number;
           winCondition?: Array<Record<string, unknown>>;
           settings?: Record<string, unknown>;
         };
 
         validateWinConditions(body.winCondition);
 
+        const mapDefaults = body.mapId ? await applyMapDefaultsToGame(db, body.mapId) : null;
+        const centerLat = body.centerLat ?? mapDefaults?.centerLat;
+        const centerLng = body.centerLng ?? mapDefaults?.centerLng;
+        const defaultZoom = body.defaultZoom ?? mapDefaults?.defaultZoom;
+
+        if (centerLat === undefined || centerLng === undefined || defaultZoom === undefined) {
+          throw new AppError(errorCodes.validationError, {
+            message: "Game requires centerLat, centerLng, and defaultZoom unless mapId is provided.",
+          });
+        }
+
         const [game] = await db
           .insert(games)
           .values({
+            mapId: body.mapId ?? null,
             name: body.name,
             modeKey: body.modeKey,
-            city: body.city ?? null,
-            centerLat: body.centerLat.toString(),
-            centerLng: body.centerLng.toString(),
-            defaultZoom: body.defaultZoom,
+            city: body.city ?? mapDefaults?.city ?? null,
+            centerLat: centerLat.toString(),
+            centerLng: centerLng.toString(),
+            defaultZoom,
+            boundary: mapDefaults?.boundary ? sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(mapDefaults.boundary)}), 4326)::geometry(Polygon,4326)` : null,
             winCondition: body.winCondition ?? [],
             settings: body.settings ?? {},
           })
@@ -186,6 +203,7 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
         const body = request.body as {
           name?: string;
           city?: string;
+          mapId?: string | null;
           centerLat?: number;
           centerLng?: number;
           defaultZoom?: number;
@@ -195,14 +213,27 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
 
         validateWinConditions(body.winCondition);
 
+        if (body.mapId !== undefined && existingGame.status !== "setup") {
+          throw new AppError(errorCodes.validationError, {
+            message: "Map assignment can only change while the game is in setup.",
+          });
+        }
+
+        const nextMapId = body.mapId === undefined ? existingGame.mapId : body.mapId;
+        const mapDefaults = nextMapId ? await applyMapDefaultsToGame(db, nextMapId) : null;
+
         const [game] = await db
           .update(games)
           .set({
+            mapId: nextMapId ?? null,
             name: body.name ?? existingGame.name,
-            city: body.city ?? existingGame.city,
-            centerLat: body.centerLat === undefined ? existingGame.centerLat : body.centerLat.toString(),
-            centerLng: body.centerLng === undefined ? existingGame.centerLng : body.centerLng.toString(),
-            defaultZoom: body.defaultZoom ?? existingGame.defaultZoom,
+            city: body.city ?? mapDefaults?.city ?? existingGame.city,
+            centerLat: body.centerLat === undefined ? (mapDefaults ? String(mapDefaults.centerLat) : existingGame.centerLat) : body.centerLat.toString(),
+            centerLng: body.centerLng === undefined ? (mapDefaults ? String(mapDefaults.centerLng) : existingGame.centerLng) : body.centerLng.toString(),
+            defaultZoom: body.defaultZoom ?? mapDefaults?.defaultZoom ?? existingGame.defaultZoom,
+            boundary: body.mapId === undefined
+              ? existingGame.boundary
+              : (mapDefaults?.boundary ? sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(mapDefaults.boundary)}), 4326)::geometry(Polygon,4326)` : null),
             winCondition: body.winCondition ?? existingGame.winCondition,
             settings: body.settings ?? existingGame.settings,
             updatedAt: new Date(),
