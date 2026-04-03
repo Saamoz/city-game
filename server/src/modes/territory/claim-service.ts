@@ -10,6 +10,7 @@ import {
   type GpsPayload,
   type JsonObject,
   type JsonValue,
+  type Zone,
 } from '@city-game/shared';
 import type { DatabaseClient } from '../../db/connection.js';
 import { env } from '../../db/env.js';
@@ -17,7 +18,12 @@ import { challengeClaims, challenges } from '../../db/schema.js';
 import { AppError } from '../../lib/errors.js';
 import { appendEvents } from '../../services/event-service.js';
 import { getGameById } from '../../services/game-service.js';
-import { getDistanceToZoneMeters, getZoneByIdOrThrow, isPointWithinZoneBuffer } from '../../services/spatial-service.js';
+import {
+  findContainingZones,
+  getDistanceToZoneMeters,
+  getZoneByIdOrThrow,
+  isPointWithinZoneBuffer,
+} from '../../services/spatial-service.js';
 
 const ACTIVE_CLAIM_STATUS = 'active';
 const DEFAULT_MAX_CONCURRENT_CLAIMS = 1;
@@ -59,13 +65,11 @@ export async function claimChallenge(db: DatabaseClient, input: ClaimChallengeIn
 
   assertChallengeAvailable(lockedChallenge.status);
 
-  if (!lockedChallenge.zoneId) {
-    throw new AppError(errorCodes.validationError, {
-      message: 'Challenge is not assigned to a zone.',
-    });
-  }
-
-  const zone = await getZoneByIdOrThrow(db, lockedChallenge.zoneId);
+  const zone = await resolveClaimZone(db, {
+    gameId: input.gameId,
+    challenge: lockedChallenge,
+    gpsPayload: input.gpsPayload,
+  });
 
   if (zone.isDisabled) {
     throw new AppError(errorCodes.zoneDisabled, {
@@ -110,6 +114,7 @@ export async function claimChallenge(db: DatabaseClient, input: ClaimChallengeIn
   const [updatedChallenge] = await db
     .update(challenges)
     .set({
+      zoneId: zone.id,
       status: 'claimed',
       currentClaimId: insertedClaim.id,
       expiresAt: claimExpiresAt,
@@ -134,11 +139,13 @@ export async function claimChallenge(db: DatabaseClient, input: ClaimChallengeIn
           status: lockedChallenge.status,
           currentClaimId: lockedChallenge.currentClaimId,
           expiresAt: lockedChallenge.expiresAt?.toISOString() ?? null,
+          zoneId: lockedChallenge.zoneId,
         },
         afterState: {
           status: updatedChallenge.status,
           currentClaimId: updatedChallenge.currentClaimId,
           expiresAt: updatedChallenge.expiresAt?.toISOString() ?? null,
+          zoneId: updatedChallenge.zoneId,
         },
         meta: {
           challenge: serializedChallenge,
@@ -184,6 +191,15 @@ export async function lockChallenge(db: DatabaseClient, challengeId: string): Pr
   return challenge;
 }
 
+export function isPortableChallengeConfig(config: unknown): boolean {
+  return Boolean(
+    config &&
+      typeof config === 'object' &&
+      !Array.isArray(config) &&
+      (config as { portable?: unknown }).portable === true,
+  );
+}
+
 function assertChallengeAvailable(status: string): void {
   if (status === 'claimed') {
     throw new AppError(errorCodes.challengeAlreadyClaimed);
@@ -199,7 +215,6 @@ function assertChallengeAvailable(status: string): void {
 }
 
 function assertGpsAccuracy(zoneMaxErrorMeters: number | null, gpsErrorMeters: number): void {
-  // Global platform threshold
   if (gpsErrorMeters > env.gpsMaxErrorMeters) {
     throw new AppError(errorCodes.gpsErrorTooHigh, {
       details: {
@@ -209,7 +224,6 @@ function assertGpsAccuracy(zoneMaxErrorMeters: number | null, gpsErrorMeters: nu
     });
   }
 
-  // Per-zone override (may be stricter or more permissive than the global threshold)
   if (zoneMaxErrorMeters !== null && gpsErrorMeters > zoneMaxErrorMeters) {
     throw new AppError(errorCodes.gpsErrorTooHigh, {
       details: {
@@ -218,6 +232,39 @@ function assertGpsAccuracy(zoneMaxErrorMeters: number | null, gpsErrorMeters: nu
       },
     });
   }
+}
+
+async function resolveClaimZone(
+  db: DatabaseClient,
+  input: { gameId: string; challenge: typeof challenges.$inferSelect; gpsPayload: GpsPayload },
+): Promise<Zone> {
+  if (input.challenge.zoneId) {
+    return getZoneByIdOrThrow(db, input.challenge.zoneId);
+  }
+
+  if (!isPortableChallengeConfig(input.challenge.config)) {
+    throw new AppError(errorCodes.validationError, {
+      message: 'Challenge is not assigned to a zone.',
+    });
+  }
+
+  const [zone] = await findContainingZones(db, {
+    gameId: input.gameId,
+    lat: input.gpsPayload.lat,
+    lng: input.gpsPayload.lng,
+  });
+
+  if (!zone) {
+    throw new AppError(errorCodes.outsideZone, {
+      message: 'Move into a zone before claiming this card.',
+      details: {
+        lat: input.gpsPayload.lat,
+        lng: input.gpsPayload.lng,
+      },
+    });
+  }
+
+  return zone;
 }
 
 async function assertPlayerInsideZone(

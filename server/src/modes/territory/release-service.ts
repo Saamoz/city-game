@@ -12,7 +12,7 @@ import { challengeClaims, challenges } from '../../db/schema.js';
 import { AppError } from '../../lib/errors.js';
 import { appendEvents } from '../../services/event-service.js';
 import { getGameById } from '../../services/game-service.js';
-import { lockChallenge, serializeChallenge, serializeClaim } from './claim-service.js';
+import { isPortableChallengeConfig, lockChallenge, serializeChallenge, serializeClaim } from './claim-service.js';
 
 const ACTIVE_CLAIM_STATUS = 'active';
 
@@ -73,6 +73,7 @@ export async function releaseChallenge(db: DatabaseClient, input: ReleaseChallen
   const [updatedChallenge] = await db
     .update(challenges)
     .set({
+      zoneId: isPortableChallengeConfig(lockedChallenge.config) ? null : lockedChallenge.zoneId,
       status: 'available',
       currentClaimId: null,
       expiresAt: null,
@@ -101,11 +102,13 @@ export async function releaseChallenge(db: DatabaseClient, input: ReleaseChallen
           status: lockedChallenge.status,
           currentClaimId: lockedChallenge.currentClaimId,
           expiresAt: lockedChallenge.expiresAt?.toISOString() ?? null,
+          zoneId: lockedChallenge.zoneId,
         },
         afterState: {
           status: updatedChallenge.status,
           currentClaimId: updatedChallenge.currentClaimId,
           expiresAt: updatedChallenge.expiresAt?.toISOString() ?? null,
+          zoneId: updatedChallenge.zoneId,
         },
         meta: {
           reason: 'released',

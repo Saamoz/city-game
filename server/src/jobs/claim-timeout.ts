@@ -11,7 +11,7 @@ import {
 import type { DatabaseClient } from '../db/connection.js';
 import { challengeClaims, challenges } from '../db/schema.js';
 import type { ModeRegistry } from '../modes/index.js';
-import { serializeChallenge, serializeClaim } from '../modes/territory/claim-service.js';
+import { isPortableChallengeConfig, serializeChallenge, serializeClaim } from '../modes/territory/claim-service.js';
 import { appendEvents } from '../services/event-service.js';
 import type { NotificationService } from '../services/notification-service.js';
 import type { Broadcaster } from '../socket/broadcaster.js';
@@ -277,6 +277,7 @@ async function expireClaimsBatch(
       const [updatedChallenge] = await db
         .update(challenges)
         .set({
+          zoneId: isPortableChallengeConfig(row.challengeConfig) ? null : row.zoneId,
           status: 'available',
           currentClaimId: null,
           expiresAt: null,
@@ -305,11 +306,13 @@ async function expireClaimsBatch(
               status: row.challengeStatus,
               currentClaimId: row.challengeCurrentClaimId,
               expiresAt: toIsoTimestamp(row.challengeExpiresAt),
+              zoneId: row.zoneId,
             },
             afterState: {
               status: updatedChallenge.status,
               currentClaimId: updatedChallenge.currentClaimId,
               expiresAt: updatedChallenge.expiresAt?.toISOString() ?? null,
+              zoneId: updatedChallenge.zoneId,
             },
             meta: {
               reason: 'expired',

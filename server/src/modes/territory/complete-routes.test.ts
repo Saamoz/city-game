@@ -176,6 +176,64 @@ describe('territory complete route', () => {
     ].sort());
   });
 
+
+  it('completes a portable card directly from the current zone without creating a visible claimed state', async () => {
+    await seedGame();
+    await seedTeam();
+    await seedPlayer({ sessionToken: 'portable-complete-session' });
+    const zone = await seedZone();
+    await seedChallenge({ zoneId: null, config: { portable: true }, scoring: { points: 7 } });
+    app = await createTestApp({ db: testDatabase.db });
+
+    const response = await completeRequest({
+      sessionToken: 'portable-complete-session',
+      actionId: 'portable-complete',
+      payload: {
+        gps: validGpsPayload(),
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      challenge: {
+        id: CHALLENGE_ID,
+        status: 'completed',
+        zoneId: zone.id,
+      },
+      claim: {
+        teamId: TEAM_ONE_ID,
+        playerId: PLAYER_ONE_ID,
+        status: 'completed',
+      },
+      zone: {
+        id: zone.id,
+        ownerTeamId: TEAM_ONE_ID,
+      },
+      resourcesAwarded: {
+        points: 7,
+      },
+    });
+
+    const storedClaims = await testDatabase.db.select().from(challengeClaims).where(eq(challengeClaims.challengeId, CHALLENGE_ID));
+    expect(storedClaims).toHaveLength(1);
+    expect(storedClaims[0]?.status).toBe('completed');
+    expect(storedClaims[0]?.completedAt).toBeInstanceOf(Date);
+
+    const storedEvents = await testDatabase.db
+      .select({ eventType: gameEvents.eventType })
+      .from(gameEvents)
+      .where(eq(gameEvents.gameId, GAME_ID))
+      .orderBy(asc(gameEvents.createdAt));
+
+    expect(storedEvents.map((event) => event.eventType).sort()).toEqual([
+      eventTypes.objectiveStateChanged,
+      eventTypes.controlStateChanged,
+      eventTypes.resourceChanged,
+      eventTypes.challengeCompleted,
+      eventTypes.zoneCaptured,
+    ].sort());
+  });
+
   it('commits expired-claim cleanup and returns claim expired', async () => {
     await seedGame();
     await seedTeam();
@@ -377,6 +435,18 @@ describe('territory complete route', () => {
     expect(storedEvents).toHaveLength(5);
     expect(ledgerRows).toHaveLength(1);
   });
+
+
+  function validGpsPayload() {
+    return {
+      lat: 49.8951,
+      lng: -97.1384,
+      gpsErrorMeters: 8,
+      speedMps: 0,
+      headingDegrees: 90,
+      capturedAt: new Date().toISOString(),
+    };
+  }
 
   async function completeRequest(input: {
     sessionToken: string;

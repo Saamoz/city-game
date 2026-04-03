@@ -1,4 +1,12 @@
-import type { GeoJsonGeometry, GeoJsonPoint, GeoJsonPolygon, Zone } from '@city-game/shared';
+import {
+  DEFAULT_GPS_BUFFER_METERS,
+  type GeoJsonGeometry,
+  type GeoJsonLineString,
+  type GeoJsonMultiPolygon,
+  type GeoJsonPoint,
+  type GeoJsonPolygon,
+  type Zone,
+} from '@city-game/shared';
 
 const DEFAULT_POINT_ZONE_RADIUS_METERS = 80;
 const EARTH_RADIUS_METERS = 6_378_137;
@@ -51,6 +59,24 @@ export function getZoneAnchor(zone: Zone): [number, number] {
   return [sums.lng / positions.length, sums.lat / positions.length];
 }
 
+export function findContainingZone(zones: Zone[], point: [number, number] | null): Zone | null {
+  if (!point) {
+    return null;
+  }
+
+  for (const zone of zones) {
+    if (zone.isDisabled) {
+      continue;
+    }
+
+    if (isPointInsideZone(zone, point)) {
+      return zone;
+    }
+  }
+
+  return null;
+}
+
 export function formatDistance(distanceMeters: number | null): string {
   if (distanceMeters === null || Number.isNaN(distanceMeters)) {
     return 'Distance unavailable';
@@ -85,6 +111,124 @@ export function getDistanceMeters(
   const arc = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 
   return EARTH_RADIUS_METERS * arc;
+}
+
+function isPointInsideZone(zone: Zone, point: [number, number]): boolean {
+  const bufferMeters = zone.claimRadiusMeters ?? DEFAULT_GPS_BUFFER_METERS;
+
+  switch (zone.geometry.type) {
+    case 'Point': {
+      const anchor: [number, number] = [zone.geometry.coordinates[0], zone.geometry.coordinates[1]];
+      return (getDistanceMeters(point, anchor) ?? Number.POSITIVE_INFINITY) <= (zone.claimRadiusMeters ?? DEFAULT_POINT_ZONE_RADIUS_METERS);
+    }
+    case 'LineString':
+      return distanceToLineStringMeters(point, zone.geometry) <= bufferMeters;
+    case 'Polygon':
+      return isPointInsidePolygon(point, zone.geometry, bufferMeters);
+    case 'MultiPolygon':
+      return zone.geometry.coordinates.some((coordinates) => isPointInsidePolygon(point, { type: 'Polygon', coordinates }, bufferMeters));
+  }
+}
+
+function isPointInsidePolygon(point: [number, number], polygon: GeoJsonPolygon, bufferMeters: number): boolean {
+  if (polygon.coordinates.length === 0) {
+    return false;
+  }
+
+  if (isPointInRing(point, polygon.coordinates[0])) {
+    const insideHole = polygon.coordinates.slice(1).some((ring) => isPointInRing(point, ring));
+    if (!insideHole) {
+      return true;
+    }
+  }
+
+  return distanceToPolygonMeters(point, polygon) <= bufferMeters;
+}
+
+function distanceToPolygonMeters(point: [number, number], polygon: GeoJsonPolygon): number {
+  let distance = Number.POSITIVE_INFINITY;
+
+  for (const ring of polygon.coordinates) {
+    distance = Math.min(distance, distanceToRingMeters(point, ring));
+  }
+
+  return distance;
+}
+
+function distanceToRingMeters(point: [number, number], ring: Array<[number, number] | number[]>): number {
+  if (ring.length < 2) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  let distance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < ring.length - 1; index += 1) {
+    const start = ring[index] as [number, number];
+    const end = ring[index + 1] as [number, number];
+    distance = Math.min(distance, distanceToSegmentMeters(point, start, end));
+  }
+
+  return distance;
+}
+
+function distanceToLineStringMeters(point: [number, number], lineString: GeoJsonLineString): number {
+  if (lineString.coordinates.length < 2) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  let distance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < lineString.coordinates.length - 1; index += 1) {
+    const start = lineString.coordinates[index] as [number, number];
+    const end = lineString.coordinates[index + 1] as [number, number];
+    distance = Math.min(distance, distanceToSegmentMeters(point, start, end));
+  }
+
+  return distance;
+}
+
+function distanceToSegmentMeters(point: [number, number], start: [number, number], end: [number, number]): number {
+  const referenceLat = (point[1] + start[1] + end[1]) / 3;
+  const projectedPoint = projectToMeters(point, referenceLat);
+  const projectedStart = projectToMeters(start, referenceLat);
+  const projectedEnd = projectToMeters(end, referenceLat);
+
+  const deltaX = projectedEnd[0] - projectedStart[0];
+  const deltaY = projectedEnd[1] - projectedStart[1];
+  const lengthSquared = (deltaX ** 2) + (deltaY ** 2);
+
+  if (lengthSquared === 0) {
+    return Math.hypot(projectedPoint[0] - projectedStart[0], projectedPoint[1] - projectedStart[1]);
+  }
+
+  const ratio = clamp(
+    ((projectedPoint[0] - projectedStart[0]) * deltaX + (projectedPoint[1] - projectedStart[1]) * deltaY) / lengthSquared,
+    0,
+    1,
+  );
+
+  const projectedClosest: [number, number] = [
+    projectedStart[0] + deltaX * ratio,
+    projectedStart[1] + deltaY * ratio,
+  ];
+
+  return Math.hypot(projectedPoint[0] - projectedClosest[0], projectedPoint[1] - projectedClosest[1]);
+}
+
+function isPointInRing(point: [number, number], ring: Array<[number, number] | number[]>): boolean {
+  let inside = false;
+
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index, index += 1) {
+    const [currentLng, currentLat] = ring[index] as [number, number];
+    const [previousLng, previousLat] = ring[previous] as [number, number];
+
+    const intersects = ((currentLat > point[1]) !== (previousLat > point[1]))
+      && (point[0] < ((previousLng - currentLng) * (point[1] - currentLat)) / ((previousLat - currentLat) || Number.EPSILON) + currentLng);
+
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
 }
 
 function bufferPointToPolygon(point: GeoJsonPoint, radiusMeters: number): GeoJsonPolygon {
@@ -125,6 +269,14 @@ function destinationPoint(
   return [normalizeLongitude(toDegrees(nextLng)), toDegrees(nextLat)];
 }
 
+function projectToMeters(point: [number, number], referenceLat: number): [number, number] {
+  const referenceLatRadians = toRadians(referenceLat);
+  return [
+    toRadians(point[0]) * EARTH_RADIUS_METERS * Math.cos(referenceLatRadians),
+    toRadians(point[1]) * EARTH_RADIUS_METERS,
+  ];
+}
+
 function toRadians(value: number): number {
   return (value * Math.PI) / 180;
 }
@@ -135,4 +287,8 @@ function toDegrees(value: number): number {
 
 function normalizeLongitude(value: number): number {
   return ((value + 540) % 360) - 180;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }

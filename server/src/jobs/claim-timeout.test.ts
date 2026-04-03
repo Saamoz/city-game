@@ -114,6 +114,33 @@ describe('claim timeout job', () => {
     expect(notifications).toEqual([]);
   });
 
+  it('clears the temporary zone assignment when a portable claim expires', async () => {
+    const notifications: TeamNotificationInput[] = [];
+    const broadcasts: Array<Record<string, unknown>> = [];
+    await seedBaseState();
+    await seedClaimedChallenge({ expiresAt: new Date(NOW.getTime() - 60_000), config: { portable: true } });
+
+    const result = await runClaimTimeoutSweep({
+      db: testDatabase.db,
+      broadcaster: {
+        send: async (input) => {
+          broadcasts.push(input as unknown as Record<string, unknown>);
+          return 1;
+        },
+      },
+      modeRegistry: createModeRegistry(),
+      notificationService: notificationRecorder(notifications),
+      now: NOW,
+    });
+
+    expect(result.expiredClaims).toBe(1);
+
+    const [storedChallenge] = await testDatabase.db.select().from(challenges).where(eq(challenges.id, CHALLENGE_ID));
+    expect(storedChallenge?.zoneId).toBeNull();
+    expect(broadcasts).toHaveLength(1);
+  });
+
+
   it('sends pre-expiry warnings and marks warningSent without changing authoritative state', async () => {
     const notifications: TeamNotificationInput[] = [];
     const broadcasts: Array<Record<string, unknown>> = [];
@@ -210,7 +237,7 @@ describe('claim timeout job', () => {
     await testDatabase.db.insert(players).values(createTestPlayer({ id: PLAYER_ID }));
   }
 
-  async function seedClaimedChallenge(input: { expiresAt: Date; warningSent?: boolean }) {
+  async function seedClaimedChallenge(input: { expiresAt: Date; warningSent?: boolean; config?: Record<string, unknown> }) {
     const zone = await createZone(testDatabase.db, {
       gameId: GAME_ID,
       name: 'Downtown Zone',
@@ -223,6 +250,7 @@ describe('claim timeout job', () => {
       gameId: GAME_ID,
       zoneId: zone.id,
       status: 'available',
+      config: input.config ?? {},
     }));
 
     await testDatabase.db.insert(challengeClaims).values({

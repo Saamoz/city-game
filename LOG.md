@@ -151,3 +151,72 @@ These were identified as flexibility improvements before frontend work begins:
 - Phase 30 follow-up polish: zone fills were desaturated, the separate selected-card summary was removed, the deck became a collapsible dock, explicit Prev/Next deck controls were added, and challenge details moved into a modal instead of permanent inline chrome.
 - WebStorm shared run configs now use native npm run configurations with the WSL Node interpreter instead of shell scripts. The example `dev.xml` is the template; other configs point at root scripts such as `build`, `typecheck`, `db:migrate`, and `validate`.
 - Added city seed scripts for `db:seed:toronto` and `db:seed:chicago`, with matching WebStorm npm run configs. These two scripts are destructive by design: each truncates live game data before seeding its city demo, so run them one at a time.
+
+---
+
+## Phase 31 Notes
+
+- Portable challenge flow is now live end to end:
+  - seeded city demos create portable deck cards with `config.portable = true` and no fixed `zoneId`
+  - claiming a portable card resolves the player’s current zone from GPS on the server and binds the challenge to that zone for the duration of the claim
+  - releasing or expiring a portable claim clears that temporary `zoneId` again so the card returns to the shared deck cleanly
+- Frontend card actions are now active in the deck itself:
+  - selected cards can `Claim Here`, `Complete`, and `Release`
+  - claimed cards show a live countdown driven from `challenge.expiresAt`
+  - completion accepts an optional short note and sends it as self-report submission payload
+  - long descriptions come from `challenge.config.long_description`; short card copy comes from `challenge.config.short_description`
+- Client-side deck flow is intentionally immediate:
+  - `useIdempotentAction` collapses repeated clicks on the same action while a request is in flight
+  - successful HTTP mutation responses are applied to the Zustand snapshot immediately via the same reducers used by realtime events
+  - socket updates still arrive and remain authoritative, but the UI no longer waits on the round-trip to reflect the action
+- Added browser geolocation hook for the live game view:
+  - watches location continuously with more aggressive options while the tab is visible
+  - supports on-demand refresh before a claim if there is no fresh fix yet
+  - current zone is inferred client-side from the latest GPS point and rendered in the deck/header as advisory context only; the server remains authoritative for actual claim resolution
+- Added portable regression coverage:
+  - claim route assigns `zoneId` when claiming a portable card
+  - release route clears `zoneId` when a portable claim is released
+  - claim-timeout job clears `zoneId` when a portable claim expires
+- Current local test loop for Phase 31:
+  - `pnpm db:up`
+  - `pnpm db:migrate`
+  - `pnpm db:seed:dev` or `pnpm db:seed:toronto` or `pnpm db:seed:chicago`
+  - `pnpm dev`
+  - open the seeded game and test claim/complete/release from the deck while standing inside a visible zone
+- Phase 31 follow-up changed the playable loop again before commit:
+  - the first draft no longer exposes a visible `claimed` in-progress state in the frontend
+  - the main deck now shows only `available` cards
+  - completed cards move into a separate, low-priority archive tray that still uses the card motif and shows the team that finished each card
+- Portable direct completion is now supported on the backend:
+  - `POST /api/v1/challenges/:id/complete` accepts optional nested `gps`
+  - when a challenge is `available` and `config.portable = true`, the Territory complete service resolves the player's current zone from GPS and completes the card atomically in one transaction
+  - this path emits completion/capture/resource events only; it does not emit a separate `challenge_claimed` event, so rival teams do not see an in-progress claim state for portable cards
+- The old `/claim` and `/release` endpoints still exist for platform completeness and tests, but the primary frontend no longer uses them for the portable deck loop.
+- GPS stale-reading handling changed at the UX layer:
+  - stale GPS still returns `GPS_TOO_OLD` from the server validation middleware
+  - the frontend now offers an override confirm and retries the same capture request with a fresh `capturedAt` timestamp if the player accepts
+  - this keeps the strict server validation behavior intact for other routes while allowing the specific game override the user requested
+- Map interaction changes:
+  - the live view now shows the browser's current location as a marker on the map when geolocation is available
+  - card drag-scroll now works over static reward chips/text because only actual buttons are marked as interactive targets
+- Card copy/UI changes:
+  - zone labels now render as just the zone name instead of `Zone <name>`
+  - the selected-card action area is reduced to a single `Claim` action plus `Details`
+  - generic claim/release explanatory copy was removed to keep the deck terse for experienced players
+- Seed scripts changed again:
+  - Winnipeg/Toronto/Chicago sample seeds no longer create point zones
+  - all current sample zones are polygon areas so the first manual playtest matches the intended city-control look
+- Validation after the follow-up changes:
+  - `pnpm --filter @city-game/client exec tsc -b --pretty false`
+  - `pnpm --filter @city-game/server exec tsc -b --pretty false`
+  - `pnpm --filter @city-game/server exec vitest run src/modes/territory/complete-routes.test.ts src/modes/territory/routes.test.ts`
+  - `pnpm --filter @city-game/server test`
+  - `pnpm -r typecheck`
+  - `pnpm -r build`
+  - `pnpm db:seed:chicago`
+- Current manual test state after reseed:
+  - active game: `Chicago Territory Demo`
+  - game id: `c85e9bf1-3c31-45dd-a2db-ba01ba46269f`
+  - join codes: `CHIBLUE1`, `CHIGOLD1`, `CHIRED01`
+
+- Phase 31 UI follow-up: fixed challenge selection by making the card itself select reliably, removed the normal browser confirm from the claim flow, and replaced the completed-card tray with a plain readable vertical archive. The stale-GPS override still uses a browser confirm and should move to an in-app warning/modal later.

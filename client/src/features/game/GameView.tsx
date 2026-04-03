@@ -2,11 +2,17 @@ import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import {
   socketServerEventTypes,
+  type ChallengeClaim,
   type GameStateSnapshot,
   type SocketEventPayloadMap,
   type SocketServerEventType,
 } from '@city-game/shared';
-import { ApiError, getMapState } from '../../lib/api';
+import {
+  ApiError,
+  completeChallenge,
+  getMapState,
+  type CompleteChallengeResponse,
+} from '../../lib/api';
 import {
   buildRealtimePayloadKey,
   createRealtimeSocket,
@@ -17,11 +23,19 @@ import {
 import { useGameStore, type RealtimeConnectionStatus } from '../../store/gameStore';
 import { ChallengeDeck } from './ChallengeDeck';
 import { ZoneLayer } from './ZoneLayer';
-import { collectGeometryPositions } from './mapGeometry';
+import { collectGeometryPositions, findContainingZone } from './mapGeometry';
+import { useGeolocation } from './useGeolocation';
+import { useIdempotentAction } from './useIdempotentAction';
 
 interface GameViewProps {
   gameId: string;
   onLeaveMap(): void;
+}
+
+interface ToastMessage {
+  tone: 'success' | 'error';
+  title: string;
+  body?: string;
 }
 
 const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env.MAPBOX_ACCESS_TOKEN ?? '').trim();
@@ -33,9 +47,11 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const fullSyncAbortRef = useRef<AbortController | null>(null);
   const appliedRealtimeKeysRef = useRef<Map<number, Set<string>>>(new Map());
   const hasConnectedRef = useRef(false);
+  const locationMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const [mapForLayer, setMapForLayer] = useState<mapboxgl.Map | null>(null);
   const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
   const [isDeckOpen, setIsDeckOpen] = useState(true);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
 
   const snapshot = useGameStore((state) => state.snapshot);
   const status = useGameStore((state) => state.status);
@@ -50,6 +66,9 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const setError = useGameStore((state) => state.setError);
   const setConnectionState = useGameStore((state) => state.setConnectionState);
   const reset = useGameStore((state) => state.reset);
+
+  const { status: locationStatus, gpsPayload, errorMessage: locationErrorMessage, refresh: refreshLocation } = useGeolocation();
+  const { runAction, isPending } = useIdempotentAction();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -73,6 +92,15 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       reset();
     };
   }, [gameId, initializeSnapshot, reset, setError, setLoading]);
+
+  useEffect(() => {
+    if (!toast) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setToast(null), 4200);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   const canStartRealtime = status === 'ready' && Boolean(snapshot);
 
@@ -291,6 +319,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
     return () => {
       didFitBoundsRef.current = false;
+      locationMarkerRef.current?.remove();
+      locationMarkerRef.current = null;
       setMapForLayer(null);
       mapRef.current = null;
       map.remove();
@@ -315,23 +345,104 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   }, [snapshot]);
 
   useEffect(() => {
-    if (!snapshot?.challenges.length) {
+    const availableChallenges = snapshot?.challenges.filter((challenge) => challenge.status === 'available') ?? [];
+
+    if (!availableChallenges.length) {
       setSelectedChallengeId(null);
       return;
     }
 
-    if (selectedChallengeId && snapshot.challenges.some((challenge) => challenge.id === selectedChallengeId)) {
+    if (selectedChallengeId && availableChallenges.some((challenge) => challenge.id === selectedChallengeId)) {
       return;
     }
 
-    const nextChallenge = [...snapshot.challenges].sort(compareChallengeOrder)[0] ?? null;
+    const nextChallenge = [...availableChallenges].sort((left, right) => left.title.localeCompare(right.title))[0] ?? null;
     setSelectedChallengeId(nextChallenge?.id ?? null);
   }, [selectedChallengeId, snapshot]);
 
   const missingToken = mapboxToken.length === 0;
   const team = snapshot?.team ?? null;
   const challengeCounts = useMemo(() => buildChallengeCounts(snapshot), [snapshot]);
+  const completedCards = useMemo(() => buildCompletedCards(snapshot), [snapshot]);
   const controlledZoneCount = useMemo(() => buildControlledZoneCount(snapshot, team?.id ?? null), [snapshot, team?.id]);
+  const currentPoint = gpsPayload ? [gpsPayload.lng, gpsPayload.lat] as [number, number] : null;
+  const currentZone = useMemo(() => snapshot ? findContainingZone(snapshot.zones, currentPoint) : null, [currentPoint, snapshot]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+
+    if (!map || !currentPoint) {
+      locationMarkerRef.current?.remove();
+      locationMarkerRef.current = null;
+      return;
+    }
+
+    if (!locationMarkerRef.current) {
+      locationMarkerRef.current = new mapboxgl.Marker({ element: createCurrentLocationMarkerElement() })
+        .setLngLat(currentPoint)
+        .addTo(map);
+      return;
+    }
+
+    locationMarkerRef.current.setLngLat(currentPoint);
+  }, [currentPoint]);
+
+  const handleCaptureChallenge = (challengeId: string) => {
+    void runAction(`capture:${challengeId}`, async (idempotencyKey) => {
+      const challenge = snapshot?.challenges.find((entry) => entry.id === challengeId) ?? null;
+      const zoneLabel = currentZone?.name ?? 'this zone';
+
+      if (!challenge) {
+        return null;
+      }
+
+      const attemptCapture = async (gpsCapturedAtOverride?: string) => {
+        const gps = gpsPayload ?? await refreshLocation();
+        const response = await completeChallenge(
+          challengeId,
+          {
+            gps: gpsCapturedAtOverride ? { ...gps, capturedAt: gpsCapturedAtOverride } : gps,
+          },
+          idempotencyKey,
+        );
+        applyCompletedMutation(gameId, response);
+        setToast({
+          tone: 'success',
+          title: response.zone ? `${response.zone.name} captured` : 'Challenge completed',
+        });
+        return response;
+      };
+
+      try {
+        return await attemptCapture();
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'GPS_TOO_OLD') {
+          const override = window.confirm('GPS reading is too old. Use it anyway?');
+          if (!override) {
+            return null;
+          }
+
+          try {
+            return await attemptCapture(new Date().toISOString());
+          } catch (retryError) {
+            setToast({
+              tone: 'error',
+              title: 'Claim failed',
+              body: getMutationErrorMessage(retryError),
+            });
+            throw retryError;
+          }
+        }
+
+        setToast({
+          tone: 'error',
+          title: 'Claim failed',
+          body: getMutationErrorMessage(error),
+        });
+        throw error;
+      }
+    });
+  };
 
   return (
     <main className="relative h-screen overflow-hidden bg-[#dfe6e8] text-[#1f2a2f]">
@@ -349,6 +460,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
             <p className="mt-1 text-sm text-[#44545c]">
               {snapshot?.player?.displayName ?? 'Checking session'}
               {team ? ' · ' + team.name : ''}
+              {currentZone ? ' · ' + currentZone.name : ''}
             </p>
           </div>
 
@@ -388,7 +500,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 <div>
                   <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">Field Deck</p>
                   <p className="mt-2 text-sm leading-6 text-[#44545c]">
-                    {challengeCounts.available} ready · {challengeCounts.claimed} claimed · {challengeCounts.completed} complete
+                    {challengeCounts.available} ready · {challengeCounts.completed} complete
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -413,22 +525,42 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 className={[
                   'grid transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
                   isDeckOpen
-                    ? 'mt-4 max-h-[28rem] translate-y-0 opacity-100'
+                    ? 'mt-4 translate-y-0 opacity-100'
                     : 'pointer-events-none mt-0 max-h-0 translate-y-8 overflow-hidden opacity-0',
                 ].join(' ')}
               >
                 <ChallengeDeck
                   challenges={snapshot.challenges}
-                  selectedChallengeId={selectedChallengeId}
+                  completedCards={completedCards}
+                  currentZoneName={currentZone?.name ?? null}
+                  isActionPending={isPending}
+                  locationMessage={locationErrorMessage}
+                  locationStatus={locationStatus}
+                  onCaptureChallenge={handleCaptureChallenge}
                   onSelectChallenge={setSelectedChallengeId}
+                  selectedChallengeId={selectedChallengeId}
                 />
               </div>
             </section>
           ) : null}
         </div>
       </div>
+
+      {toast ? <Toast tone={toast.tone} title={toast.title} body={toast.body} /> : null}
     </main>
   );
+
+  function applyCompletedMutation(targetGameId: string, response: CompleteChallengeResponse): void {
+    applyRealtimePayload(targetGameId, socketServerEventTypes.challengeCompleted, {
+      gameId: targetGameId,
+      stateVersion: response.stateVersion,
+      serverTime: new Date().toISOString(),
+      challenge: response.challenge,
+      claim: response.claim,
+      zone: response.zone,
+      resourcesAwarded: response.resourcesAwarded,
+    });
+  }
 }
 
 function StatusCard({ label, value }: { label: string; value: string }) {
@@ -463,6 +595,21 @@ function Banner({
   );
 }
 
+function Toast({ tone, title, body }: ToastMessage) {
+  const toneClassName = tone === 'error'
+    ? 'border-[#bb4d4d]/40 bg-[#f7d9d4] text-[#6c2626]'
+    : 'border-[#7b9a73]/40 bg-[#dfeadb] text-[#254028]';
+
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-6 z-20 flex justify-center px-4">
+      <div className={'min-w-[18rem] max-w-md rounded-2xl border px-4 py-3 shadow-[0_20px_50px_rgba(24,32,36,0.22)] ' + toneClassName}>
+        <p className="text-sm font-semibold">{title}</p>
+        {body ? <p className="mt-1 text-sm text-current/85">{body}</p> : null}
+      </div>
+    </div>
+  );
+}
+
 function getGameViewError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.statusCode === 401) {
@@ -490,6 +637,68 @@ function getBoundsFromSnapshot(snapshot: GameStateSnapshot): mapboxgl.LngLatBoun
   return bounds;
 }
 
+function buildChallengeCounts(snapshot: GameStateSnapshot | null) {
+  return (snapshot?.challenges ?? []).reduce(
+    (counts, challenge) => {
+      counts[challenge.status] += 1;
+      return counts;
+    },
+    { available: 0, claimed: 0, completed: 0 },
+  );
+}
+
+function buildControlledZoneCount(snapshot: GameStateSnapshot | null, teamId: string | null): number {
+  if (!snapshot || !teamId) {
+    return 0;
+  }
+
+  return snapshot.zones.filter((zone) => zone.ownerTeamId === teamId).length;
+}
+
+function buildCompletedCards(snapshot: GameStateSnapshot | null): Array<{ challenge: GameStateSnapshot['challenges'][number]; teamName: string | null }> {
+  if (!snapshot) {
+    return [];
+  }
+
+  const completedClaimsByChallengeId = new Map<string, ChallengeClaim>();
+  for (const claim of snapshot.claims) {
+    if (claim.status !== 'completed') {
+      continue;
+    }
+
+    const previous = completedClaimsByChallengeId.get(claim.challengeId);
+    const previousTime = previous?.completedAt ? new Date(previous.completedAt).getTime() : 0;
+    const nextTime = claim.completedAt ? new Date(claim.completedAt).getTime() : 0;
+
+    if (!previous || nextTime >= previousTime) {
+      completedClaimsByChallengeId.set(claim.challengeId, claim);
+    }
+  }
+
+  const teamNameById = new Map(snapshot.teams.map((team) => [team.id, team.name]));
+
+  return snapshot.challenges
+    .filter((challenge) => challenge.status === 'completed')
+    .sort((left, right) => left.title.localeCompare(right.title))
+    .map((challenge) => {
+      const completedClaim = completedClaimsByChallengeId.get(challenge.id);
+      return {
+        challenge,
+        teamName: completedClaim ? teamNameById.get(completedClaim.teamId) ?? null : null,
+      };
+    });
+}
+
+function createCurrentLocationMarkerElement(): HTMLDivElement {
+  const element = document.createElement('div');
+  element.style.width = '18px';
+  element.style.height = '18px';
+  element.style.borderRadius = '9999px';
+  element.style.border = '3px solid #f3ecd8';
+  element.style.background = '#1f4c63';
+  element.style.boxShadow = '0 0 0 6px rgba(31, 76, 99, 0.18), 0 10px 22px rgba(14, 24, 29, 0.2)';
+  return element;
+}
 function pruneRealtimeKeys(appliedKeys: Map<number, Set<string>>, currentVersion: number): void {
   for (const version of appliedKeys.keys()) {
     if (version < currentVersion) {
@@ -518,16 +727,25 @@ function isJoinAckSuccess(response: unknown): response is { ok: true } {
 function getJoinAckErrorMessage(response: unknown): string {
   if (typeof response === 'object' && response !== null && 'error' in response) {
     const error = (response as { error?: { message?: unknown } }).error;
-    if (error && typeof error.message === 'string') {
+    if (typeof error?.message === 'string') {
       return error.message;
     }
   }
 
-  return 'Failed to join the live feed.';
+  return 'Failed to join the live game feed.';
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
+function formatSocketReason(reason: string): string {
+  switch (reason) {
+    case 'transport close':
+      return 'transport closed';
+    case 'transport error':
+      return 'transport error';
+    case 'ping timeout':
+      return 'ping timeout';
+    default:
+      return reason;
+  }
 }
 
 function getRealtimeErrorMessage(error: unknown): string {
@@ -539,64 +757,21 @@ function getRealtimeErrorMessage(error: unknown): string {
     return error.message;
   }
 
-  return 'Live sync failed.';
+  return 'Failed to refresh live state.';
 }
 
-function formatSocketReason(reason: string): string {
-  switch (reason) {
-    case 'transport close':
-      return 'transport closed';
-    case 'transport error':
-      return 'transport error';
-    case 'ping timeout':
-      return 'ping timeout';
-    case 'io server disconnect':
-      return 'server closed the connection';
-    default:
-      return reason;
+function getMutationErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.message;
   }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return 'Request failed.';
 }
 
-function buildControlledZoneCount(snapshot: GameStateSnapshot | null, teamId: string | null): number {
-  if (!snapshot || !teamId) {
-    return 0;
-  }
-
-  return snapshot.zones.filter((zone) => zone.ownerTeamId === teamId).length;
-}
-
-function buildChallengeCounts(snapshot: GameStateSnapshot | null): {
-  available: number;
-  claimed: number;
-  completed: number;
-} {
-  if (!snapshot) {
-    return {
-      available: 0,
-      claimed: 0,
-      completed: 0,
-    };
-  }
-
-  return snapshot.challenges.reduce(
-    (counts, challenge) => {
-      counts[challenge.status] += 1;
-      return counts;
-    },
-    {
-      available: 0,
-      claimed: 0,
-      completed: 0,
-    },
-  );
-}
-
-function compareChallengeOrder(left: GameStateSnapshot['challenges'][number], right: GameStateSnapshot['challenges'][number]): number {
-  const statusOrder = { available: 0, claimed: 1, completed: 2 } as const;
-  const byStatus = statusOrder[left.status] - statusOrder[right.status];
-  if (byStatus !== 0) {
-    return byStatus;
-  }
-
-  return left.title.localeCompare(right.title);
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
 }

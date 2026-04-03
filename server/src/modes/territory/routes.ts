@@ -28,6 +28,7 @@ const completeChallengeBodySchema = {
   additionalProperties: false,
   properties: {
     submission: {},
+    gps: gpsPayloadSchema,
   },
 } as const;
 
@@ -129,6 +130,10 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       let postCommitData: TerritoryPostCommitData | null = null;
 
+      if (hasGpsPayload(request.body)) {
+        await app.validateGps(request, reply);
+      }
+
       await executeIdempotentMutation(
         app,
         request,
@@ -148,7 +153,7 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
               gameId: player.gameId,
               playerId: player.id,
               teamId: player.teamId,
-              payload: ((request.body ?? null) as JsonObject | null) ?? null,
+              payload: (request.body as JsonObject | null) ?? null,
             },
             { db },
           );
@@ -341,6 +346,14 @@ function isClaimActionBody(value: unknown): value is {
       'stateVersion' in value &&
       typeof (value as { stateVersion?: unknown }).stateVersion === 'number',
   );
+}
+
+function hasGpsPayload(body: unknown): boolean {
+  if (!body || typeof body !== 'object') {
+    return false;
+  }
+
+  return 'gps' in body || 'playerLocation' in body || ('lat' in body && 'lng' in body && 'capturedAt' in body);
 }
 
 function isTerritoryPostCommitData(value: unknown): value is TerritoryPostCommitData {

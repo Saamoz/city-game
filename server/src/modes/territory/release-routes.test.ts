@@ -107,6 +107,28 @@ describe('territory release route', () => {
     ].sort());
   });
 
+  it('clears the temporary zone assignment when a portable claim is released', async () => {
+    await seedGame();
+    await seedTeam();
+    await seedPlayer({ sessionToken: 'portable-release-session' });
+    const zone = await seedZone();
+    await seedChallenge({ zoneId: zone.id, config: { portable: true } });
+    await seedClaimedChallenge({ expiresAt: new Date(Date.now() + 5 * 60_000) });
+    app = await createTestApp({ db: testDatabase.db });
+
+    const response = await releaseRequest({
+      sessionToken: 'portable-release-session',
+      actionId: 'portable-release',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().challenge.zoneId).toBeNull();
+
+    const [storedChallenge] = await testDatabase.db.select().from(challenges).where(eq(challenges.id, CHALLENGE_ID));
+    expect(storedChallenge?.zoneId).toBeNull();
+  });
+
+
   it('allows another team to claim the challenge after release', async () => {
     await seedGame();
     await seedTeam();

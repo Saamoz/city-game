@@ -108,6 +108,7 @@ export function createTerritoryModeHandler(): ModeHandler {
             playerId: action.playerId,
             teamId: action.teamId,
             submission: getCompletionSubmission(action.payload),
+            gpsPayload: getCompletionGps(action.payload),
           });
 
           if (result.kind === 'expired') {
@@ -283,6 +284,15 @@ function getCompletionSubmission(value: unknown): JsonValue | null {
   }
 
   return (value.submission as JsonValue | undefined) ?? null;
+}
+
+
+function getCompletionGps(value: unknown): GpsPayload | null {
+  if (!isJsonObject(value) || !('gps' in value)) {
+    return null;
+  }
+
+  return isGpsPayload(value.gps) ? value.gps : null;
 }
 
 function isJsonObject(value: unknown): value is JsonObject {

@@ -1,9 +1,12 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import {
+  DEFAULT_GPS_BUFFER_METERS,
   errorCodes,
   eventTypes,
   type Challenge,
   type ChallengeClaim,
+  type GameSettings,
+  type GpsPayload,
   type JsonObject,
   type JsonValue,
   type ResourceAwardMap,
@@ -11,13 +14,19 @@ import {
   type Zone,
 } from '@city-game/shared';
 import type { DatabaseClient } from '../../db/connection.js';
+import { env } from '../../db/env.js';
 import { challengeClaims, challenges, zones } from '../../db/schema.js';
 import { AppError } from '../../lib/errors.js';
 import { appendEvents, type AppendEventInput } from '../../services/event-service.js';
 import { getGameById } from '../../services/game-service.js';
 import { transactInTransaction } from '../../services/resource-service.js';
-import { getZoneByIdOrThrow } from '../../services/spatial-service.js';
-import { lockChallenge, serializeChallenge, serializeClaim } from './claim-service.js';
+import {
+  findContainingZones,
+  getDistanceToZoneMeters,
+  getZoneByIdOrThrow,
+  isPointWithinZoneBuffer,
+} from '../../services/spatial-service.js';
+import { isPortableChallengeConfig, lockChallenge, serializeChallenge, serializeClaim } from './claim-service.js';
 
 const ACTIVE_CLAIM_STATUS = 'active';
 
@@ -27,6 +36,7 @@ export interface CompleteChallengeInput {
   playerId: string;
   teamId: string;
   submission?: JsonValue | null;
+  gpsPayload?: GpsPayload | null;
 }
 
 export interface CompleteChallengeSuccessResult {
@@ -71,6 +81,23 @@ export async function completeChallenge(
   if (lockedChallenge.gameId !== input.gameId) {
     throw new AppError(errorCodes.validationError, {
       message: 'Challenge not found for the active player game.',
+    });
+  }
+
+  if (
+    lockedChallenge.status === 'available' &&
+    isPortableChallengeConfig(lockedChallenge.config) &&
+    input.gpsPayload
+  ) {
+    return completePortableChallengeDirectly(db, {
+      challenge: lockedChallenge,
+      gameId: input.gameId,
+      playerId: input.playerId,
+      teamId: input.teamId,
+      submission: input.submission ?? null,
+      gpsPayload: input.gpsPayload,
+      now,
+      settings: game.settings as GameSettings,
     });
   }
 
@@ -125,21 +152,139 @@ export async function completeChallenge(
     throw new AppError(errorCodes.noActiveClaim);
   }
 
+  return finishChallengeCompletion(db, {
+    gameId: input.gameId,
+    playerId: input.playerId,
+    teamId: input.teamId,
+    now,
+    lockedChallenge,
+    updatedChallenge,
+    updatedClaim,
+    zoneBefore,
+  });
+}
+
+async function completePortableChallengeDirectly(
+  db: DatabaseClient,
+  input: {
+    challenge: typeof challenges.$inferSelect;
+    gameId: string;
+    playerId: string;
+    teamId: string;
+    submission: JsonValue | null;
+    gpsPayload: GpsPayload;
+    now: Date;
+    settings: GameSettings;
+  },
+): Promise<CompleteChallengeSuccessResult> {
+  const zone = await resolvePortableZone(db, {
+    gameId: input.gameId,
+    challenge: input.challenge,
+    gpsPayload: input.gpsPayload,
+  });
+
+  if (zone.isDisabled) {
+    throw new AppError(errorCodes.zoneDisabled, {
+      details: {
+        zoneId: zone.id,
+      },
+    });
+  }
+
+  if (input.settings.require_gps_accuracy) {
+    assertGpsAccuracy(zone.maxGpsErrorMeters, input.gpsPayload.gpsErrorMeters);
+  }
+
+  await assertPlayerInsideZone(
+    db,
+    zone.id,
+    input.gpsPayload.lat,
+    input.gpsPayload.lng,
+    zone.claimRadiusMeters,
+  );
+
+  const zoneBefore = await lockZone(db, zone.id);
+  const locationAtClaim = sql`ST_SetSRID(ST_MakePoint(${input.gpsPayload.lng}, ${input.gpsPayload.lat}), 4326)`;
+
+  const [insertedClaim] = await db
+    .insert(challengeClaims)
+    .values({
+      challengeId: input.challenge.id,
+      gameId: input.gameId,
+      teamId: input.teamId,
+      playerId: input.playerId,
+      status: 'completed',
+      expiresAt: input.now,
+      completedAt: input.now,
+      submission: input.submission,
+      locationAtClaim,
+    })
+    .returning();
+
+  if (!insertedClaim) {
+    throw new AppError(errorCodes.validationError, {
+      message: 'Challenge completion failed.',
+    });
+  }
+
+  const [updatedChallenge] = await db
+    .update(challenges)
+    .set({
+      zoneId: zone.id,
+      status: 'completed',
+      currentClaimId: null,
+      expiresAt: null,
+      updatedAt: input.now,
+    })
+    .where(eq(challenges.id, input.challenge.id))
+    .returning();
+
+  if (!updatedChallenge) {
+    throw new AppError(errorCodes.validationError, {
+      message: 'Challenge completion failed.',
+    });
+  }
+
+  return finishChallengeCompletion(db, {
+    gameId: input.gameId,
+    playerId: input.playerId,
+    teamId: input.teamId,
+    now: input.now,
+    lockedChallenge: input.challenge,
+    updatedChallenge,
+    updatedClaim: insertedClaim,
+    zoneBefore,
+  });
+}
+
+async function finishChallengeCompletion(
+  db: DatabaseClient,
+  input: {
+    gameId: string;
+    playerId: string;
+    teamId: string;
+    now: Date;
+    lockedChallenge: typeof challenges.$inferSelect;
+    updatedChallenge: typeof challenges.$inferSelect;
+    updatedClaim: typeof challengeClaims.$inferSelect;
+    zoneBefore: Zone | null;
+  },
+): Promise<CompleteChallengeSuccessResult> {
   let updatedZone: Zone | null = null;
-  if (lockedChallenge.zoneId) {
+  if (input.updatedChallenge.zoneId) {
     await db
       .update(zones)
       .set({
         ownerTeamId: input.teamId,
-        capturedAt: now,
-        updatedAt: now,
+        capturedAt: input.now,
+        updatedAt: input.now,
       })
-      .where(eq(zones.id, lockedChallenge.zoneId));
+      .where(eq(zones.id, input.updatedChallenge.zoneId));
 
-    updatedZone = await getZoneByIdOrThrow(db, lockedChallenge.zoneId);
+    updatedZone = await getZoneByIdOrThrow(db, input.updatedChallenge.zoneId);
   }
 
-  const resourcesAwarded = normalizeResourceAwards(updatedChallenge.scoring as ResourceAwardMap);
+  const resourcesAwarded = normalizeResourceAwards(input.updatedChallenge.scoring as ResourceAwardMap);
   const resourceEntries: ResourceLedgerEntry[] = [];
 
   for (const [resourceType, delta] of Object.entries(resourcesAwarded)) {
@@ -154,31 +299,33 @@ export async function completeChallenge(
         resourceType,
         delta,
         reason: 'challenge_completed',
-        referenceId: updatedChallenge.id,
+        referenceId: input.updatedChallenge.id,
         referenceType: 'challenge',
       }),
     );
   }
 
-  const claim = serializeClaim(updatedClaim);
-  const challenge = serializeChallenge(updatedChallenge);
+  const claim = serializeClaim(input.updatedClaim);
+  const challenge = serializeChallenge(input.updatedChallenge);
   const events: AppendEventInput[] = [
     {
       eventType: eventTypes.objectiveStateChanged,
       entityType: 'challenge',
-      entityId: updatedChallenge.id,
+      entityId: input.updatedChallenge.id,
       actorType: 'player',
       actorId: input.playerId,
       actorTeamId: input.teamId,
       beforeState: {
-        status: lockedChallenge.status,
-        currentClaimId: lockedChallenge.currentClaimId,
-        expiresAt: lockedChallenge.expiresAt?.toISOString() ?? null,
+        status: input.lockedChallenge.status,
+        currentClaimId: input.lockedChallenge.currentClaimId,
+        expiresAt: input.lockedChallenge.expiresAt?.toISOString() ?? null,
+        zoneId: input.lockedChallenge.zoneId,
       },
       afterState: {
-        status: updatedChallenge.status,
-        currentClaimId: updatedChallenge.currentClaimId,
-        expiresAt: updatedChallenge.expiresAt?.toISOString() ?? null,
+        status: input.updatedChallenge.status,
+        currentClaimId: input.updatedChallenge.currentClaimId,
+        expiresAt: input.updatedChallenge.expiresAt?.toISOString() ?? null,
+        zoneId: input.updatedChallenge.zoneId,
       },
       meta: {
         challenge,
@@ -187,7 +334,7 @@ export async function completeChallenge(
     },
   ];
 
-  if (zoneBefore && updatedZone) {
+  if (input.zoneBefore && updatedZone) {
     events.push(
       {
         eventType: eventTypes.controlStateChanged,
@@ -197,8 +344,8 @@ export async function completeChallenge(
         actorId: input.playerId,
         actorTeamId: input.teamId,
         beforeState: {
-          ownerTeamId: zoneBefore.ownerTeamId,
-          capturedAt: zoneBefore.capturedAt,
+          ownerTeamId: input.zoneBefore.ownerTeamId,
+          capturedAt: input.zoneBefore.capturedAt,
         },
         afterState: {
           ownerTeamId: updatedZone.ownerTeamId,
@@ -246,7 +393,7 @@ export async function completeChallenge(
   events.push({
     eventType: eventTypes.challengeCompleted,
     entityType: 'challenge_claim',
-    entityId: updatedClaim.id,
+    entityId: input.updatedClaim.id,
     actorType: 'player',
     actorId: input.playerId,
     actorTeamId: input.teamId,
@@ -310,6 +457,81 @@ async function lockZone(db: DatabaseClient, zoneId: string): Promise<Zone> {
   return getZoneByIdOrThrow(db, zoneId);
 }
 
+async function resolvePortableZone(
+  db: DatabaseClient,
+  input: {
+    gameId: string;
+    challenge: typeof challenges.$inferSelect;
+    gpsPayload: GpsPayload;
+  },
+): Promise<Zone> {
+  const [zone] = await findContainingZones(db, {
+    gameId: input.gameId,
+    lat: input.gpsPayload.lat,
+    lng: input.gpsPayload.lng,
+  });
+
+  if (!zone) {
+    throw new AppError(errorCodes.outsideZone, {
+      message: 'Move into a zone before claiming this card.',
+      details: {
+        lat: input.gpsPayload.lat,
+        lng: input.gpsPayload.lng,
+      },
+    });
+  }
+
+  return zone;
+}
+
+function assertGpsAccuracy(zoneMaxErrorMeters: number | null, gpsErrorMeters: number): void {
+  if (gpsErrorMeters > env.gpsMaxErrorMeters) {
+    throw new AppError(errorCodes.gpsErrorTooHigh, {
+      details: {
+        maxErrorMeters: env.gpsMaxErrorMeters,
+        gpsErrorMeters,
+      },
+    });
+  }
+
+  if (zoneMaxErrorMeters !== null && gpsErrorMeters > zoneMaxErrorMeters) {
+    throw new AppError(errorCodes.gpsErrorTooHigh, {
+      details: {
+        maxErrorMeters: zoneMaxErrorMeters,
+        gpsErrorMeters,
+      },
+    });
+  }
+}
+
+async function assertPlayerInsideZone(
+  db: DatabaseClient,
+  zoneId: string,
+  lat: number,
+  lng: number,
+  claimRadiusMeters: number | null,
+): Promise<void> {
+  const covered = await isPointWithinZoneBuffer(db, {
+    zoneId,
+    lat,
+    lng,
+    bufferMeters: claimRadiusMeters ?? undefined,
+  });
+
+  if (covered) {
+    return;
+  }
+
+  const distanceMeters = await getDistanceToZoneMeters(db, { zoneId, lat, lng });
+  throw new AppError(errorCodes.outsideZone, {
+    details: {
+      zoneId,
+      distanceMeters,
+      bufferMeters: claimRadiusMeters ?? DEFAULT_GPS_BUFFER_METERS,
+    },
+  });
+}
+
 async function expireClaim(
   db: DatabaseClient,
   input: {
@@ -340,6 +562,7 @@ async function expireClaim(
   const [updatedChallenge] = await db
     .update(challenges)
     .set({
+      zoneId: isPortableChallengeConfig(input.challenge.config) ? null : input.challenge.zoneId,
       status: 'available',
       currentClaimId: null,
       expiresAt: null,
@@ -368,14 +591,15 @@ async function expireClaim(
           status: input.challenge.status,
           currentClaimId: input.challenge.currentClaimId,
           expiresAt: input.challenge.expiresAt?.toISOString() ?? null,
+          zoneId: input.challenge.zoneId,
         },
         afterState: {
           status: updatedChallenge.status,
           currentClaimId: updatedChallenge.currentClaimId,
           expiresAt: updatedChallenge.expiresAt?.toISOString() ?? null,
+          zoneId: updatedChallenge.zoneId,
         },
         meta: {
-          reason: 'expired',
           challenge,
           claim,
         } as unknown as JsonObject,
@@ -389,9 +613,9 @@ async function expireClaim(
         actorTeamId: input.claim.teamId,
         afterState: claim as unknown as JsonValue,
         meta: {
-          reason: 'expired',
           challengeId: updatedChallenge.id,
-        },
+          claim,
+        } as unknown as JsonObject,
       },
     ],
   });
@@ -405,17 +629,12 @@ async function expireClaim(
 }
 
 function normalizeResourceAwards(scoring: ResourceAwardMap): ResourceAwardMap {
-  const awards: ResourceAwardMap = {};
-
-  if (!scoring || typeof scoring !== 'object' || Array.isArray(scoring)) {
-    return awards;
-  }
-
-  for (const [resourceType, value] of Object.entries(scoring)) {
-    if (typeof value === 'number' && Number.isFinite(value) && value !== 0) {
-      awards[resourceType] = value;
+  return Object.entries(scoring).reduce<ResourceAwardMap>((awards, [resourceType, value]) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+      return awards;
     }
-  }
 
-  return awards;
+    awards[resourceType] = value;
+    return awards;
+  }, {});
 }

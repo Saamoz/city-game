@@ -1,5 +1,5 @@
 import type { GameSettings, WinConditions } from '@city-game/shared';
-import { pointGeometry, runSampleSeed, squarePolygon, type SampleSeedConfig } from './seed-sample.js';
+import { runSampleSeed, squarePolygon, type SampleSeedConfig } from './seed-sample.js';
 
 const gameSettings: GameSettings = {
   max_concurrent_claims: 2,
@@ -37,10 +37,9 @@ const config: SampleSeedConfig = {
     },
     {
       name: 'Union Station Hall',
-      geometry: pointGeometry(-87.6401, 41.8786),
+      geometry: squarePolygon(-87.6401, 41.8786, 0.00115),
       ownerTeamName: 'Ember Team',
       pointValue: 2,
-      claimRadiusMeters: 90,
       metadata: { landmark: true },
     },
     {
@@ -58,18 +57,47 @@ const config: SampleSeedConfig = {
     },
     {
       name: 'Navy Pier Signal',
-      geometry: pointGeometry(-87.6079, 41.8917),
+      geometry: squarePolygon(-87.6079, 41.8917, 0.0012),
       pointValue: 3,
-      claimRadiusMeters: 105,
       metadata: { landmark: true },
     },
   ],
   challenges: [
-    { zoneName: 'Millennium Park Bowl', title: 'Take the park bowl', scoring: { points: 10, coins: 2 } },
-    { zoneName: 'Union Station Hall', title: 'Hold the terminal hall', scoring: { points: 8, coins: 1 } },
-    { zoneName: 'Riverwalk Crossing', title: 'Control the river crossing', scoring: { points: 12, coins: 3 } },
-    { zoneName: 'Grant Park Fieldhouse', title: 'Sweep the fieldhouse block', scoring: { points: 9, coins: 2 } },
-    { zoneName: 'Navy Pier Signal', title: 'Activate the pier signal', scoring: { points: 11, coins: 2 } },
+    {
+      title: 'Crosswind Check',
+      shortDescription: 'Secure the zone and verify the angle.',
+      longDescription: 'Check the current angle into the zone, confirm it holds, and convert that read into a fast capture.',
+      scoring: { points: 10, coins: 2 },
+      portable: true,
+    },
+    {
+      title: 'Grid Survey',
+      shortDescription: 'Read the block and plant your hold.',
+      longDescription: 'Survey the local block pattern, choose the cleanest hold position, and seal the zone before the rival team rotates in.',
+      scoring: { points: 8, coins: 1 },
+      portable: true,
+    },
+    {
+      title: 'Anchor Sweep',
+      shortDescription: 'Sweep the perimeter and anchor the center.',
+      longDescription: 'Treat the current zone as a live anchor point. Sweep the edge, claim the center, and make the capture stick.',
+      scoring: { points: 12, coins: 3 },
+      portable: true,
+    },
+    {
+      title: 'Approach Audit',
+      shortDescription: 'Confirm the strongest entry line.',
+      longDescription: 'Audit the strongest entry into this zone so the team can either reinforce it or rotate through it immediately after capture.',
+      scoring: { points: 9, coins: 2 },
+      portable: true,
+    },
+    {
+      title: 'Signal Lock',
+      shortDescription: 'Lock the zone and call the claim cleanly.',
+      longDescription: 'Make the capture feel deliberate: identify the zone, confirm the hold, and lock the signal for your team.',
+      scoring: { points: 11, coins: 2 },
+      portable: true,
+    },
   ],
 };
 

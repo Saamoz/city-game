@@ -1,5 +1,5 @@
 import type { GameSettings, WinConditions } from '@city-game/shared';
-import { pointGeometry, runSampleSeed, squarePolygon, type SampleSeedConfig } from './seed-sample.js';
+import { runSampleSeed, squarePolygon, type SampleSeedConfig } from './seed-sample.js';
 
 const DEV_SEED_KEY = 'dev_sample_v1';
 
@@ -39,10 +39,9 @@ const config: SampleSeedConfig = {
     },
     {
       name: 'Union Station',
-      geometry: pointGeometry(-97.1278, 49.8888),
+      geometry: squarePolygon(-97.1278, 49.8888, 0.00115),
       ownerTeamName: 'Blue Team',
       pointValue: 2,
-      claimRadiusMeters: 85,
       metadata: { landmark: true },
     },
     {
@@ -60,18 +59,47 @@ const config: SampleSeedConfig = {
     },
     {
       name: 'St. Boniface Beacon',
-      geometry: pointGeometry(-97.1188, 49.8899),
+      geometry: squarePolygon(-97.1188, 49.8899, 0.0012),
       pointValue: 3,
-      claimRadiusMeters: 100,
       metadata: { landmark: true },
     },
   ],
   challenges: [
-    { zoneName: 'The Forks Market', title: 'Secure the market concourse', scoring: { points: 10, coins: 2 } },
-    { zoneName: 'Union Station', title: 'Hold the station platform', scoring: { points: 8, coins: 1 } },
-    { zoneName: 'Legislative Grounds', title: 'Control the main lawn', scoring: { points: 12, coins: 3 } },
-    { zoneName: 'Exchange Square', title: 'Sweep the plaza', scoring: { points: 9, coins: 2 } },
-    { zoneName: 'St. Boniface Beacon', title: 'Activate the beacon', scoring: { points: 11, coins: 2 } },
+    {
+      title: 'Signal Check',
+      shortDescription: 'Verify the zone and lock the lane.',
+      longDescription: 'Run a fast signal check, confirm the approach is clear, and tag the area for your team before anyone else does.',
+      scoring: { points: 10, coins: 2 },
+      portable: true,
+    },
+    {
+      title: 'Field Sketch',
+      shortDescription: 'Capture the space in three sharp notes.',
+      longDescription: 'Make a quick field sketch of the zone in front of you: entry, sightline, and one landmark worth calling out to the team.',
+      scoring: { points: 8, coins: 1 },
+      portable: true,
+    },
+    {
+      title: 'Marker Drop',
+      shortDescription: 'Plant a clean claim and hold it steady.',
+      longDescription: 'Treat the current zone like a fresh checkpoint. Drop a marker, call the hold, and keep the team’s presence obvious.',
+      scoring: { points: 12, coins: 3 },
+      portable: true,
+    },
+    {
+      title: 'Route Audit',
+      shortDescription: 'Check the approaches and secure the best line.',
+      longDescription: 'Review the routes feeding into this zone and identify the strongest approach for your team to reinforce next.',
+      scoring: { points: 9, coins: 2 },
+      portable: true,
+    },
+    {
+      title: 'Civic Pulse',
+      shortDescription: 'Read the zone and claim it with confidence.',
+      longDescription: 'Take a quick read on how the zone feels on arrival, then convert that read into a decisive capture for your side.',
+      scoring: { points: 11, coins: 2 },
+      portable: true,
+    },
   ],
 };
 

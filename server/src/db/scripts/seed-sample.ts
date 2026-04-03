@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import type { GameSettings, GeoJsonPoint, GeoJsonPolygon, WinConditions } from '@city-game/shared';
+import type { GameSettings, GeoJsonGeometry, GeoJsonPoint, GeoJsonPolygon, WinConditions } from '@city-game/shared';
 import type { DatabaseClient } from '../connection.js';
 import { createDb } from '../connection.js';
 import { challenges, games, teams } from '../schema.js';
@@ -30,7 +30,7 @@ export interface TeamSeed {
 
 export interface ZoneSeed {
   name: string;
-  geometry: GeoJsonPolygon | GeoJsonPoint;
+  geometry: GeoJsonGeometry;
   ownerTeamName?: string | null;
   pointValue: number;
   claimRadiusMeters?: number;
@@ -38,10 +38,12 @@ export interface ZoneSeed {
 }
 
 export interface ChallengeSeed {
-  zoneName: string;
   title: string;
-  description?: string;
+  zoneName?: string;
+  shortDescription?: string;
+  longDescription?: string;
   scoring: Record<string, number>;
+  portable?: boolean;
 }
 
 export interface SampleSeedConfig {
@@ -134,22 +136,34 @@ export async function runSampleSeed(config: SampleSeedConfig, options?: { clearE
 
       const zoneByName = new Map(insertedZones.map((zone) => [zone.name, zone]));
 
-      await transactionalDb.insert(challenges).values(config.challenges.map((challenge) => ({
-        gameId: game.id,
-        zoneId: zoneByName.get(challenge.zoneName)?.id,
-        title: challenge.title,
-        description: challenge.description ?? challenge.title,
-        kind: 'visit',
-        config: {
-          seed_key: config.seedKey,
-          short_description: challenge.description ?? challenge.title,
-          long_description: challenge.description ?? challenge.title,
-        },
-        completionMode: 'self_report',
-        scoring: challenge.scoring,
-        difficulty: 'easy',
-        status: 'available',
-      })));
+      await transactionalDb.insert(challenges).values(config.challenges.map((challenge) => {
+        const zoneId = challenge.zoneName ? zoneByName.get(challenge.zoneName)?.id ?? null : null;
+        if (challenge.zoneName && !zoneId) {
+          throw new Error(`Challenge ${challenge.title} references missing zone ${challenge.zoneName}.`);
+        }
+
+        const shortDescription = challenge.shortDescription?.trim() || challenge.title;
+        const longDescription = challenge.longDescription?.trim() || shortDescription;
+        const portable = challenge.portable ?? !challenge.zoneName;
+
+        return {
+          gameId: game.id,
+          zoneId,
+          title: challenge.title,
+          description: shortDescription,
+          kind: 'visit',
+          config: {
+            seed_key: config.seedKey,
+            portable,
+            short_description: shortDescription,
+            long_description: longDescription,
+          },
+          completionMode: 'self_report',
+          scoring: challenge.scoring,
+          difficulty: 'easy',
+          status: 'available',
+        };
+      }));
 
       await transitionGameLifecycle(transactionalDb, registry, game.id, 'start');
 

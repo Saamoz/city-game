@@ -107,6 +107,33 @@ describe('territory claim route', () => {
   });
 
 
+  it("claims a portable challenge against the player's current zone", async () => {
+    await seedGame();
+    await seedTeam();
+    await seedPlayer({ sessionToken: 'portable-claim-session' });
+    const zone = await seedZone();
+    await seedChallenge({ zoneId: null, config: { portable: true } });
+    app = await createTestApp({ db: testDatabase.db });
+
+    const response = await claimRequest({
+      sessionToken: 'portable-claim-session',
+      actionId: 'portable-claim',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      challenge: {
+        id: CHALLENGE_ID,
+        status: 'claimed',
+        zoneId: zone.id,
+      },
+    });
+
+    const [storedChallenge] = await testDatabase.db.select().from(challenges).where(eq(challenges.id, CHALLENGE_ID));
+    expect(storedChallenge?.zoneId).toBe(zone.id);
+  });
+
+
   it('uses per-game claim_timeout_minutes when present', async () => {
     await seedGame({
       settings: {

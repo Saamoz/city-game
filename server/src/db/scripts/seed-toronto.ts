@@ -1,5 +1,5 @@
 import type { GameSettings, WinConditions } from '@city-game/shared';
-import { pointGeometry, runSampleSeed, squarePolygon, type SampleSeedConfig } from './seed-sample.js';
+import { runSampleSeed, squarePolygon, type SampleSeedConfig } from './seed-sample.js';
 
 const gameSettings: GameSettings = {
   max_concurrent_claims: 2,
@@ -37,10 +37,9 @@ const config: SampleSeedConfig = {
     },
     {
       name: 'CN Tower Plaza',
-      geometry: pointGeometry(-79.3871, 43.6426),
+      geometry: squarePolygon(-79.3871, 43.6426, 0.00115),
       ownerTeamName: 'Harbour Team',
       pointValue: 2,
-      claimRadiusMeters: 90,
       metadata: { landmark: true },
     },
     {
@@ -58,18 +57,47 @@ const config: SampleSeedConfig = {
     },
     {
       name: 'Harbourfront Beacon',
-      geometry: pointGeometry(-79.3801, 43.6389),
+      geometry: squarePolygon(-79.3801, 43.6389, 0.0012),
       pointValue: 3,
-      claimRadiusMeters: 100,
       metadata: { landmark: true },
     },
   ],
   challenges: [
-    { zoneName: 'Union Station Concourse', title: 'Lock down the concourse', scoring: { points: 10, coins: 2 } },
-    { zoneName: 'CN Tower Plaza', title: 'Trigger the tower signal', scoring: { points: 8, coins: 1 } },
-    { zoneName: 'Nathan Phillips Square', title: 'Control the square centerline', scoring: { points: 12, coins: 3 } },
-    { zoneName: 'Distillery Courtyard', title: 'Sweep the brick courtyard', scoring: { points: 9, coins: 2 } },
-    { zoneName: 'Harbourfront Beacon', title: 'Anchor the waterfront beacon', scoring: { points: 11, coins: 2 } },
+    {
+      title: 'Signal Sweep',
+      shortDescription: 'Tag the zone and clear the approach.',
+      longDescription: 'Sweep the immediate approach, confirm the route is workable, and lock the current zone down for your team.',
+      scoring: { points: 10, coins: 2 },
+      portable: true,
+    },
+    {
+      title: 'Street Read',
+      shortDescription: 'Take a fast read on movement and rhythm.',
+      longDescription: 'Read the flow through the zone, call the strongest angle, and turn that local advantage into a capture.',
+      scoring: { points: 8, coins: 1 },
+      portable: true,
+    },
+    {
+      title: 'Hold Marker',
+      shortDescription: 'Establish presence and keep the line stable.',
+      longDescription: 'Treat the zone as a live hold point. Stabilize the team position and make the capture feel deliberate.',
+      scoring: { points: 12, coins: 3 },
+      portable: true,
+    },
+    {
+      title: 'Route Proof',
+      shortDescription: 'Confirm the best route out of the zone.',
+      longDescription: 'Identify the strongest next route from this zone so the team can chain pressure into the surrounding blocks.',
+      scoring: { points: 9, coins: 2 },
+      portable: true,
+    },
+    {
+      title: 'Anchor Call',
+      shortDescription: 'Plant the team flag in the current block.',
+      longDescription: 'Make a clear anchor call from where you stand and convert that local control into a clean territory swing.',
+      scoring: { points: 11, coins: 2 },
+      portable: true,
+    },
   ],
 };
 
