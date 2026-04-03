@@ -179,48 +179,32 @@ All backend phases are implemented, tested, and passing. Summary of what exists:
 
 ---
 
-## Phase 33: Frontend — Distance Tool
+## Phase 33: Frontend — Admin Zone Editor (`/admin/zones`)
 
-**Goal:** Map ruler for measuring distances.
-
-### Work
-
-- Toggle button in desktop toolbar / ☰ menu on mobile
-- `mapMode: ‘play’ | ‘measure’` in Zustand
-- Tap map → place waypoints; amber dashed polyline connects them
-- Running distance label in km near last waypoint (League Mono font, cream pill)
-- Tap last waypoint to undo. "Clear" button resets all.
-- Measure mode suppresses zone tap and deck card selection
-- Escape key exits measure mode
-
-### Validation
-- Measure works on desktop and mobile. Cumulative distance correct. Toggle clears. Deck still openable in measure mode.
-
----
-
-## Phase 34: Frontend — Admin Zone Editor (`/admin/zones`)
-
-**Goal:** Terra Draw zone editing interface.
+**Goal:** Terra Draw editor for reusable authored maps and their zone layouts.
 
 ### Work
 
-- Full-screen Mapbox (same style) + left tool panel (desktop) / bottom sheet (mobile)
+- Full-screen Mapbox with desktop-first left tool panel
+- Authored map list + map metadata form (name, city, center, zoom)
+- Create/select reusable maps independent from games
 - Tool modes: Select, Draw Polygon, Edit Vertices, Delete, Import OSM, Import File
-- Select → sidebar with zone name, point value, claim radius; edit + save (PATCH)
-- Draw → click vertices, double-click to close → POST `/zones`
-- Edit → drag vertices of selected polygon → PATCH
-- Delete → confirm modal → DELETE `/zones/:id`
-- Import OSM → place name / OSM relation ID → preview → confirm bulk import
-- Import File → drag-drop GeoJSON FeatureCollection → preview → `/zones/import`
-- Buffer visualization: translucent ring showing claim radius on selected zone
+- Select → sidebar with authored zone name + claim parameters; edit + save (`PATCH /map-zones/:id`)
+- Draw → click vertices, double-click to close → `POST /maps/:id/zones`
+- Delete → confirm modal → `DELETE /map-zones/:id`
+- Import OSM → preview → confirm bulk import into authored map
+- Import File → drag-drop GeoJSON FeatureCollection → preview → `POST /maps/:id/zones/import`
+- Export current authored zone configuration as GeoJSON
 - Zone name labels always visible in editor mode
 
 ### Validation
-- All CRUD operations work and persist. Import (OSM + file) works. Buffer ring renders. Mobile editing functional.
+- Authored maps persist independently from games.
+- A game can be created with a `mapId`, started, and receives cloned runtime zones from that authored map.
+- CRUD/import/export all work against authored maps without mutating already-running games.
 
 ---
 
-## Phase 35: Frontend — Admin Panel (`/admin`)
+## Phase 34: Frontend — Admin Panel (`/admin`)
 
 **Goal:** Game management and overrides UI.
 
@@ -240,7 +224,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 36: PWA & Service Worker
+## Phase 35: PWA & Service Worker
 
 **Goal:** Installable, offline-capable, push-enabled.
 
@@ -256,7 +240,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 37: Rate Limiting
+## Phase 36: Rate Limiting
 
 **Goal:** Prevent abuse.
 
@@ -270,7 +254,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 38: End-to-End Integration Test
+## Phase 37: End-to-End Integration Test
 
 **Goal:** Full game scenario automated.
 
@@ -285,7 +269,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 39: Mobile Testing & Polish
+## Phase 38: Mobile Testing & Polish
 
 **Goal:** Works on real phones.
 
@@ -299,7 +283,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 40: Deployment
+## Phase 39: Deployment
 
 **Goal:** Production on Proxmox.
 
@@ -314,7 +298,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 41: Playtest Prep
+## Phase 40: Playtest Prep
 
 **Goal:** Game configured for real play.
 
@@ -328,7 +312,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 42: Playtest & Post-Mortem
+## Phase 41: Playtest & Post-Mortem
 
 **Goal:** Real game, real data, real learning.
 
@@ -345,3 +329,24 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 ---
 
 *Ship V1 by completing all phases. Each phase is independently testable.*
+---
+
+## Future Work
+
+### Deferred Frontend — Distance Tool (formerly Phase 33)
+
+**Goal:** Map ruler for measuring distances.
+
+### Work
+
+- Toggle button in desktop toolbar / ☰ menu on mobile
+- `mapMode: 'play' | 'measure'` in Zustand
+- Tap map → place waypoints; amber dashed polyline connects them
+- Running distance label in km near last waypoint (League Mono font, cream pill)
+- Tap last waypoint to undo. "Clear" button resets all.
+- Measure mode suppresses zone tap and deck card selection
+- Escape key exits measure mode
+
+### Validation
+- Measure works on desktop and mobile. Cumulative distance correct. Toggle clears. Deck still openable in measure mode.
+

@@ -11,6 +11,9 @@
   },
   "dependencies": {
     "@city-game/shared": "workspace:*",
+    "@mapbox/mapbox-gl-draw": "^1.5.1",
+    "@turf/turf": "^7.3.4",
+    "@types/mapbox__mapbox-gl-draw": "^1.4.9",
     "mapbox-gl": "^3.20.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
