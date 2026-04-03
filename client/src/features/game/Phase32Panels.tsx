@@ -288,16 +288,16 @@ function OverlayShell({ title, onClose, children }: { title: string; onClose(): 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#162126]/42 p-0 [touch-action:none] sm:items-center sm:p-6" onClick={() => requestClose(false)}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#162126]/42 p-0 [touch-action:none] lg:items-center lg:p-6" onClick={() => requestClose(false)}>
       <section
-        className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] shadow-[0_30px_80px_rgba(24,32,36,0.28)] sm:rounded-[2rem]"
+        className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] shadow-[0_30px_80px_rgba(24,32,36,0.28)] lg:rounded-[2rem]"
         onClick={(event) => event.stopPropagation()}
         style={{
           transform: `translateY(${dragOffset}px)`,
           transition: isDragging ? 'none' : 'transform 0.24s ease',
         }}
       >
-        <header className="border-b border-[#d6c59d]/55 px-5 py-4 sm:px-6">
+        <header className="border-b border-[#d6c59d]/55 px-5 py-4 lg:px-6">
           <div
             className="mb-3 flex cursor-grab touch-none justify-center active:cursor-grabbing"
             onPointerDown={handlePointerDown}
@@ -308,7 +308,7 @@ function OverlayShell({ title, onClose, children }: { title: string; onClose(): 
             <div className="h-1 w-10 rounded-full bg-[#c8b48a]/70" />
           </div>
           <div className="flex items-center justify-between gap-4">
-            <h2 className="truncate font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#24343a] sm:text-[2rem]">{title}</h2>
+            <h2 className="truncate font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#24343a] lg:text-[2rem]">{title}</h2>
             <button
               className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#f2ead6]"
               onClick={() => requestClose(true)}
@@ -318,7 +318,7 @@ function OverlayShell({ title, onClose, children }: { title: string; onClose(): 
             </button>
           </div>
         </header>
-        <div className="overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
+        <div className="overflow-y-auto px-5 py-5 lg:px-6">{children}</div>
       </section>
     </div>
   );

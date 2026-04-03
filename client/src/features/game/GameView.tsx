@@ -719,11 +719,11 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,234,215,0.16),transparent_28%),linear-gradient(180deg,rgba(223,230,232,0.04),rgba(223,230,232,0.16))]" />
       <ZoneLayer map={mapForLayer} snapshot={snapshot} />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-[linear-gradient(180deg,rgba(243,236,220,0.9),rgba(243,236,220,0))] px-4 pb-10 pt-4 sm:px-6 lg:px-8">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-[linear-gradient(180deg,rgba(243,236,220,0.9),rgba(243,236,220,0))] px-4 pb-10 pt-4 lg:px-8">
         <div className="pointer-events-auto mx-auto max-w-7xl">
 
           {/* Mobile top bar */}
-          <div className="sm:hidden flex items-start justify-between gap-3">
+          <div className="flex items-start justify-between gap-3 lg:hidden">
             <div className="min-w-0 space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 {team ? (
@@ -758,11 +758,11 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           </div>
 
           {/* Desktop HUD */}
-          <div className="hidden sm:flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="hidden lg:flex lg:flex-row lg:items-start lg:justify-between">
             <div className="flex min-w-0 flex-1 flex-col gap-3 lg:max-w-[28rem]">
               <div className="rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] px-5 py-4 shadow-[0_20px_60px_rgba(46,58,62,0.18)]">
                 <p className="text-[11px] uppercase tracking-[0.35em] text-[#936718]">Field Brief</p>
-                <h1 className="mt-2 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#1f2a2f] sm:text-3xl">
+                <h1 className="mt-2 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#1f2a2f] lg:text-3xl">
                   {snapshot?.game.name ?? 'Loading game'}
                 </h1>
                 <p className="mt-1 text-sm text-[#44545c]">
@@ -778,7 +778,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 onOpenFeed={() => setActiveOverlay('feed')}
               />
             </div>
-            <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[23rem]">
+            <div className="grid gap-3 lg:min-w-[23rem]">
               <StatusCard label="Controlled" value={String(controlledZoneCount)} />
               <StatusCard label="Deck" value={String(challengeCounts.available)} />
               <StatusCard label="Version" value={String(snapshot?.game.stateVersion ?? 0)} />
@@ -788,7 +788,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
         </div>
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-4 pb-4 sm:px-6 lg:px-8">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-4 pb-4 lg:px-8">
         <div className="pointer-events-auto mx-auto flex max-w-7xl flex-col gap-3">
           {missingToken ? (
             <Banner title="Mapbox token required" body="Add VITE_MAPBOX_ACCESS_TOKEN to the root .env file, then restart the client." tone="warning" />
@@ -812,7 +812,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
           {/* Mobile: pill toggle button when deck is closed */}
           {snapshot && !isDeckOpen ? (
-            <div className="sm:hidden flex justify-end">
+            <div className="flex justify-end lg:hidden">
               <button
                 className="rounded-full border border-[#c9ae6d]/55 bg-[#f3ecd8]/96 px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#24343a] shadow-[0_8px_24px_rgba(46,58,62,0.18)] backdrop-blur-sm transition hover:bg-[#eee3cb]"
                 onClick={() => startTransition(() => setIsDeckOpen(true))}
@@ -826,7 +826,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           {/* Mobile: open deck — swipeable, bare cards only */}
           {snapshot && isDeckOpen ? (
             <div
-              className="sm:hidden [touch-action:none]"
+              className="lg:hidden [touch-action:none]"
               style={{
                 transform: `translateY(${deckDragY}px)`,
                 transition: isDraggingDeck ? 'none' : 'transform 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
@@ -895,7 +895,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
           {/* Desktop: full section with chrome */}
           {snapshot ? (
-            <section className="hidden sm:block rounded-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8]/96 p-4 shadow-[0_22px_60px_rgba(46,58,62,0.18)] backdrop-blur-sm sm:p-5">
+            <section className="hidden rounded-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8]/96 p-4 shadow-[0_22px_60px_rgba(46,58,62,0.18)] backdrop-blur-sm lg:block lg:p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">Field Deck</p>
@@ -950,7 +950,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       {/* Mobile menu overlay */}
       {isMenuOpen ? (
         <div
-          className="sm:hidden fixed inset-0 z-50 flex items-end bg-[#162126]/40"
+          className="fixed inset-0 z-50 flex items-end bg-[#162126]/40 lg:hidden"
           onClick={() => requestMenuClose(false)}
         >
           <div

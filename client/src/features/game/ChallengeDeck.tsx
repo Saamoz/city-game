@@ -56,7 +56,7 @@ export function ChallengeDeck({
 
   return (
     <>
-      <div className="hidden sm:flex items-center justify-between gap-3">
+      <div className="hidden lg:flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <p className="text-xs uppercase tracking-[0.22em] text-[#6d7c82]">
             {availableChallenges.length} ready
@@ -119,7 +119,7 @@ export function ChallengeDeck({
                 <article
                   key={challenge.id}
                   className={[
-                    'relative snap-start min-w-[13rem] max-w-[13rem] sm:min-w-[17rem] sm:max-w-[17rem] flex-none rounded-[1.8rem] border p-4 sm:p-5 text-[#1f2a2f] shadow-[0_18px_40px_rgba(24,32,36,0.14)] transition duration-150',
+                    'relative snap-start min-w-[13rem] max-w-[13rem] lg:min-w-[17rem] lg:max-w-[17rem] flex-none rounded-[1.8rem] border p-4 lg:p-5 text-[#1f2a2f] shadow-[0_18px_40px_rgba(24,32,36,0.14)] transition duration-150',
                     isSelected
                       ? 'z-10 border-[#24343a] bg-[#fff8eb] shadow-[0_22px_48px_rgba(24,32,36,0.22)]'
                       : 'z-0 border-[#c8b48a]/55 bg-[#f8f1df] hover:-translate-y-0.5 hover:bg-[#fbf4e4]',
@@ -139,18 +139,18 @@ export function ChallengeDeck({
                   style={{ transform: `rotate(${(index % 2 === 0 ? -1 : 1) * Math.min(index, 2) * 0.35}deg)` }}
                 >
                   <div className="flex items-start justify-between gap-4">
-                    <h3 className="font-[Georgia,Times_New_Roman,serif] text-lg sm:text-xl font-semibold text-[#1f2a2f]">
+                    <h3 className="font-[Georgia,Times_New_Roman,serif] text-lg lg:text-xl font-semibold text-[#1f2a2f]">
                       {challenge.title}
                     </h3>
                   </div>
 
-                  <p className="mt-3 sm:mt-4 overflow-hidden text-sm leading-6 text-[#4f6168] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] sm:[-webkit-line-clamp:4]">
+                  <p className="mt-3 lg:mt-4 overflow-hidden text-sm leading-6 text-[#4f6168] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] lg:[-webkit-line-clamp:4]">
                     {shortDescription}
                   </p>
 
 
-                  <div className="mt-3 sm:mt-5 border-t border-[#d8c8a3]/55 pt-3 sm:pt-4">
-                    <p className="hidden sm:block text-[11px] uppercase tracking-[0.18em] text-[#7d6f55]">
+                  <div className="mt-3 lg:mt-5 border-t border-[#d8c8a3]/55 pt-3 lg:pt-4">
+                    <p className="hidden lg:block text-[11px] uppercase tracking-[0.18em] text-[#7d6f55]">
                       {currentZoneName ?? 'No zone'}
                     </p>
 
@@ -216,7 +216,7 @@ export function ChallengeDeck({
       )}
 
       {completedCards.length ? (
-        <section className="hidden sm:block mt-3 rounded-[1.4rem] border border-[#c8b48a]/40 bg-[#ede4cf]/72 px-4 py-3">
+        <section className="hidden lg:block mt-3 rounded-[1.4rem] border border-[#c8b48a]/40 bg-[#ede4cf]/72 px-4 py-3">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[11px] uppercase tracking-[0.24em] text-[#7a6a48]">
               Completed {completedCards.length}
@@ -267,7 +267,7 @@ export function ChallengeDeck({
 
       {detailChallenge ? (
         <div
-          className="fixed inset-0 z-[60] flex items-end justify-center bg-[#162126]/38 p-4 sm:items-center"
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-[#162126]/38 p-4 lg:items-center"
           data-deck-interactive="true"
           onClick={() => setDetailChallengeId(null)}
         >
