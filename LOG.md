@@ -11,8 +11,8 @@ Running handoff log. Keep short, high-signal notes here: environment quirks, imp
 - Repo: `E:\city game` / WSL: `/mnt/e/city game`
 - Remote: `origin -> https://github.com/Saamoz/city-game.git`
 - Branch: `master`
-- Date: 2026-04-01
-- Stage: **Phase 30 in progress. Frontend map view is being simplified around a portable challenge deck instead of map markers and zone detail.**
+- Date: 2026-04-03
+- Stage: **Phase 31 complete. Mobile-first UI live: floating card deck, swipe gestures, hamburger menu, GPS-driven portable completion flow. Phase 32 next: team HUD, scoreboard, live feed, toasts.**
 
 ---
 
@@ -77,146 +77,52 @@ These were identified as flexibility improvements before frontend work begins:
 - `challenge.kind`, `challenge.config`, and `completionMode` are stored but not dispatched on — all challenges complete identically in V1 (self-report). Branching on completion mode is post-V1.
 - `filterStateForViewer` is an identity function in Territory. The seam is in place for asymmetric visibility modes (hide-and-seek, tag).
 - `.DS_Store` is tracked in git.
+- Stale-GPS override uses `window.confirm` — should move to an in-app modal (Phase 39 polish at latest).
 
 ---
 
-## Phase 28 Notes
+## Phases 28–30 Notes (Summary)
 
-- Frontend Phase 28 is now live in `client/`:
-  - landing flow auto-discovers `GET /api/v1/game/active`
-  - direct `/game/:id` routing is supported without adding a router dependency yet
-  - player registration and team join hit the real backend with cookie auth and generated `Idempotency-Key` headers
-  - map view initializes from `GET /api/v1/game/:id/map-state`
-  - zones render from authoritative snapshot data with owner-team colors
-- `VITE_MAPBOX_ACCESS_TOKEN` is read from the repo-root `.env` via `client/vite.config.ts` (`envDir: '..'`).
-- Mapbox is intentionally split into its own Rollup chunk. The vendor payload is still large, but it is now isolated from the app shell and lazy-loaded behind the game route.
-- Added `@types/geojson` on the client because `mapbox-gl` layer typing pulls `geojson` module types during TypeScript build.
-- Manual local test loop for frontend work:
-  - `pnpm db:up`
-  - `pnpm db:migrate`
-  - `pnpm dev`
-  - open `http://localhost:5173`
-- Useful WebStorm configs remain: `DB Up`, `DB Migrate`, `Dev All`, `Validate`.
+- **Phase 28:** Landing auto-discovers active game. Registration + team join hit real backend. Full-screen Mapbox with team-colored zone polygons. Dev proxy fix (Vite was stripping `/api` prefix). `ZoneLayer` fixed to use React state for map instance (ref-only wiring didn't mount). `VITE_MAPBOX_ACCESS_TOKEN` read from repo-root `.env`.
+- **Phase 29:** Socket.IO client wired with cookie auth. Reconnect re-emits `join_game`. Version ordering: ignore stale, gap → full sync. Per-version dedupe handles same-version sibling events. Reconnect banner in UI.
+- **Phase 30:** Pivoted to portable challenge deck (no map pins, no zone detail sheet). Deck is horizontal card tray with drag-scroll, collapsible dock. Fixed three bugs in `ChallengeDeck.tsx`: hooks naming violation (`createDragRefs` → `useDragRefs`), click bubbling resetting confirm state, `setPointerCapture` timing. City seed scripts added: `db:seed:toronto`, `db:seed:chicago` (destructive — each truncates live data).
 
----
-
-## Dev Seed
-
-- Added `pnpm db:seed:dev` and `DB Seed Dev` WebStorm run config.
-- The seed script creates or reuses a single dev Territory game and avoids creating a second active game if one already exists.
-- Seed data includes:
-  - 1 active game centered on Winnipeg
-  - 3 teams with fixed join codes
-  - 5 zones (mix of polygon and point zones)
-  - 5 available challenges
-- Current seeded game: created or reused on demand by `pnpm db:seed:dev`; the game id is intentionally not fixed anymore because completed seeds are replaced with a fresh active game.
-  - join codes: `RED12345`, `BLUE1234`, `GOLD1234`
-- Implementation note: zone creation in the seed script is intentionally sequential inside the transaction to avoid the `pg` deprecation warning triggered by concurrent queries on a single transaction client.
-- Fixed a Phase 28 dev proxy bug: Vite was stripping `/api` before forwarding, which turned `/api/v1/...` into `/v1/...` and made the frontend look like there was no active game. The client proxy now forwards `/api/v1` unchanged to the Fastify server on port 3000.
-- Phase 28 follow-up fixes:
-  - `ZoneLayer` now receives a real map instance via React state. The previous ref-only wiring meant the layer never mounted against a live `mapbox-gl` instance, so zones were not rendered even though the snapshot loaded.
-  - `Leave Map` now suppresses automatic re-entry on the landing screen for the current browser session. The prior behavior immediately re-opened the map because the existing player session already had a team.
-  - Vite proxy bug and map-instance bug together were the two blockers behind the initial frontend test failures.
-- Frontend visual direction is now explicitly pivoting toward the updated spec: warmer parchment/expedition chrome, serif headers, denser information layout, and quieter map backdrop. This is a starting point, not the final visual system.
-
----
-
-## Phase 29 Notes
-
-- Frontend realtime sync is now wired through `socket.io-client` in the game view:
-  - client connects only after the initial `/game/:id/map-state` snapshot succeeds
-  - every socket `connect` re-emits `join_game` with the latest known `stateVersion`
-  - reconnects therefore restore room membership correctly instead of silently staying unsubscribed
-- Client-side sync behavior now follows the platform rule with one important nuance:
-  - delta batches ignore events older than the current version and request a full sync on a version gap
-  - direct socket payloads also force a full sync on a version gap
-  - exact same-version direct payloads are still allowed once per event key because the server may emit multiple sibling realtime events with the same `stateVersion` for a single transaction (for example `challenge_completed` + `zone_captured` + multiple `resource_changed` payloads)
-- The client keeps a small per-version dedupe map for direct realtime payloads. This prevents duplicate processing during reconnect jitter without dropping legitimate same-version sibling events.
-- Connection state is surfaced in the map UI with explicit `connecting`, `reconnecting`, and `error` banners so manual testing does not depend on browser devtools.
-- `socket.io-client` was added to the client workspace for Phase 29.
-
----
-
-## Phase 30 Notes
-
-- Product direction changed before Phase 30 stabilized: the first playable Territory draft now uses a **portable challenge deck** instead of challenge markers tied to map locations.
-- Main map view requirements now are:
-  - colored ownership zones only
-  - no challenge pins
-  - no zone detail bottom sheet
-  - compact card-style challenge deck over the map chrome
-- The deck is selectable in the client so Phase 31 can attach completion actions to the chosen card without reintroducing map marker selection.
-- Spec and plan were updated at the same time as the client so future phases build against the new loop rather than the earlier marker-based design.
-- Live state sync remains in place; the Phase 30 pivot is a gameplay/UI change, not a realtime architecture change.
-- Phase 30 follow-up polish: zone fills were desaturated, the separate selected-card summary was removed, the deck became a collapsible dock, explicit Prev/Next deck controls were added, and challenge details moved into a modal instead of permanent inline chrome.
-- WebStorm shared run configs now use native npm run configurations with the WSL Node interpreter instead of shell scripts. The example `dev.xml` is the template; other configs point at root scripts such as `build`, `typecheck`, `db:migrate`, and `validate`.
-- Added city seed scripts for `db:seed:toronto` and `db:seed:chicago`, with matching WebStorm npm run configs. These two scripts are destructive by design: each truncates live game data before seeding its city demo, so run them one at a time.
+Dev seed join codes: Winnipeg `RED12345`/`BLUE1234`/`GOLD1234`, Chicago `CHIBLUE1`/`CHIGOLD1`/`CHIRED01`.
 
 ---
 
 ## Phase 31 Notes
 
-- Portable challenge flow is now live end to end:
-  - seeded city demos create portable deck cards with `config.portable = true` and no fixed `zoneId`
-  - claiming a portable card resolves the player’s current zone from GPS on the server and binds the challenge to that zone for the duration of the claim
-  - releasing or expiring a portable claim clears that temporary `zoneId` again so the card returns to the shared deck cleanly
-- Frontend card actions are now active in the deck itself:
-  - selected cards can `Claim Here`, `Complete`, and `Release`
-  - claimed cards show a live countdown driven from `challenge.expiresAt`
-  - completion accepts an optional short note and sends it as self-report submission payload
-  - long descriptions come from `challenge.config.long_description`; short card copy comes from `challenge.config.short_description`
-- Client-side deck flow is intentionally immediate:
-  - `useIdempotentAction` collapses repeated clicks on the same action while a request is in flight
-  - successful HTTP mutation responses are applied to the Zustand snapshot immediately via the same reducers used by realtime events
-  - socket updates still arrive and remain authoritative, but the UI no longer waits on the round-trip to reflect the action
-- Added browser geolocation hook for the live game view:
-  - watches location continuously with more aggressive options while the tab is visible
-  - supports on-demand refresh before a claim if there is no fresh fix yet
-  - current zone is inferred client-side from the latest GPS point and rendered in the deck/header as advisory context only; the server remains authoritative for actual claim resolution
-- Added portable regression coverage:
-  - claim route assigns `zoneId` when claiming a portable card
-  - release route clears `zoneId` when a portable claim is released
-  - claim-timeout job clears `zoneId` when a portable claim expires
-- Current local test loop for Phase 31:
-  - `pnpm db:up`
-  - `pnpm db:migrate`
-  - `pnpm db:seed:dev` or `pnpm db:seed:toronto` or `pnpm db:seed:chicago`
-  - `pnpm dev`
-  - open the seeded game and test claim/complete/release from the deck while standing inside a visible zone
-- Phase 31 follow-up changed the playable loop again before commit:
-  - the first draft no longer exposes a visible `claimed` in-progress state in the frontend
-  - the main deck now shows only `available` cards
-  - completed cards move into a separate, low-priority archive tray that still uses the card motif and shows the team that finished each card
-- Portable direct completion is now supported on the backend:
-  - `POST /api/v1/challenges/:id/complete` accepts optional nested `gps`
-  - when a challenge is `available` and `config.portable = true`, the Territory complete service resolves the player's current zone from GPS and completes the card atomically in one transaction
-  - this path emits completion/capture/resource events only; it does not emit a separate `challenge_claimed` event, so rival teams do not see an in-progress claim state for portable cards
-- The old `/claim` and `/release` endpoints still exist for platform completeness and tests, but the primary frontend no longer uses them for the portable deck loop.
-- GPS stale-reading handling changed at the UX layer:
-  - stale GPS still returns `GPS_TOO_OLD` from the server validation middleware
-  - the frontend now offers an override confirm and retries the same capture request with a fresh `capturedAt` timestamp if the player accepts
-  - this keeps the strict server validation behavior intact for other routes while allowing the specific game override the user requested
-- Map interaction changes:
-  - the live view now shows the browser's current location as a marker on the map when geolocation is available
-  - card drag-scroll now works over static reward chips/text because only actual buttons are marked as interactive targets
-- Card copy/UI changes:
-  - zone labels now render as just the zone name instead of `Zone <name>`
-  - the selected-card action area is reduced to a single `Claim` action plus `Details`
-  - generic claim/release explanatory copy was removed to keep the deck terse for experienced players
-- Seed scripts changed again:
-  - Winnipeg/Toronto/Chicago sample seeds no longer create point zones
-  - all current sample zones are polygon areas so the first manual playtest matches the intended city-control look
-- Validation after the follow-up changes:
-  - `pnpm --filter @city-game/client exec tsc -b --pretty false`
-  - `pnpm --filter @city-game/server exec tsc -b --pretty false`
-  - `pnpm --filter @city-game/server exec vitest run src/modes/territory/complete-routes.test.ts src/modes/territory/routes.test.ts`
-  - `pnpm --filter @city-game/server test`
-  - `pnpm -r typecheck`
-  - `pnpm -r build`
-  - `pnpm db:seed:chicago`
-- Current manual test state after reseed:
-  - active game: `Chicago Territory Demo`
-  - game id: `c85e9bf1-3c31-45dd-a2db-ba01ba46269f`
-  - join codes: `CHIBLUE1`, `CHIGOLD1`, `CHIRED01`
+**Backend additions:**
+- `POST /challenges/:id/complete` now accepts optional nested `gps` body. When challenge is `available` + `config.portable = true`, Territory complete service resolves the player's current zone from GPS and completes atomically in one transaction — no separate `challenge_claimed` event emitted (rival teams don't see an in-progress state for portable cards).
+- Portable claim timeout job and release both clear `zoneId` on the challenge when a portable claim ends.
+- `/claim` and `/release` still exist for platform completeness and tests; not used by the primary frontend.
 
-- Phase 31 UI follow-up: fixed challenge selection by making the card itself select reliably, removed the normal browser confirm from the claim flow, and replaced the completed-card tray with a plain readable vertical archive. The stale-GPS override still uses a browser confirm and should move to an in-app warning/modal later.
+**Frontend completion flow:**
+- `useIdempotentAction` deduplicates in-flight calls by key; callers always get back the same promise while a request is in flight.
+- `useGeolocation` runs `watchPosition` continuously; `refresh()` calls `getCurrentPosition` on demand before a claim if no fix is cached.
+- `GPS_TOO_OLD` → confirm dialog → retry with overridden `capturedAt: new Date().toISOString()`. Error in retry is wrapped in its own try/catch so toast fires rather than being silently swallowed.
+- Optimistic Zustand update on action start; socket arrival reconciles the authoritative state.
+- Deck shows only `available` challenges. Completed cards move to archived tray below the deck.
+
+**Mobile-first UI overhaul:**
+- Full-screen map on mobile; no fixed chrome columns.
+- Mobile top bar (`sm:hidden`): current zone pill + ☰ hamburger. Menu overlay: fixed bottom sheet with game name, player, team, Back to Lobby.
+- Desktop HUD (`hidden sm:flex`): left column with Field Brief card, GPS status pill, full deck with Prev/Next + counts, always-visible completed section, Back to Lobby.
+- Mobile deck: pill button (`sm:hidden`) when closed → tapping slides deck up from bottom (400ms spring). Drag handle at top. Swipe-down to close, swipe-up to reveal completed tray.
+- `touch-action: none` on deck wrapper + `e.preventDefault()` on committed drag prevents viewport pan competing with custom swipe gesture detection.
+- Completed tray uses `max-height` + `opacity` CSS transition (500ms spring) — chosen over translate-based because the deck is bottom-anchored and content below it naturally expands toward the bottom edge.
+- Deck close is two-stage: `setDeckDragY(500)` immediately (spring eject), then `setIsDeckOpen(false)` after 400ms so pill button reappears only after animation completes.
+- Removed Mapbox `NavigationControl` (zoom buttons) — map is a backdrop.
+- Removed scoring/reward pills from all cards and modals (V1 does not display points/coins to players).
+- Card selection: amber outline ring only; no "Selected" badge.
+
+**Swipe thresholds:**
+- Close: deltaY > 80px, or deltaY > 30px + velocity > 0.5 px/ms
+- Show completed: deltaY < −50px, or deltaY < −20px + velocity < −0.4 px/ms
+- Resistance factor on upward overscroll: 0.25×
+
+**Validation:**
+- `pnpm -r typecheck && pnpm -r build && pnpm --filter @city-game/server test`
+- Manual: Chicago seed → join → open deck → swipe → claim challenge → zone captures → completed tray appears correctly.
+- Current seed: `Chicago Territory Demo` — join codes `CHIBLUE1` / `CHIGOLD1` / `CHIRED01`

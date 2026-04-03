@@ -632,15 +632,35 @@ Custom Mapbox Standard derivative: faded theme, muted blue-gray roads, minimal l
 
 Style: `mapbox://styles/saamoz/cmng3j80c004001s831aw5e3b/draft`
 
+No Mapbox NavigationControl (zoom buttons) — the map is a backdrop, not an exploration tool. Pinch-to-zoom works natively.
+
 ### Palette
 
-- **UI chrome**: warm and earthy — cream, aged-paper off-whites, amber accents, deep navy or forest green for contrast.
+- **UI chrome**: warm and earthy — `#f5f0e8` cream backgrounds, `#c8b48a` amber accents and borders, `#3d2b1f` dark-brown text, `#b85c3a` action red for Claim/Complete.
 - **Team colors**: vivid and user-defined (red, blue, gold, etc.). The UI steps back to let them dominate zone fills and scoreboards.
 - **Map base**: cool and faded. Provides spatial context without competing for attention.
+- **Overlays**: `rgba(245,240,232,0.85)` with `backdrop-blur-sm` for panels that float over the map.
 
 ### Typography
 
 Typographic warmth and color over texture. Serif or semi-serif for display and headers to carry heritage character; clean readable type for body and UI controls. The map itself uses League Mono.
+
+### Tokens (Established in Phase 31)
+
+- **Card radius**: `1.4rem` for deck cards, `1.9rem` for deck chrome container
+- **Card shadow**: `shadow-md` or `0 2px 12px rgba(0,0,0,0.18)` for floating deck
+- **Touch targets**: 48px minimum, 56px for primary actions (Claim, Complete)
+- **Swipe handles**: `h-1 w-10 rounded-full bg-[#c8b48a]/70` — visible but not dominant
+- **Animation curve**: `cubic-bezier(0.22, 1, 0.36, 1)` (spring-like) for deck open/close
+
+### Micro-Interactions
+
+- **Deck open**: slides up from bottom over ~400ms with spring easing
+- **Deck close**: same spring in reverse; pill button reappears after animation completes
+- **Completed tray**: `max-height` + `opacity` transition from 0 to `14rem` over 500ms; appears below the deck expanding toward the bottom edge
+- **Card select**: outline ring replaces selected badge (no badge)
+- **Swipe-to-close**: 0.25x resistance on upward (over-drag); threshold 80px or 30px+velocity for close
+- **Swipe-up**: reveals completed tray; threshold 50px or 20px+velocity
 
 ### Admin Panel
 
@@ -654,32 +674,87 @@ Utilitarian. The admin panel prioritizes speed and clarity over visual personali
 
 ```
 /                      Landing / register / join team
-/game/:id              Main game view
-/game/:id/challenges   Challenge list
-/game/:id/feed         Event feed
-/game/:id/scores       Scoreboard
-/admin                 Admin panel
-/admin/zones           Zone editor
-/admin/challenges      Challenge manager
+/game/:id              Main game view (implemented)
+/game/:id/feed         Event feed (Phase 32)
+/game/:id/scores       Scoreboard (Phase 32)
+/admin                 Admin panel (Phase 35)
+/admin/zones           Zone editor (Phase 34)
+/admin/challenges      Challenge manager (Phase 35)
 ```
 
-### Main Game View
+### Main Game View — Current Structure (Phase 31)
 
 ```
 <GameView>
-├── <MapContainer>              Mapbox GL JS
-│   ├── <ZoneLayer>             Colored polygons only
-│   ├── <PlayerLocationMarker>  Pulsing blue dot
-│   ├── <AnnotationLayer>       Team + all annotations
-│   └── <DistanceTool>          Tap → distance in mi/km
-├── <GameHUD>
-│   ├── <TeamBanner>            Name, color, resources
-│   ├── <ChallengeDeck>         Card tray for portable objectives
-│   ├── <SelectedChallenge>     Detail + actions for the chosen card
-│   └── <MiniScoreboard>
-├── <LiveFeed>
-└── <NotificationToast>
+├── <MapContainer>              Full-screen Mapbox GL JS (no zoom controls)
+│   ├── <ZoneLayer>             Colored polygons, owner-team fills
+│   └── <PlayerLocationMarker>  Pulsing blue dot (live GPS)
+│
+├── Mobile HUD (sm:hidden)
+│   ├── Top bar                 Zone pill (current zone name) + ☰ menu button
+│   └── Pill button             "Field Deck ▲" floating bottom-right (when deck closed)
+│
+├── Desktop HUD (hidden sm:flex, left column)
+│   ├── Field Brief card        Game name, team name/color, zone context
+│   ├── GPS status pill         live / requesting / error
+│   ├── <ChallengeDeck>         Horizontal card tray with Prev/Next + counts
+│   ├── Completed cards section Archived card shapes with team attribution
+│   └── Back to Lobby button
+│
+├── Mobile Deck overlay (sm:hidden, slides up from bottom)
+│   ├── Drag handle             h-1 w-10 amber pill — swipe target
+│   ├── <ChallengeDeck>         Bare card tray, no chrome, pan-x scroll
+│   └── Completed tray          Expands below deck on swipe-up (max-h 14rem)
+│
+├── Mobile Menu overlay (fixed inset-0, z-50)
+│   ├── Backdrop                semi-opaque, tap to close
+│   └── Bottom sheet            Game name, player name, team, Back to Lobby
+│
+└── <NotificationToast>         Error/success toasts (bottom center)
 ```
+
+### Challenge Card (Mobile)
+
+Cards are `13rem` wide (`17rem` desktop), `rounded-[1.4rem]`, warm cream background with amber border on selected state. No scoring/reward pills in V1.
+
+**Available card (idle):**
+- Title (bold, truncated to 2 lines)
+- Short description (2 lines, muted)
+- Zone label (desktop only, `sm:block`)
+- Tap anywhere on card → selects it (outline ring)
+
+**Available card (selected):**
+- Same layout + amber outline ring
+- Action row: `[Claim Here]` (red pill) + `[Details]` (ghost)
+- Claim: captures GPS, calls `POST /challenges/:id/complete`, optimistic update
+
+**Completed card:**
+- Greyed title + "✓ Completed" badge
+- Team name that completed it (desktop only)
+- Shown in collapsed tray below deck
+
+### Swipe Gestures (Mobile Deck)
+
+The deck wrapper has `touch-action: none` to prevent viewport pan during swipe:
+
+| Gesture | Threshold | Result |
+|---|---|---|
+| Swipe down | >80px, or >30px + velocity >0.5 | Close deck (spring animation) |
+| Swipe up | >50px, or >20px + velocity <-0.4 | Show completed tray |
+| Swipe up (tray visible) | same | No-op (tray already visible) |
+| Swipe down (tray visible) | >30px | Dismiss tray first, then next swipe closes |
+| Release mid-swipe | below threshold | Snap back |
+
+Resistance: `deltaY * 0.25` on upward overscroll (deck is already at top). Deck close is two-stage: `setDeckDragY(500)` immediately, then `setIsDeckOpen(false)` after 400ms so pill button only appears after animation finishes.
+
+### GPS Flow
+
+`useGeolocation` runs `watchPosition` continuously. On Claim:
+1. Use cached `gpsPayload` if available; call `refresh()` if not.
+2. Server returns `GPS_TOO_OLD` → show confirm dialog → retry with `capturedAt: new Date().toISOString()`.
+3. Server returns `OUTSIDE_ZONE` → toast "You are not inside a zone."
+4. Server returns other error → toast message.
+5. Success → optimistic update applied immediately; socket confirmation arrives and is reconciled.
 
 ### Zustand Store
 
@@ -688,7 +763,7 @@ interface GameStore {
   connected: boolean;
   socket: Socket | null;
   stateVersion: number;
-  player: Player | null;       // player.teamId may be null
+  player: Player | null;
   team: Team | null;
   game: Game | null;
   zones: Map<string, Zone>;
@@ -697,11 +772,8 @@ interface GameStore {
   teams: Map<string, Team>;
   annotations: Map<string, Annotation>;
   teamResources: Map<string, Map<string, number>>;
-  selectedZoneId: string | null;
-  activeChallengeId: string | null;
   playerLocation: GpsPayload | null;
   mapMode: 'play' | 'measure';
-  pendingActions: Map<string, PendingAction>;
 }
 ```
 
@@ -711,16 +783,116 @@ interface GameStore {
 interface GpsPayload {
   lat: number;
   lng: number;
-  gpsErrorMeters: number;        // Error radius from coords.accuracy.
+  gpsErrorMeters: number;
   speedMps: number | null;
   headingDegrees: number | null;
-  capturedAt: string;            // ISO from Position.timestamp.
+  capturedAt: string;            // ISO from Position.timestamp
 }
 ```
 
-### Mobile-First
+### Mobile-First Layout Contract
 
-Full-screen map, bottom sheets, 48px min touch targets (56px for claim/complete), adaptive GPS (10s/30s/60s), Zustand persistence, PWA manifest.
+- **No layout chrome on mobile.** The deck, HUD, and menus float over the full-screen map. Nothing occupies a fixed column or sidebar on small screens.
+- **Progressive enhancement at `sm:` (640px).** Desktop restores the left-column HUD with full deck chrome, counts, zone labels, and completed section always visible.
+- **Touch targets**: 48px minimum, 56px for Claim/Complete. Card height is unrestricted; scroll within the horizontal tray.
+- **Adaptive GPS**: `enableHighAccuracy: true`, `maximumAge: 5000`, `timeout: 12000` while tab is visible. Relaxed when hidden (`maximumAge: 30000`, `timeout: 20000`).
+
+---
+
+### Phase 32 Frontend Design — HUD, Scoreboard & Feed
+
+#### Team HUD (Mobile)
+
+On mobile the top bar currently shows only the current zone pill. Phase 32 adds a **Team Resource Strip** — a compact row anchored below the top bar showing the player's team name color swatch, and resource totals (`⬡ 120 pts`). This strip is dismissible (tap to collapse) and auto-hides when the deck is open.
+
+Desktop HUD already has the Field Brief card; Phase 32 expands it to include live resource counters with subtle count-up animation on resource award events.
+
+#### MiniScoreboard
+
+A collapsed scoreboard widget accessible from the mobile menu (☰ → Standings). On desktop it renders as a compact 2-3 row leaderboard below the resource counters in the left column. Shows: rank, team color swatch, team name, zone count, points. Tapping opens the full Scoreboard page.
+
+#### Full Scoreboard (`/game/:id/scores`)
+
+Full-page view. Top section: game name, time elapsed / remaining. Main table: rank, team name (with color bar), zones owned, points, coins. Territory tiebreak order: points → zones → coins → name. Rows animate in on mount; point changes animate (count-up on live `resource_changed` events). A "Live" badge pulses when socket is connected.
+
+#### Live Feed (`/game/:id/feed`)
+
+Chronological event log. Each entry is an `EventCard`:
+- **Zone captured**: team color indicator + "Team X captured Zone Y"
+- **Challenge completed**: "Player completed [Challenge Title]"
+- **Game started/ended**: banner-style entry
+- **Resource awarded**: "Team X earned N points" (only if resource change is significant, e.g. ≥10)
+
+Feed loads recent events on mount (`GET /game/:id/events`), then appends live via socket. Infinite scroll upward for history. On mobile this is a full page. On desktop it could be a collapsible sidebar — Phase 32 will decide based on available space.
+
+#### NotificationToast
+
+Bottom-center, stacked if multiple. Types:
+- **Success** (green-tinted amber): "Zone captured!" with team color
+- **Error** (red): API error message
+- **Info** (neutral cream): GPS warning, expiry warning
+- Auto-dismiss after 4s; tap to dismiss early. No more than 3 visible at once (oldest drops).
+
+---
+
+### Phase 33 Frontend Design — Distance Tool
+
+A toggleable ruler mode for measuring distances on the map. Activated from a toolbar button (desktop) or the ☰ menu (mobile).
+
+**Behavior:**
+- Tap to place waypoints. Each subsequent tap extends the path.
+- A dashed amber polyline connects waypoints.
+- Running distance label floats near the last waypoint in km (or mi — locale preference stored in localStorage).
+- Tap the last waypoint again to close/undo. A "Clear" button in the toolbar resets all waypoints.
+- While measure mode is active, zone tap interactions are suppressed. Deck can still be opened.
+- Exit measure mode via the toolbar toggle or pressing Escape.
+
+**UI:** The distance label uses the cartographic mono font (League Mono) in a cream pill with amber border — consistent with the map aesthetic.
+
+---
+
+### Phase 34 Frontend Design — Admin Zone Editor (`/admin/zones`)
+
+Powered by Terra Draw. Full-screen map view (same Mapbox style) with a tool panel on the left (desktop) or bottom sheet (mobile).
+
+**Modes (mutually exclusive toolbar buttons):**
+- **Select**: click to select an existing zone polygon. Sidebar shows zone name, point value, claim radius. Edit in-place and save.
+- **Draw Polygon**: click to place vertices, double-click to close. Committed polygon sent to `POST /game/:id/zones`.
+- **Edit**: drag vertices of selected polygon. Save commits a PATCH.
+- **Delete**: select then delete — confirm modal before `DELETE /zones/:id`.
+- **Import OSM**: text field for a place name or OSM relation ID. Preview footprint, confirm to import.
+- **Import File**: drag-drop a GeoJSON FeatureCollection. Preview all polygons, bulk import via `/zones/import`.
+
+**Buffer visualization**: when a zone is selected, a translucent ring shows the claim radius buffer around the zone boundary — helping admins calibrate whether the buffer makes physical sense at the location.
+
+**Zone styling in editor**: owned zones show fill with 50% opacity; selected zone gets a dashed animated border. Zone name labels always visible in editor mode (hidden in player map view).
+
+---
+
+### Phase 35 Frontend Design — Admin Panel (`/admin`)
+
+Utilitarian. Clean sidebar navigation, no cartographic chrome. Sections:
+
+**Game Settings**: name, city, win condition picker (dropdown + config fields), claim timeout, max concurrent claims, GPS accuracy requirement toggle, location tracking toggle.
+
+**Game Lifecycle**: Start / Pause / Resume / End buttons with confirmation modals. Current status badge. `POST /game/:id/start|pause|end`.
+
+**Teams**: list with join codes, colors, player counts. Create team form. Edit name/color inline.
+
+**Challenges**: table with title, kind, status, zone. Create/edit form (title, description, kind, config JSON editor, scoring JSON). Delete with confirm. Filter by status.
+
+**Overrides**: quick-action panel — force-complete a challenge (select from list), reset a challenge, assign zone owner (select zone + team), adjust resources (team + resource + delta + reason), rebroadcast state.
+
+**Scoreboard**: read-only live scoreboard (same data as player view).
+
+---
+
+### Phase 36 — PWA
+
+- `manifest.json`: name "Territory", short_name "Territory", `display: standalone`, theme color amber `#c8b48a`, background color cream `#f5f0e8`, icons at 192px and 512px.
+- Service worker: cache-first for app shell (HTML, JS, CSS), network-first for API calls. Offline shows a cached "You're offline — reconnect to play" screen.
+- Push notifications: `POST /players/me/push-subscribe` stores VAPID subscription. Server triggers push on zone capture by a rival team. Notification body: "Team X captured Zone Y". Tapping opens the game view.
+- Zustand state persisted to `localStorage` (game ID, player ID, team ID) so returning players skip the join flow.
 
 ---
 

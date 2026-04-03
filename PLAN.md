@@ -66,148 +66,193 @@ All backend phases are implemented, tested, and passing. Summary of what exists:
 
 ---
 
-## Phase 28: Frontend — Map Shell & Zone Rendering
+## Phase 28: Frontend — Map Shell & Zone Rendering ✅
 
-**Goal:** Mapbox map with zones from API.
+**Done.** Mapbox map with zones from API.
 
-### Work
-
-- Mapbox init, REST client with cookie handling and Idempotency-Key generation
-- `Landing.tsx`:
-    - On mount: calls `GET /api/v1/game/active` to discover the current game ID. If 404 → show "No active game" message
-    - Registration form: display_name → `POST /game/:id/players` → session cookie set
-    - Team join form: join_code → `POST /game/:id/teams/join` → redirect to game view
-    - If URL already includes `/game/:id`, use that ID directly (supports shareable join links)
+- `Landing.tsx`: auto-discovers `GET /game/active`, registration form, team join form, direct `/game/:id` routing
 - `GameView.tsx`: full-screen Mapbox map
-- `ZoneLayer.tsx`: zones from `GET /map-state`, team-colored polygons
-- `gameStore.ts`: Zustand store initialized from map-state
-
-### Validation
-
-- Browser: open `/` → game discovered automatically, registration + join works
-- Open `/game/:id` directly → uses that ID
-- No active game → helpful message
-- Zones rendered with correct colors. Mobile works
+- `ZoneLayer.tsx`: zones from map-state, team-colored polygons
+- `gameStore.ts`: Zustand store from map-state
+- Dev proxy fix: Vite forwards `/api/v1` unchanged to Fastify on port 3000
+- `VITE_MAPBOX_ACCESS_TOKEN` read from repo-root `.env`
 
 ---
 
-## Phase 29: Frontend — Socket.IO & Live State
+## Phase 29: Frontend — Socket.IO & Live State ✅
 
-**Goal:** Real-time sync with version ordering.
+**Done.** Real-time sync with version ordering.
 
-### Work
-
-- Socket.IO client with cookie auth, Zustand sync handlers
-- **Version rule**: ignore events ≤ current version. Gap → full sync
-- Reconnect banner
-
-### Validation
-
-- State changes reflected live. Disconnect/reconnect works. Out-of-order ignored. Gap → full sync
+- Socket.IO client connects after initial map-state, re-emits `join_game` on every reconnect
+- Version ordering: ignore events ≤ current version; gap → full sync
+- Per-version dedupe map handles same-version sibling events correctly
+- Reconnect banner surfaced in UI
 
 ---
 
-## Phase 30: Frontend — Portable Challenge Deck
+## Phase 30: Frontend — Portable Challenge Deck ✅
 
-**Goal:** Replace map markers and zone detail with a challenge deck-first play surface.
+**Done.** Card-style challenge deck over the map.
 
-### Work
-
-- Remove challenge pins and zone detail bottom sheet from the main map view
-- Render a compact challenge deck of card-style objectives
-- Keep the map focused on colored zone ownership only
-- Preserve live state sync and lightweight deck selection state
-
-### Validation
-
-- No challenge pins on the map. No zone info sheet. Deck cards render and are selectable. Real-time updates still reconnect correctly
+- Removed challenge pins and zone detail sheet
+- Horizontal card tray with drag-scroll and tap-to-select
+- Deck is a collapsible dock; challenge details in a modal
+- Fixed three bugs before stabilization: hooks naming violation (`createDragRefs` → `useDragRefs`), click bubbling resetting confirm state, `setPointerCapture` timing (moved to first drag movement)
 
 ---
 
-## Phase 31: Frontend — Portable Completion UI
+## Phase 31: Frontend — Portable Completion UI + Mobile-First UI ✅
 
-**Goal:** Complete a selected challenge card against the zone the player is currently in.
+**Done.** Full mobile-first redesign + complete challenge flow.
 
-### Work
+### What was built
 
-- Card-driven complete flow instead of zone-bound claim markers
-- Selected challenge actions, submission controls, countdown state, and optimistic UI
-- useIdempotentAction, useGeolocation (adaptive intervals)
-- Optimistic updates with rollback
+**Challenge flow:**
+- `POST /challenges/:id/complete` with GPS — no claim/release step for portable deck
+- `useIdempotentAction` deduplicates in-flight requests
+- `useGeolocation` watches position continuously; `refresh()` for on-demand fix
+- Optimistic Zustand update on action start; socket arrival reconciles
+- `GPS_TOO_OLD` → confirm dialog → retry with overridden `capturedAt`
+- `OUTSIDE_ZONE` → toast with clear message
+
+**Mobile-first UI:**
+- Map is full-screen on mobile; no permanent chrome overlapping it
+- Mobile top bar: zone pill + ☰ hamburger → menu overlay with Back to Lobby
+- Desktop: left-column HUD with Field Brief, GPS pill, full deck chrome
+- Mobile deck: floating overlay that slides up from bottom; pill button when closed
+- Swipe-down to close (spring animation, 400ms); pill reappears only after animation
+- Swipe-up to reveal completed cards tray from below
+- Completed tray: `max-height` + `opacity` CSS transition, 500ms spring
+- Removed Mapbox NavigationControl (zoom buttons)
+- No scoring/reward pills on cards in V1
 
 ### Validation
-
-- Selecting a card and completing it applies to the player’s current zone. Errors show toast + rollback. Double-tap idempotent. GPS adaptive
+- Selecting and completing a card captures current zone. Errors toast + rollback. Double-tap idempotent. GPS adaptive. Swipe gestures work on real devices.
 
 ---
 
-## Phase 32: Frontend — HUD, Scoreboard, & Feed
+## Phase 32: Frontend — HUD, Scoreboard & Feed
 
-**Goal:** Team banner, scoreboard, live feed, toasts.
+**Goal:** Team resource strip, mini scoreboard, full scoreboard page, live event feed, notification toasts.
 
 ### Work
 
-- TeamBanner, MiniScoreboard, Scoreboard page, LiveFeed, EventCard, NotificationToast
+**Team Resource Strip (mobile):**
+- Compact row below the top bar: team color swatch + team name + resource totals (`⬡ 120 pts`)
+- Auto-hides when deck is open to preserve map visibility
+- Tap to collapse/expand
+
+**Desktop HUD expansion:**
+- Field Brief card gains live resource counters
+- Count-up animation on `resource_changed` socket events
+
+**MiniScoreboard:**
+- Accessible from ☰ menu on mobile (Standings item)
+- Desktop: compact 2-3 row leaderboard below resource counters in left column
+- Shows: rank, color swatch, team name, zone count, points
+- Tap → full Scoreboard page
+
+**Full Scoreboard (`/game/:id/scores`):**
+- Full-page view: game name, time elapsed/remaining
+- Table: rank, team color bar, team name, zones owned, points, coins
+- Territory tiebreak: points → zones → coins → name
+- Rows animate in on mount; point changes count-up on live events
+- "Live" badge pulses when connected
+
+**Live Feed (`/game/:id/feed`):**
+- Chronological `EventCard` list
+- Zone captured: team color indicator + "Team X captured Zone Y"
+- Challenge completed: player + challenge title
+- Game lifecycle: banner entries
+- Loads recent events on mount, appends via socket
+- Infinite scroll upward for history
+- Mobile: full page. Desktop: TBD collapsible panel.
+
+**NotificationToast:**
+- Bottom-center stack (max 3 visible)
+- Types: success (green-tinted amber), error (red), info (neutral cream)
+- Auto-dismiss 4s, tap to dismiss early
+- Rival zone capture → toast with team color
 
 ### Validation
-
-- Resources animate. Scoreboard matches. Events animate. Toasts for rival captures
+- Resource counters match server. Scoreboard matches territory ranking. Events animate live. Toasts fire for rival captures and GPS warnings.
 
 ---
 
 ## Phase 33: Frontend — Distance Tool
 
-**Goal:** Measure distances on map.
+**Goal:** Map ruler for measuring distances.
 
 ### Work
 
-- DistanceTool toggle, waypoints, dashed line, distance label, useMapTools
+- Toggle button in desktop toolbar / ☰ menu on mobile
+- `mapMode: ‘play’ | ‘measure’` in Zustand
+- Tap map → place waypoints; amber dashed polyline connects them
+- Running distance label in km near last waypoint (League Mono font, cream pill)
+- Tap last waypoint to undo. "Clear" button resets all.
+- Measure mode suppresses zone tap and deck card selection
+- Escape key exits measure mode
 
 ### Validation
-
-- Measure works. Cumulative. Toggle clears. Zone tap suppressed in measure mode
+- Measure works on desktop and mobile. Cumulative distance correct. Toggle clears. Deck still openable in measure mode.
 
 ---
 
-## Phase 34: Frontend — Admin Zone Editor
+## Phase 34: Frontend — Admin Zone Editor (`/admin/zones`)
 
-**Goal:** Terra Draw zone editing.
+**Goal:** Terra Draw zone editing interface.
 
 ### Work
 
-- Terra Draw setup, draw/edit/delete modes, import (OSM or file), config panel, buffer visualization
+- Full-screen Mapbox (same style) + left tool panel (desktop) / bottom sheet (mobile)
+- Tool modes: Select, Draw Polygon, Edit Vertices, Delete, Import OSM, Import File
+- Select → sidebar with zone name, point value, claim radius; edit + save (PATCH)
+- Draw → click vertices, double-click to close → POST `/zones`
+- Edit → drag vertices of selected polygon → PATCH
+- Delete → confirm modal → DELETE `/zones/:id`
+- Import OSM → place name / OSM relation ID → preview → confirm bulk import
+- Import File → drag-drop GeoJSON FeatureCollection → preview → `/zones/import`
+- Buffer visualization: translucent ring showing claim radius on selected zone
+- Zone name labels always visible in editor mode
 
 ### Validation
-
-- Draw/edit/delete zones. Import works. Config persisted. Buffer shown
+- All CRUD operations work and persist. Import (OSM + file) works. Buffer ring renders. Mobile editing functional.
 
 ---
 
-## Phase 35: Frontend — Admin Panel
+## Phase 35: Frontend — Admin Panel (`/admin`)
 
 **Goal:** Game management and overrides UI.
 
 ### Work
 
-- GameSettings, ChallengeManager, resource/zone override UIs
+Clean sidebar navigation (no cartographic chrome). Sections:
+
+- **Game Settings**: name, city, win condition picker + config, claim timeout, max concurrent claims, GPS accuracy toggle, location tracking toggle
+- **Lifecycle**: Start / Pause / Resume / End with confirm modals + status badge
+- **Teams**: list with join codes + player counts; create team form; edit name/color inline
+- **Challenges**: table (title, kind, status, zone); create/edit form; delete with confirm; filter by status
+- **Overrides**: force-complete, reset, assign zone owner, adjust resources (team + type + delta + reason), rebroadcast state
+- **Scoreboard**: read-only live view
 
 ### Validation
-
-- Lifecycle controls, challenge CRUD, overrides work through UI
+- All lifecycle controls work. Challenge CRUD persists. Overrides apply and broadcast. Scoreboard live.
 
 ---
 
 ## Phase 36: PWA & Service Worker
 
-**Goal:** Installable, offline capable, push handler.
+**Goal:** Installable, offline-capable, push-enabled.
 
 ### Work
 
-- manifest.json, sw.js (cache + push), Zustand persistence, push subscription flow
+- `manifest.json`: name "Territory", `display: standalone`, theme `#c8b48a`, bg `#f5f0e8`, 192/512px icons
+- Service worker: cache-first for app shell, network-first for API; offline fallback screen
+- Push: `POST /players/me/push-subscribe` stores VAPID subscription; server pushes on rival zone capture
+- Zustand persistence: game ID, player ID, team ID in `localStorage` to skip re-join on return
 
 ### Validation
-
-- Add to Home Screen. Offline loads cached. Push notifications work
+- Add to Home Screen works. Offline loads cached shell. Push arrives on rival capture. Return visit skips join flow.
 
 ---
 
