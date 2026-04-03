@@ -5,6 +5,7 @@ import type { GeolocationStatus } from './useGeolocation';
 interface CompletedChallengeCard {
   challenge: Challenge;
   teamName: string | null;
+  teamColor: string | null;
 }
 
 interface ChallengeDeckProps {
@@ -16,6 +17,7 @@ interface ChallengeDeckProps {
   selectedChallengeId: string | null;
   onSelectChallenge(challengeId: string): void;
   onCaptureChallenge(challengeId: string): void;
+  onFocusCompletedCard(challengeId: string): void;
   isActionPending(actionKey: string): boolean;
 }
 
@@ -37,6 +39,7 @@ export function ChallengeDeck({
   selectedChallengeId,
   onSelectChallenge,
   onCaptureChallenge,
+  onFocusCompletedCard,
   isActionPending,
 }: ChallengeDeckProps) {
   const availableChallenges = [...challenges]
@@ -231,21 +234,30 @@ export function ChallengeDeck({
           {showCompleted ? (
             <div className="-mx-4 mt-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               <div className="flex w-max gap-3 pr-4">
-                {completedCards.map(({ challenge, teamName }) => (
-                  <article
+                {completedCards.map(({ challenge, teamName, teamColor }) => (
+                  <button
                     key={challenge.id}
-                    className="min-w-[14rem] max-w-[14rem] flex-none rounded-[1.2rem] border border-[#c8b48a]/45 bg-[#f7efdc] p-4 text-[#24343a] shadow-[0_10px_24px_rgba(24,32,36,0.08)]"
+                    className="min-w-[14rem] max-w-[14rem] flex-none rounded-[1.2rem] border border-[#c8b48a]/45 bg-[#f7efdc] p-4 text-left text-[#24343a] shadow-[0_10px_24px_rgba(24,32,36,0.08)] transition hover:bg-[#fbf3e2]"
+                    data-deck-interactive="true"
+                    onClick={() => onFocusCompletedCard(challenge.id)}
+                    type="button"
                   >
-                    <p className="truncate text-[11px] uppercase tracking-[0.18em] text-[#7a6a48]">
-                      {teamName ?? 'Unknown team'}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-3 w-3 shrink-0 rounded-full border border-[#f8f1df]"
+                        style={{ backgroundColor: teamColor ?? '#a28f67' }}
+                      />
+                      <p className="truncate text-[11px] uppercase tracking-[0.18em] text-[#7a6a48]">
+                        {teamName ?? 'Unknown team'}
+                      </p>
+                    </div>
                     <h3 className="mt-2 line-clamp-2 font-[Georgia,Times_New_Roman,serif] text-lg font-semibold text-[#24343a]">
                       {challenge.title}
                     </h3>
                     <p className="mt-2 line-clamp-3 text-sm leading-6 text-[#55646b]">
                       {getShortDescription(challenge)}
                     </p>
-                  </article>
+                  </button>
                 ))}
               </div>
             </div>

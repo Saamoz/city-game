@@ -5,11 +5,14 @@ import {
   type ChallengeClaim,
   type ErrorResponse,
   type Game,
+  type GameEventRecord,
+  type GameEventType,
   type GameStateSnapshot,
   type GpsPayload,
   type JsonValue,
   type Player,
   type ResourceAwardMap,
+  type ScoreboardEntry,
   type Team,
   type Zone,
 } from '@city-game/shared';
@@ -51,6 +54,15 @@ interface JoinTeamResponse {
 
 interface MapStateResponse {
   snapshot: GameStateSnapshot;
+}
+
+
+interface ScoreboardResponse {
+  scoreboard: ScoreboardEntry[];
+}
+
+interface RecentEventsResponse {
+  events: GameEventRecord[];
 }
 
 export interface ChallengeActionResponse {
@@ -114,6 +126,29 @@ export async function joinTeam(gameId: string, joinCode: string): Promise<JoinTe
 export async function getMapState(gameId: string, signal?: AbortSignal): Promise<GameStateSnapshot> {
   const response = await apiRequest<MapStateResponse>(`/game/${gameId}/map-state`, { signal });
   return response.snapshot;
+}
+
+
+export async function getScoreboard(gameId: string, signal?: AbortSignal): Promise<ScoreboardEntry[]> {
+  const response = await apiRequest<ScoreboardResponse>(`/game/${gameId}/scoreboard`, { signal });
+  return response.scoreboard;
+}
+
+export async function getRecentEvents(
+  gameId: string,
+  options: { limit?: number; eventType?: GameEventType; signal?: AbortSignal } = {},
+): Promise<GameEventRecord[]> {
+  const searchParams = new URLSearchParams();
+  if (typeof options.limit === 'number') {
+    searchParams.set('limit', String(options.limit));
+  }
+  if (options.eventType) {
+    searchParams.set('eventType', options.eventType);
+  }
+
+  const query = searchParams.size ? `?${searchParams.toString()}` : '';
+  const response = await apiRequest<RecentEventsResponse>(`/game/${gameId}/events${query}`, { signal: options.signal });
+  return response.events;
 }
 
 export async function claimChallenge(challengeId: string, gps: GpsPayload, idempotencyKey?: string): Promise<ChallengeActionResponse> {

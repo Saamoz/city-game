@@ -29,7 +29,7 @@
 
 **Zone geometry:** `GEOMETRY(Geometry, 4326)` — supports Polygon (area zones), Point (station/landmark zones), MultiPolygon. `ST_Buffer` and `ST_Covers` work identically across all types. Point zones use `claim_radius_meters` as the capture circle radius.
 
-**Resource types:** Mode-defined strings stored in `resource_ledger.resource_type`. The platform award loop iterates `challenge.scoring` keys — not a fixed enum. Territory uses `points` and `coins`; other modes may define their own without schema changes.
+**Resource types:** Mode-defined strings stored in `resource_ledger.resource_type`. The platform award loop iterates `challenge.scoring` keys — not a fixed enum. Territory V1 does not use a player-facing resource economy; future modes or variants may define their own resource strings without schema changes.
 
 **Claim timeout:** `CLAIM_TIMEOUT_MINUTES` env var is the server-wide default. Per-game override via `game.settings.claim_timeout_minutes`.
 
@@ -58,10 +58,10 @@ All backend phases are implemented, tested, and passing. Summary of what exists:
 - **Territory claim/complete/release**: Full flows with row locks, GPS containment, resource awards, events, receipts, broadcasts.
 - **Claim timeout job**: `FOR UPDATE SKIP LOCKED`, startup recovery, pre-expiry push warnings.
 - **Admin overrides**: force-complete, reset, assign-owner, move-team, rebroadcast-state, adjust-resources.
-- **Win condition evaluation**: all_zones, zone_majority, score_threshold, time_limit. Triggered post-completion and by periodic job.
+- **Win condition evaluation**: all_zones, zone_majority, score_threshold, time_limit. Backend support exists for all four; Territory V1 should use all_zones, zone_majority, and time_limit in product/UI flows.
 - **Player location updates**: Optional tracking, retention cleanup job.
 - **Annotation CRUD**: Player/admin permissions, visibility filtering, broadcasts.
-- **Scoreboard**: Mode-delegated `computeScoreboard()`, Territory ranks by points → zones → coins → name.
+- **Scoreboard**: Mode-delegated `computeScoreboard()`. Territory V1 should rank by zones owned only, with deterministic fallback by team name/id.
 - **Web Push notifications**: VAPID, per-player subscriptions, rate limiting, Territory capture triggers.
 
 ---
@@ -118,7 +118,7 @@ All backend phases are implemented, tested, and passing. Summary of what exists:
 **Mobile-first UI:**
 - Map is full-screen on mobile; no permanent chrome overlapping it
 - Mobile top bar: zone pill + ☰ hamburger → menu overlay with Back to Lobby
-- Desktop: left-column HUD with Field Brief, GPS pill, full deck chrome
+- Desktop: left-column HUD with Field Brief, GPS pill, full deck chrome, and zone-control summary
 - Mobile deck: floating overlay that slides up from bottom; pill button when closed
 - Swipe-down to close (spring animation, 400ms); pill reappears only after animation
 - Swipe-up to reveal completed cards tray from below
@@ -133,30 +133,30 @@ All backend phases are implemented, tested, and passing. Summary of what exists:
 
 ## Phase 32: Frontend — HUD, Scoreboard & Feed
 
-**Goal:** Team resource strip, mini scoreboard, full scoreboard page, live event feed, notification toasts.
+**Goal:** Team control strip, mini scoreboard, full scoreboard page, live event feed, notification toasts.
 
 ### Work
 
-**Team Resource Strip (mobile):**
-- Compact row below the top bar: team color swatch + team name + resource totals (`⬡ 120 pts`)
+**Team Control Strip (mobile):**
+- Compact row below the top bar: team color swatch + team name + zones owned
 - Auto-hides when deck is open to preserve map visibility
 - Tap to collapse/expand
 
 **Desktop HUD expansion:**
-- Field Brief card gains live resource counters
-- Count-up animation on `resource_changed` socket events
+- Field Brief card gains live controlled-zone count and concise standings context
+- No points or currency counters in V1 Territory
 
 **MiniScoreboard:**
 - Accessible from ☰ menu on mobile (Standings item)
-- Desktop: compact 2-3 row leaderboard below resource counters in left column
-- Shows: rank, color swatch, team name, zone count, points
+- Desktop: compact 2-3 row leaderboard below the control summary in left column
+- Shows: rank, color swatch, team name, zones owned
 - Tap → full Scoreboard page
 
 **Full Scoreboard (`/game/:id/scores`):**
 - Full-page view: game name, time elapsed/remaining
-- Table: rank, team color bar, team name, zones owned, points, coins
-- Territory tiebreak: points → zones → coins → name
-- Rows animate in on mount; point changes count-up on live events
+- Table: rank, team color bar, team name, zones owned
+- Territory ranking: zones owned descending, then deterministic team name/id fallback
+- Rows animate in on mount
 - "Live" badge pulses when connected
 
 **Live Feed (`/game/:id/feed`):**
@@ -175,7 +175,7 @@ All backend phases are implemented, tested, and passing. Summary of what exists:
 - Rival zone capture → toast with team color
 
 ### Validation
-- Resource counters match server. Scoreboard matches territory ranking. Events animate live. Toasts fire for rival captures and GPS warnings.
+- Zone-control counts match server ownership. Scoreboard matches Territory V1 ranking. Events animate live. Toasts fire for rival captures and GPS warnings.
 
 ---
 
@@ -281,7 +281,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ### Validation
 
-- All assertions pass. Events, resources, ownership correct
+- All assertions pass. Events and ownership are correct; Territory V1 does not depend on separate points/coins balances.
 
 ---
 

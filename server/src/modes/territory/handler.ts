@@ -227,19 +227,9 @@ export function createTerritoryModeHandler(): ModeHandler {
           resources: balancesByTeam[team.id] ?? { points: 0, coins: 0 },
         }))
         .sort((left, right) => {
-          const pointDelta = (right.resources.points ?? 0) - (left.resources.points ?? 0);
-          if (pointDelta !== 0) {
-            return pointDelta;
-          }
-
           const zoneDelta = right.zoneCount - left.zoneCount;
           if (zoneDelta !== 0) {
             return zoneDelta;
-          }
-
-          const coinDelta = (right.resources.coins ?? 0) - (left.resources.coins ?? 0);
-          if (coinDelta !== 0) {
-            return coinDelta;
           }
 
           const nameCompare = left.team.name.localeCompare(right.team.name);

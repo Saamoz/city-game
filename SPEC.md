@@ -185,7 +185,7 @@ CREATE TABLE challenges (
   kind             VARCHAR(50) NOT NULL,        -- 'visit','text','photo','quiz','multi_step','custom'
   config           JSONB NOT NULL DEFAULT '{}',
   completion_mode  VARCHAR(20) NOT NULL DEFAULT 'self_report',
-  scoring          JSONB NOT NULL DEFAULT '{"points":10}',
+  scoring          JSONB NOT NULL DEFAULT '{}',
   difficulty       VARCHAR(10),
   status           VARCHAR(20) NOT NULL DEFAULT 'available',
   current_claim_id UUID,                        -- FK added via ALTER TABLE (see migration note).
@@ -231,8 +231,9 @@ CREATE TABLE resource_ledger (
   game_id         UUID NOT NULL REFERENCES games(id),
   team_id         UUID NOT NULL REFERENCES teams(id),
   player_id       UUID REFERENCES players(id),   -- NULL = team-level.
-  resource_type   VARCHAR(50) NOT NULL,          -- Free-form string. Territory uses 'points'/'coins'.
-                                                -- Other modes define their own resource type keys.
+  resource_type   VARCHAR(50) NOT NULL,          -- Free-form string. Retained for future modes
+                                                -- and Territory variants with economies.
+                                                -- Territory V1 does not use a player-facing resource economy.
                                                 -- The award loop processes whatever keys appear in
                                                 -- challenge.scoring — not a fixed enum.
   delta           INTEGER NOT NULL,
@@ -458,7 +459,7 @@ interface ModeHandler {
 | Schedule claim timeout | Territory handler |
 | Return HTTP response | Platform |
 
-Note: Resources are NOT awarded during claim. Territory awards resources on completion only. Other modes could define different behavior via their handler.
+Note: No separate resources are awarded during claim. Territory V1 changes zone ownership on completion and does not depend on a player-facing resource economy. Other modes or future Territory variants may award resources via their handler.
 
 ---
 
@@ -515,8 +516,7 @@ Events & Sync:
   GET    /game/:id/scoreboard            Standings
 
 Resources:
-  GET    /game/:id/resources             All team-level balances (V1: team only.
-                                         Ledger supports player-level too for future modes.)
+  GET    /game/:id/resources             All team-level balances (platform seam; not used by Territory V1 UI)
   GET    /game/:id/resources/:team_id    Single team's balances
   GET    /game/:id/resources/:team_id/history  Transactions
 ```
@@ -525,7 +525,7 @@ Resources:
 
 ```
 POST   /challenges/:id/claim      Claim. Requires GPS payload.
-POST   /challenges/:id/complete   Complete. Captures zone, awards resources.
+POST   /challenges/:id/complete   Complete. Captures current zone in Territory V1.
 POST   /challenges/:id/release    Release a claim.
 ```
 
@@ -793,7 +793,7 @@ interface GpsPayload {
 ### Mobile-First Layout Contract
 
 - **No layout chrome on mobile.** The deck, HUD, and menus float over the full-screen map. Nothing occupies a fixed column or sidebar on small screens.
-- **Progressive enhancement at `sm:` (640px).** Desktop restores the left-column HUD with full deck chrome, counts, zone labels, and completed section always visible.
+- **Progressive enhancement at `sm:` (640px).** Desktop restores the left-column HUD with full deck chrome, zone-control counts, zone labels, and completed section always visible.
 - **Touch targets**: 48px minimum, 56px for Claim/Complete. Card height is unrestricted; scroll within the horizontal tray.
 - **Adaptive GPS**: `enableHighAccuracy: true`, `maximumAge: 5000`, `timeout: 12000` while tab is visible. Relaxed when hidden (`maximumAge: 30000`, `timeout: 20000`).
 
@@ -803,17 +803,17 @@ interface GpsPayload {
 
 #### Team HUD (Mobile)
 
-On mobile the top bar currently shows only the current zone pill. Phase 32 adds a **Team Resource Strip** — a compact row anchored below the top bar showing the player's team name color swatch, and resource totals (`⬡ 120 pts`). This strip is dismissible (tap to collapse) and auto-hides when the deck is open.
+On mobile the top bar currently shows only the current zone pill. Phase 32 adds a **Team Control Strip** — a compact row anchored below the top bar showing the player's team color swatch, team name, and current zone count. This strip is dismissible (tap to collapse) and auto-hides when the deck is open.
 
-Desktop HUD already has the Field Brief card; Phase 32 expands it to include live resource counters with subtle count-up animation on resource award events.
+Desktop HUD already has the Field Brief card; Phase 32 expands it to include controlled-zone count and concise standings context instead of points or currency counters.
 
 #### MiniScoreboard
 
-A collapsed scoreboard widget accessible from the mobile menu (☰ → Standings). On desktop it renders as a compact 2-3 row leaderboard below the resource counters in the left column. Shows: rank, team color swatch, team name, zone count, points. Tapping opens the full Scoreboard page.
+A collapsed scoreboard widget accessible from the mobile menu (☰ → Standings). On desktop it renders as a compact 2-3 row leaderboard below the control summary in the left column. Shows: rank, team color swatch, team name, and zones owned. Tapping opens the full Scoreboard page.
 
 #### Full Scoreboard (`/game/:id/scores`)
 
-Full-page view. Top section: game name, time elapsed / remaining. Main table: rank, team name (with color bar), zones owned, points, coins. Territory tiebreak order: points → zones → coins → name. Rows animate in on mount; point changes animate (count-up on live `resource_changed` events). A "Live" badge pulses when socket is connected.
+Full-page view. Top section: game name, time elapsed / remaining. Main table: rank, team name (with color bar), and zones owned. Territory V1 ranking is zone count descending, then deterministic team name/id fallback. Rows animate in on mount. A "Live" badge pulses when socket is connected.
 
 #### Live Feed (`/game/:id/feed`)
 
@@ -821,7 +821,6 @@ Chronological event log. Each entry is an `EventCard`:
 - **Zone captured**: team color indicator + "Team X captured Zone Y"
 - **Challenge completed**: "Player completed [Challenge Title]"
 - **Game started/ended**: banner-style entry
-- **Resource awarded**: "Team X earned N points" (only if resource change is significant, e.g. ≥10)
 
 Feed loads recent events on mount (`GET /game/:id/events`), then appends live via socket. Infinite scroll upward for history. On mobile this is a full page. On desktop it could be a collapsible sidebar — Phase 32 will decide based on available space.
 
@@ -916,22 +915,21 @@ Trust-based. The platform assumes players are honest; validation catches technic
 
 ### Rules
 
-First playable draft: challenges come from a shared portable deck. Players physically enter a zone, choose a card, and complete it against their current zone. Location-pinned challenges can return later as an advanced variant. Completion captures zone, awards resources, consumes challenge. Claims auto-expire after timeout. Max concurrent claims: configurable (default 1).
+First playable draft: challenges come from a shared portable deck. Players physically enter a zone, choose a card, and complete it against their current zone. Completion captures the zone and consumes the challenge. Territory V1 uses zones owned as the only player-facing score. There are no points, coins, shops, or spendable currencies in the first version. Claims auto-expire after timeout. Max concurrent claims: configurable (default 1).
 
 ### Resources
 
-Territory defines two resource types: `points` (team-level, primary scoring) and `coins` (team-level, reserved for future shop mechanics). Both initialize to 0 per team on game start.
+Territory V1 has no separate player-facing resource economy.
 
-Resource types are mode-defined strings stored in `resource_ledger.resource_type`. Future modes may define their own types (e.g. `energy`, `influence`) without schema changes. The platform resource award loop processes whatever keys appear in `challenge.scoring` — it does not validate against a fixed enum.
+The platform still retains `resource_ledger` as a generic seam for future modes and future Territory variants. If a later mode introduces `points`, `coins`, `energy`, or `influence`, those values still belong in `resource_ledger.resource_type`, and the platform award loop can process arbitrary `challenge.scoring` keys.
 
 ### Win Conditions
 
 | Type | Config | Trigger |
 |---|---|---|
 | `all_zones` | `{}` | One team owns all non-disabled zones |
-| `zone_majority` | `{"threshold":0.6}` | ≥60% zones |
-| `time_limit` | `{"duration_minutes":120}` | Clock expires. Most zones (tiebreak: points) |
-| `score_threshold` | `{"target":500}` | Team reaches target |
+| `zone_majority` | `{"threshold":0.6}` | Team owns at least the configured share of zones |
+| `time_limit` | `{"duration_minutes":120}` | Clock expires. Most zones wins (deterministic fallback: team name / id) |
 
 ### Claim Flow
 
@@ -987,27 +985,20 @@ Resource types are mode-defined strings stored in `resource_ledger.resource_type
    i. Load zone via challenge.zone_id
    j. Record zone before_state: { owner_team_id, captured_at }
    k. UPDATE zone: owner_team_id = player's team, captured_at = NOW()
-   l. Write resource transactions:
-      — Read scoring from challenge (e.g. {"points":10,"coins":5})
-      — For each resource type:
-        Lock latest ledger row (FOR UPDATE)
-        Compute new_balance = prev_balance + delta, new_sequence = prev_sequence + 1
-        INSERT resource_ledger row
-        — Sequence uniqueness index prevents corruption
+   l. Territory V1: no resource ledger writes. Completion only changes challenge state and zone ownership.
    m. INCREMENT state_version
    n. INSERT game_events:
       — OBJECTIVE_STATE_CHANGED (engine): challenge claimed → completed
       — CONTROL_STATE_CHANGED (engine): zone owner change
-      — RESOURCE_CHANGED (engine): one per resource type
       — CHALLENGE_COMPLETED (mode)
       — ZONE_CAPTURED (mode)
    o. COMMIT
 5. Store action receipt
 6. filterStateForViewer (no-op)
-7. Broadcast: challenge_completed, zone_captured, resource_changed
+7. Broadcast: challenge_completed, zone_captured
 8. Evaluate win condition → if met: end game, broadcast game_ended
 9. Push notifications to rival teams + own team
-10. Return 200 { claim, challenge, zone, resources_awarded, state_version }
+10. Return 200 { claim, challenge, zone, state_version }
 11. Client: resolve pending action, apply authoritative state
 ```
 

@@ -43,26 +43,13 @@ describe('scoreboard routes', () => {
     await closeTestDatabase();
   });
 
-  it('returns ranked standings using points first and zone count as the first tiebreak', async () => {
+  it('returns ranked standings using zone count only and ignores resource balances for ordering', async () => {
     await seedGame();
     await seedTeams();
     await seedZone('Red One', TEAM_RED_ID, 0);
     await seedZone('Red Two', TEAM_RED_ID, 1);
     await seedZone('Blue One', TEAM_BLUE_ID, 2);
-    await transact(testDatabase.db, {
-      gameId: GAME_ID,
-      teamId: TEAM_RED_ID,
-      resourceType: 'points',
-      delta: 20,
-      reason: 'scoreboard_seed',
-    });
-    await transact(testDatabase.db, {
-      gameId: GAME_ID,
-      teamId: TEAM_RED_ID,
-      resourceType: 'coins',
-      delta: 4,
-      reason: 'scoreboard_seed',
-    });
+
     await transact(testDatabase.db, {
       gameId: GAME_ID,
       teamId: TEAM_BLUE_ID,
@@ -74,7 +61,7 @@ describe('scoreboard routes', () => {
       gameId: GAME_ID,
       teamId: TEAM_GREEN_ID,
       resourceType: 'coins',
-      delta: 2,
+      delta: 99,
       reason: 'scoreboard_seed',
     });
 
@@ -89,28 +76,28 @@ describe('scoreboard routes', () => {
     expect(response.json()).toEqual({
       scoreboard: [
         {
-          team: expect.objectContaining({ id: TEAM_BLUE_ID, name: 'Blue Team' }),
-          zoneCount: 1,
-          resources: { points: 30, coins: 0 },
+          team: expect.objectContaining({ id: TEAM_RED_ID, name: 'Red Team' }),
+          zoneCount: 2,
+          resources: { points: 0, coins: 0 },
           rank: 1,
         },
         {
-          team: expect.objectContaining({ id: TEAM_RED_ID, name: 'Red Team' }),
-          zoneCount: 2,
-          resources: { points: 20, coins: 4 },
+          team: expect.objectContaining({ id: TEAM_BLUE_ID, name: 'Blue Team' }),
+          zoneCount: 1,
+          resources: { points: 30, coins: 0 },
           rank: 2,
         },
         {
           team: expect.objectContaining({ id: TEAM_GREEN_ID, name: 'Green Team' }),
           zoneCount: 0,
-          resources: { points: 0, coins: 2 },
+          resources: { points: 0, coins: 99 },
           rank: 3,
         },
       ],
     });
   });
 
-  it('breaks ties by zone count, then coins, then stable team ordering', async () => {
+  it('breaks ties by deterministic team ordering after zone count', async () => {
     await seedGame();
     await seedTeams();
     await seedZone('Blue One', TEAM_BLUE_ID, 0);
@@ -119,21 +106,11 @@ describe('scoreboard routes', () => {
     await seedZone('Green Two', TEAM_GREEN_ID, 3);
     await seedZone('Red One', TEAM_RED_ID, 4);
 
-    for (const teamId of [TEAM_RED_ID, TEAM_BLUE_ID, TEAM_GREEN_ID]) {
-      await transact(testDatabase.db, {
-        gameId: GAME_ID,
-        teamId,
-        resourceType: 'points',
-        delta: 10,
-        reason: 'scoreboard_tie_seed',
-      });
-    }
-
     await transact(testDatabase.db, {
       gameId: GAME_ID,
-      teamId: TEAM_RED_ID,
-      resourceType: 'coins',
-      delta: 7,
+      teamId: TEAM_GREEN_ID,
+      resourceType: 'points',
+      delta: 100,
       reason: 'scoreboard_tie_seed',
     });
     await transact(testDatabase.db, {
@@ -141,13 +118,6 @@ describe('scoreboard routes', () => {
       teamId: TEAM_BLUE_ID,
       resourceType: 'coins',
       delta: 1,
-      reason: 'scoreboard_tie_seed',
-    });
-    await transact(testDatabase.db, {
-      gameId: GAME_ID,
-      teamId: TEAM_GREEN_ID,
-      resourceType: 'coins',
-      delta: 3,
       reason: 'scoreboard_tie_seed',
     });
 
@@ -159,15 +129,14 @@ describe('scoreboard routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().scoreboard.map((entry: { team: { id: string }; rank: number; zoneCount: number; resources: { coins: number } }) => ({
+    expect(response.json().scoreboard.map((entry: { team: { id: string }; rank: number; zoneCount: number }) => ({
       id: entry.team.id,
       rank: entry.rank,
       zoneCount: entry.zoneCount,
-      coins: entry.resources.coins,
     }))).toEqual([
-      { id: TEAM_GREEN_ID, rank: 1, zoneCount: 2, coins: 3 },
-      { id: TEAM_BLUE_ID, rank: 2, zoneCount: 2, coins: 1 },
-      { id: TEAM_RED_ID, rank: 3, zoneCount: 1, coins: 7 },
+      { id: TEAM_BLUE_ID, rank: 1, zoneCount: 2 },
+      { id: TEAM_GREEN_ID, rank: 2, zoneCount: 2 },
+      { id: TEAM_RED_ID, rank: 3, zoneCount: 1 },
     ]);
   });
 

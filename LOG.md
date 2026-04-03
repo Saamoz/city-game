@@ -12,7 +12,7 @@ Running handoff log. Keep short, high-signal notes here: environment quirks, imp
 - Remote: `origin -> https://github.com/Saamoz/city-game.git`
 - Branch: `master`
 - Date: 2026-04-03
-- Stage: **Phase 31 complete. Mobile-first UI live: floating card deck, swipe gestures, hamburger menu, GPS-driven portable completion flow. Phase 32 next: team HUD, scoreboard, live feed, toasts.**
+- Stage: **Phase 31 complete. Mobile-first UI live: floating card deck, swipe gestures, hamburger menu, GPS-driven portable completion flow. Phase 32 next: team control HUD, zone-only scoreboard, live feed, toasts.**
 
 ---
 
@@ -78,6 +78,7 @@ These were identified as flexibility improvements before frontend work begins:
 - `filterStateForViewer` is an identity function in Territory. The seam is in place for asymmetric visibility modes (hide-and-seek, tag).
 - `.DS_Store` is tracked in git.
 - Stale-GPS override uses `window.confirm` — should move to an in-app modal (Phase 39 polish at latest).
+- Territory V1 scoring clarification: zones owned is the only player-facing score. Older references to points/coins in frontend planning are deprecated; those remain platform seams for future modes or later Territory variants.
 
 ---
 
@@ -126,3 +127,36 @@ Dev seed join codes: Winnipeg `RED12345`/`BLUE1234`/`GOLD1234`, Chicago `CHIBLUE
 - `pnpm -r typecheck && pnpm -r build && pnpm --filter @city-game/server test`
 - Manual: Chicago seed → join → open deck → swipe → claim challenge → zone captures → completed tray appears correctly.
 - Current seed: `Chicago Territory Demo` — join codes `CHIBLUE1` / `CHIGOLD1` / `CHIRED01`
+
+## Phase 32 Notes
+
+**Territory V1 control HUD:**
+- Scoreboard presentation is now zone-only. Backend Territory standings sort by `zoneCount desc`, then team name/id for deterministic ties. Resource balances remain in platform data but are intentionally ignored by V1 ranking and UI.
+- New client-side panels in `client/src/features/game/Phase32Panels.tsx`: `TeamControlStrip`, `MiniScoreboardCard`, full standings overlay, and live feed overlay.
+- Mobile HUD keeps the map clear: top bar shows current zone + menu, and a compact team control strip sits below it. Menu now opens `Standings` and `Feed` instead of forcing those onto the map surface.
+- Desktop HUD keeps the existing field brief and status cards, with a standings card added as a second warm-paper module rather than a separate app-like pane.
+
+**Live feed / toast behavior:**
+- Feed overlay fetches `GET /game/:id/events?limit=40` on demand and renders the recent visible control history.
+- Realtime direct socket events synthesize lightweight `GameEventRecord` entries client-side for immediate feed updates while the overlay is open or cached. Only event types already surfaced in Phase 32 are synthesized: zone capture, challenge complete, game lifecycle, and player join.
+- Rival `zone_captured` and `game_ended` socket events now trigger neutral info toasts. Toasts support `success`, `error`, and `info`, plus optional team-color accent dots.
+
+**Design constraints kept in this pass:**
+- No points / coins / resource counters in the player-facing HUD.
+- Overlays use the same cartographic warm-paper treatment as the deck instead of introducing bright app-chrome panels.
+- Phase 31 deck interactions, map behavior, and mobile sheet layout were preserved; this phase only adds control/status surfaces around them.
+
+**Validation:**
+- `pnpm --filter @city-game/server exec vitest run src/routes/scoreboard-routes.test.ts`
+- `pnpm --filter @city-game/client exec tsc -b --pretty false`
+- `pnpm --filter @city-game/client build`
+- `pnpm -r typecheck`
+- `pnpm -r build`
+
+**Phase 32 compactness follow-up:**
+- Mobile top bar now uses three compact pills only: team, zone count, current zone. The separate collapsible control strip was removed.
+- Standings overlay was compressed: no game title, no duplicate sublabel under each team, just rank/name on the left and `Zones N` on the right.
+- Feed now suppresses per-player / per-challenge duplicate narration for captures. Territory V1 feed shows the team control outcome (`Team captured Zone`) plus lifecycle events.
+- Standings, feed, and the mobile hamburger sheet all support swipe-down-to-close from their sheet header / grab area.
+- Completed cards now show a team-color dot and clicking a completed card pans the map to the captured zone.
+

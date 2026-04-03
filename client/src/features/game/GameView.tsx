@@ -4,6 +4,7 @@ import mapboxgl from 'mapbox-gl';
 import {
   socketServerEventTypes,
   type ChallengeClaim,
+  type GameEventRecord,
   type GameStateSnapshot,
   type SocketEventPayloadMap,
   type SocketServerEventType,
@@ -12,6 +13,7 @@ import {
   ApiError,
   completeChallenge,
   getMapState,
+  getRecentEvents,
   type CompleteChallengeResponse,
 } from '../../lib/api';
 import {
@@ -23,6 +25,13 @@ import {
 } from '../../lib/realtime';
 import { useGameStore, type RealtimeConnectionStatus } from '../../store/gameStore';
 import { ChallengeDeck } from './ChallengeDeck';
+import {
+  FeedOverlay,
+  MiniScoreboardCard,
+  ScoreboardOverlay,
+  buildFeedEntries,
+  buildZoneScoreboard,
+} from './Phase32Panels';
 import { ZoneLayer } from './ZoneLayer';
 import { collectGeometryPositions, findContainingZone } from './mapGeometry';
 import { useGeolocation } from './useGeolocation';
@@ -34,9 +43,17 @@ interface GameViewProps {
 }
 
 interface ToastMessage {
-  tone: 'success' | 'error';
+  tone: 'success' | 'error' | 'info';
   title: string;
   body?: string;
+  accentColor?: string;
+}
+
+interface CompletedCardViewModel {
+  challenge: GameStateSnapshot['challenges'][number];
+  teamName: string | null;
+  teamColor: string | null;
+  zoneId: string | null;
 }
 
 const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env.MAPBOX_ACCESS_TOKEN ?? '').trim();
@@ -57,6 +74,15 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const [deckDragY, setDeckDragY] = useState(0);
   const [isDraggingDeck, setIsDraggingDeck] = useState(false);
   const deckSwipeRef = useRef({ active: false, startX: 0, startY: 0, startTime: 0, committed: false });
+  const menuSwipeRef = useRef({ pointerId: null as number | null, startY: 0, startTime: 0, didDrag: false });
+  const [menuDragY, setMenuDragY] = useState(0);
+  const [isDraggingMenu, setIsDraggingMenu] = useState(false);
+  const menuCloseTimerRef = useRef<number | null>(null);
+  const feedAbortRef = useRef<AbortController | null>(null);
+  const [activeOverlay, setActiveOverlay] = useState<'scoreboard' | 'feed' | null>(null);
+  const [recentEvents, setRecentEvents] = useState<GameEventRecord[]>([]);
+  const [feedStatus, setFeedStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [feedErrorMessage, setFeedErrorMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
   const snapshot = useGameStore((state) => state.snapshot);
@@ -107,6 +133,53 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     const timer = window.setTimeout(() => setToast(null), 4200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+
+  useEffect(() => {
+    setActiveOverlay(null);
+    setIsMenuOpen(false);
+    setRecentEvents([]);
+    setFeedStatus('idle');
+    setFeedErrorMessage(null);
+    feedAbortRef.current?.abort();
+    feedAbortRef.current = null;
+  }, [gameId]);
+
+  const loadRecentEvents = useCallback(async () => {
+    feedAbortRef.current?.abort();
+    const controller = new AbortController();
+    feedAbortRef.current = controller;
+    setFeedStatus('loading');
+    setFeedErrorMessage(null);
+
+    try {
+      const events = await getRecentEvents(gameId, {
+        limit: 40,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      setRecentEvents(events);
+      setFeedStatus('ready');
+    } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
+
+      setFeedStatus('error');
+      setFeedErrorMessage(getRealtimeErrorMessage(error));
+    }
+  }, [gameId]);
+
+  useEffect(() => {
+    if (activeOverlay !== 'feed') {
+      return;
+    }
+
+    void loadRecentEvents();
+  }, [activeOverlay, loadRecentEvents]);
 
   const canStartRealtime = status === 'ready' && Boolean(snapshot);
 
@@ -229,8 +302,37 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
         versionKeys.add(payloadKey);
         appliedRealtimeKeysRef.current.set(payload.stateVersion, versionKeys);
-        const nextVersion = useGameStore.getState().snapshot?.game.stateVersion ?? payload.stateVersion;
+        const nextSnapshot = useGameStore.getState().snapshot;
+        const nextVersion = nextSnapshot?.game.stateVersion ?? payload.stateVersion;
         pruneRealtimeKeys(appliedRealtimeKeysRef.current, nextVersion);
+
+        const feedEvent = buildRealtimeFeedEventRecord(eventType, payload);
+        if (feedEvent) {
+          setRecentEvents((current) => mergeRecentEvents(current, feedEvent));
+        }
+
+        if (eventType === socketServerEventTypes.zoneCaptured) {
+          const zonePayload = payload as SocketEventPayloadMap['zone_captured'];
+          const ownTeamId = nextSnapshot?.team?.id ?? null;
+          if (zonePayload.claim.teamId !== ownTeamId) {
+            const rivalTeam = nextSnapshot?.teams.find((entry) => entry.id === zonePayload.claim.teamId) ?? null;
+            setToast({
+              tone: 'info',
+              title: `${rivalTeam?.name ?? 'Rival team'} captured ${zonePayload.zone.name}`,
+              body: 'Standings updated.',
+              accentColor: rivalTeam?.color,
+            });
+          }
+        }
+
+        if (eventType === socketServerEventTypes.gameEnded) {
+          setToast({
+            tone: 'info',
+            title: 'Game ended',
+            body: 'Final standings are available.',
+          });
+        }
+
         setConnectionState('live', null);
       };
 
@@ -370,6 +472,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const challengeCounts = useMemo(() => buildChallengeCounts(snapshot), [snapshot]);
   const completedCards = useMemo(() => buildCompletedCards(snapshot), [snapshot]);
   const controlledZoneCount = useMemo(() => buildControlledZoneCount(snapshot, team?.id ?? null), [snapshot, team?.id]);
+  const scoreboardEntries = useMemo(() => buildZoneScoreboard(snapshot), [snapshot]);
+  const feedEntries = useMemo(() => buildFeedEntries(recentEvents, snapshot), [recentEvents, snapshot]);
   const currentPoint = gpsPayload ? [gpsPayload.lng, gpsPayload.lat] as [number, number] : null;
   const currentZone = useMemo(() => snapshot ? findContainingZone(snapshot.zones, currentPoint) : null, [currentPoint, snapshot]);
 
@@ -518,6 +622,97 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     setDeckDragY(0);
   }, []);
 
+  const handleMenuPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    menuSwipeRef.current.pointerId = event.pointerId;
+    menuSwipeRef.current.startY = event.clientY;
+    menuSwipeRef.current.startTime = Date.now();
+    menuSwipeRef.current.didDrag = false;
+  }, []);
+
+  const handleMenuPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (menuSwipeRef.current.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaY = event.clientY - menuSwipeRef.current.startY;
+
+    if (!menuSwipeRef.current.didDrag && Math.abs(deltaY) < 8) {
+      return;
+    }
+
+    if (!menuSwipeRef.current.didDrag) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      menuSwipeRef.current.didDrag = true;
+    }
+
+    event.preventDefault();
+    setIsDraggingMenu(true);
+    setMenuDragY(deltaY > 0 ? deltaY : Math.round(deltaY * 0.2));
+  }, []);
+
+  const requestMenuClose = useCallback((animated: boolean) => {
+    if (menuCloseTimerRef.current !== null) {
+      window.clearTimeout(menuCloseTimerRef.current);
+      menuCloseTimerRef.current = null;
+    }
+
+    if (!animated) {
+      setIsMenuOpen(false);
+      setMenuDragY(0);
+      return;
+    }
+
+    setIsDraggingMenu(false);
+    setMenuDragY(window.innerHeight);
+    menuCloseTimerRef.current = window.setTimeout(() => {
+      setIsMenuOpen(false);
+      setMenuDragY(0);
+    }, 220);
+  }, []);
+
+  const handleMenuPointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (menuSwipeRef.current.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const didDrag = menuSwipeRef.current.didDrag;
+    const deltaY = event.clientY - menuSwipeRef.current.startY;
+    const velocity = deltaY / Math.max(Date.now() - menuSwipeRef.current.startTime, 1);
+    menuSwipeRef.current.pointerId = null;
+    menuSwipeRef.current.didDrag = false;
+    setIsDraggingMenu(false);
+
+    if (didDrag && (deltaY > 90 || (deltaY > 36 && velocity > 0.55))) {
+      requestMenuClose(true);
+      return;
+    }
+
+    setMenuDragY(0);
+  }, [requestMenuClose]);
+
+  const handleFocusCompletedCard = useCallback((challengeId: string) => {
+    const map = mapRef.current;
+    if (!map || !snapshot) {
+      return;
+    }
+
+    const completedCard = completedCards.find((entry) => entry.challenge.id === challengeId);
+    if (!completedCard?.zoneId) {
+      return;
+    }
+
+    const zone = snapshot.zones.find((entry) => entry.id === completedCard.zoneId);
+    if (!zone) {
+      return;
+    }
+
+    focusMapOnZone(map, zone);
+  }, [completedCards, snapshot]);
+
   return (
     <main className="relative h-screen overflow-hidden bg-[#dfe6e8] text-[#1f2a2f]">
       <div ref={mapContainerRef} className="absolute inset-0" />
@@ -527,15 +722,33 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-[linear-gradient(180deg,rgba(243,236,220,0.9),rgba(243,236,220,0))] px-4 pb-10 pt-4 sm:px-6 lg:px-8">
         <div className="pointer-events-auto mx-auto max-w-7xl">
 
-          {/* Mobile top bar: zone pill + menu button */}
-          <div className="sm:hidden flex items-center justify-between">
-            {currentZone ? (
-              <span className="rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/90 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] backdrop-blur-sm">
-                {currentZone.name}
-              </span>
-            ) : <span />}
+          {/* Mobile top bar */}
+          <div className="sm:hidden flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {team ? (
+                  <span className="inline-flex items-center gap-2 rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] backdrop-blur-sm">
+                    <span
+                      className="h-3 w-3 rounded-full border border-[#f8f1df]"
+                      style={{ backgroundColor: team.color }}
+                    />
+                    <span className="truncate">{team.name}</span>
+                  </span>
+                ) : null}
+                {team ? (
+                  <span className="rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] backdrop-blur-sm">
+                    {controlledZoneCount} {controlledZoneCount === 1 ? 'zone' : 'zones'}
+                  </span>
+                ) : null}
+              </div>
+              {currentZone ? (
+                <span className="inline-flex max-w-full rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] backdrop-blur-sm">
+                  <span className="truncate">{currentZone.name}</span>
+                </span>
+              ) : null}
+            </div>
             <button
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-[#c9ae6d]/55 bg-[#f3ecd8]/90 text-sm text-[#24343a] shadow-sm backdrop-blur-sm"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#c9ae6d]/55 bg-[#f3ecd8]/90 text-sm text-[#24343a] shadow-sm backdrop-blur-sm"
               onClick={() => setIsMenuOpen(true)}
               type="button"
               aria-label="Menu"
@@ -546,18 +759,26 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
           {/* Desktop HUD */}
           <div className="hidden sm:flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] px-5 py-4 shadow-[0_20px_60px_rgba(46,58,62,0.18)]">
-              <p className="text-[11px] uppercase tracking-[0.35em] text-[#936718]">Field Brief</p>
-              <h1 className="mt-2 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#1f2a2f] sm:text-3xl">
-                {snapshot?.game.name ?? 'Loading game'}
-              </h1>
-              <p className="mt-1 text-sm text-[#44545c]">
-                {snapshot?.player?.displayName ?? 'Checking session'}
-                {team ? ' · ' + team.name : ''}
-                {currentZone ? ' · ' + currentZone.name : ''}
-              </p>
+            <div className="flex min-w-0 flex-1 flex-col gap-3 lg:max-w-[28rem]">
+              <div className="rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] px-5 py-4 shadow-[0_20px_60px_rgba(46,58,62,0.18)]">
+                <p className="text-[11px] uppercase tracking-[0.35em] text-[#936718]">Field Brief</p>
+                <h1 className="mt-2 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#1f2a2f] sm:text-3xl">
+                  {snapshot?.game.name ?? 'Loading game'}
+                </h1>
+                <p className="mt-1 text-sm text-[#44545c]">
+                  {snapshot?.player?.displayName ?? 'Checking session'}
+                  {team ? ' · ' + team.name : ''}
+                  {currentZone ? ' · ' + currentZone.name : ''}
+                </p>
+              </div>
+              <MiniScoreboardCard
+                entries={scoreboardEntries}
+                teamId={team?.id ?? null}
+                onOpenScoreboard={() => setActiveOverlay('scoreboard')}
+                onOpenFeed={() => setActiveOverlay('feed')}
+              />
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[23rem]">
               <StatusCard label="Controlled" value={String(controlledZoneCount)} />
               <StatusCard label="Deck" value={String(challengeCounts.available)} />
               <StatusCard label="Version" value={String(snapshot?.game.stateVersion ?? 0)} />
@@ -628,6 +849,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 locationMessage={locationErrorMessage}
                 locationStatus={locationStatus}
                 onCaptureChallenge={handleCaptureChallenge}
+                onFocusCompletedCard={handleFocusCompletedCard}
                 onSelectChallenge={setSelectedChallengeId}
                 selectedChallengeId={selectedChallengeId}
               />
@@ -640,21 +862,29 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 >
                   <div className="mt-3 -mx-1 overflow-x-auto [scrollbar-width:none] [touch-action:pan-x] [&::-webkit-scrollbar]:hidden">
                     <div className="flex w-max gap-3 px-1 pb-1 pr-5">
-                      {completedCards.map(({ challenge, teamName }) => (
-                        <article
+                      {completedCards.map(({ challenge, teamName, teamColor }) => (
+                        <button
                           key={challenge.id}
-                          className="min-w-[12rem] max-w-[12rem] flex-none rounded-[1.2rem] border border-[#c8b48a]/45 bg-[#f7efdc] p-4 text-[#24343a] shadow-[0_10px_24px_rgba(24,32,36,0.08)]"
+                          className="min-w-[12rem] max-w-[12rem] flex-none rounded-[1.2rem] border border-[#c8b48a]/45 bg-[#f7efdc] p-4 text-left text-[#24343a] shadow-[0_10px_24px_rgba(24,32,36,0.08)] transition hover:bg-[#fbf3e2]"
+                          onClick={() => handleFocusCompletedCard(challenge.id)}
+                          type="button"
                         >
-                          <p className="truncate text-[10px] uppercase tracking-[0.18em] text-[#7a6a48]">
-                            {teamName ?? 'Unknown team'}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="h-3 w-3 shrink-0 rounded-full border border-[#f8f1df]"
+                              style={{ backgroundColor: teamColor ?? '#a28f67' }}
+                            />
+                            <p className="truncate text-[10px] uppercase tracking-[0.18em] text-[#7a6a48]">
+                              {teamName ?? 'Unknown team'}
+                            </p>
+                          </div>
                           <h3 className="mt-1.5 line-clamp-2 font-[Georgia,Times_New_Roman,serif] text-base font-semibold text-[#24343a]">
                             {challenge.title}
                           </h3>
                           <p className="mt-1.5 line-clamp-3 text-xs leading-5 text-[#55646b]">
                             {(challenge.config?.['short_description'] as string | undefined) ?? challenge.description}
                           </p>
-                        </article>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -707,6 +937,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                   locationMessage={locationErrorMessage}
                   locationStatus={locationStatus}
                   onCaptureChallenge={handleCaptureChallenge}
+                  onFocusCompletedCard={handleFocusCompletedCard}
                   onSelectChallenge={setSelectedChallengeId}
                   selectedChallengeId={selectedChallengeId}
                 />
@@ -720,19 +951,32 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       {isMenuOpen ? (
         <div
           className="sm:hidden fixed inset-0 z-50 flex items-end bg-[#162126]/40"
-          onClick={() => setIsMenuOpen(false)}
+          onClick={() => requestMenuClose(false)}
         >
           <div
-            className="w-full rounded-t-[1.9rem] border-t border-[#c9ae6d]/55 bg-[#f3ecd8] px-6 pb-10 pt-6"
+            className="w-full rounded-t-[1.9rem] border-t border-[#c9ae6d]/55 bg-[#f3ecd8] px-6 pb-10 pt-6 [touch-action:none]"
             onClick={(e) => e.stopPropagation()}
+            style={{
+              transform: `translateY(${menuDragY}px)`,
+              transition: isDraggingMenu ? 'none' : 'transform 0.24s ease',
+            }}
           >
+            <div
+              className="mb-3 flex cursor-grab touch-none justify-center active:cursor-grabbing"
+              onPointerDown={handleMenuPointerDown}
+              onPointerMove={handleMenuPointerMove}
+              onPointerUp={handleMenuPointerEnd}
+              onPointerCancel={handleMenuPointerEnd}
+            >
+              <div className="h-1 w-10 rounded-full bg-[#c8b48a]/70" />
+            </div>
             <div className="mb-5 flex items-center justify-between">
               <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">
                 {snapshot?.game.name ?? 'Game'}
               </p>
               <button
                 className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a]"
-                onClick={() => setIsMenuOpen(false)}
+                onClick={() => requestMenuClose(false)}
                 type="button"
               >
                 ✕
@@ -742,18 +986,56 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               {snapshot?.player?.displayName ?? ''}
               {team ? ' · ' + team.name : ''}
             </p>
-            <button
-              className="w-full rounded-2xl border border-[#29414b] bg-[#24343a] px-4 py-4 text-sm font-semibold text-[#f4ead7] transition hover:bg-[#1d2b30]"
-              onClick={onLeaveMap}
-              type="button"
-            >
-              Back to Lobby
-            </button>
+            <div className="space-y-3">
+              <button
+                className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-4 text-sm font-semibold text-[#24343a] transition hover:bg-[#f2ead6]"
+                onClick={() => {
+                  setActiveOverlay('scoreboard');
+                  requestMenuClose(false);
+                }}
+                type="button"
+              >
+                Standings
+              </button>
+              <button
+                className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#efe5cf] px-4 py-4 text-sm font-semibold text-[#24343a] transition hover:bg-[#e6d8bc]"
+                onClick={() => {
+                  setActiveOverlay('feed');
+                  requestMenuClose(false);
+                }}
+                type="button"
+              >
+                Feed
+              </button>
+              <button
+                className="w-full rounded-2xl border border-[#29414b] bg-[#24343a] px-4 py-4 text-sm font-semibold text-[#f4ead7] transition hover:bg-[#1d2b30]"
+                onClick={onLeaveMap}
+                type="button"
+              >
+                Back to Lobby
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
 
-      {toast ? <Toast tone={toast.tone} title={toast.title} body={toast.body} /> : null}
+      {activeOverlay === 'scoreboard' ? (
+        <ScoreboardOverlay
+          entries={scoreboardEntries}
+          onClose={() => setActiveOverlay(null)}
+        />
+      ) : null}
+
+      {activeOverlay === 'feed' ? (
+        <FeedOverlay
+          entries={feedEntries}
+          isLoading={feedStatus === 'loading'}
+          errorMessage={feedErrorMessage}
+          onClose={() => setActiveOverlay(null)}
+        />
+      ) : null}
+
+      {toast ? <Toast tone={toast.tone} title={toast.title} body={toast.body} accentColor={toast.accentColor} /> : null}
     </main>
   );
 
@@ -802,16 +1084,26 @@ function Banner({
   );
 }
 
-function Toast({ tone, title, body }: ToastMessage) {
+function Toast({ tone, title, body, accentColor }: ToastMessage) {
   const toneClassName = tone === 'error'
     ? 'border-[#bb4d4d]/40 bg-[#f7d9d4] text-[#6c2626]'
-    : 'border-[#7b9a73]/40 bg-[#dfeadb] text-[#254028]';
+    : tone === 'info'
+      ? 'border-[#6e8e95]/40 bg-[#e1edf0] text-[#29414b]'
+      : 'border-[#7b9a73]/40 bg-[#dfeadb] text-[#254028]';
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-6 z-20 flex justify-center px-4">
       <div className={'min-w-[18rem] max-w-md rounded-2xl border px-4 py-3 shadow-[0_20px_50px_rgba(24,32,36,0.22)] ' + toneClassName}>
-        <p className="text-sm font-semibold">{title}</p>
-        {body ? <p className="mt-1 text-sm text-current/85">{body}</p> : null}
+        <div className="flex items-start gap-3">
+          <span
+            className="mt-1 h-3 w-3 shrink-0 rounded-full border border-[#f6efe0]"
+            style={{ backgroundColor: accentColor ?? 'currentColor' }}
+          />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">{title}</p>
+            {body ? <p className="mt-1 text-sm text-current/85">{body}</p> : null}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -862,7 +1154,7 @@ function buildControlledZoneCount(snapshot: GameStateSnapshot | null, teamId: st
   return snapshot.zones.filter((zone) => zone.ownerTeamId === teamId).length;
 }
 
-function buildCompletedCards(snapshot: GameStateSnapshot | null): Array<{ challenge: GameStateSnapshot['challenges'][number]; teamName: string | null }> {
+function buildCompletedCards(snapshot: GameStateSnapshot | null): CompletedCardViewModel[] {
   if (!snapshot) {
     return [];
   }
@@ -882,18 +1174,49 @@ function buildCompletedCards(snapshot: GameStateSnapshot | null): Array<{ challe
     }
   }
 
-  const teamNameById = new Map(snapshot.teams.map((team) => [team.id, team.name]));
+  const teamById = new Map(snapshot.teams.map((team) => [team.id, team]));
 
   return snapshot.challenges
     .filter((challenge) => challenge.status === 'completed')
     .sort((left, right) => left.title.localeCompare(right.title))
     .map((challenge) => {
       const completedClaim = completedClaimsByChallengeId.get(challenge.id);
+      const team = completedClaim ? teamById.get(completedClaim.teamId) ?? null : null;
       return {
         challenge,
-        teamName: completedClaim ? teamNameById.get(completedClaim.teamId) ?? null : null,
+        teamName: team?.name ?? null,
+        teamColor: team?.color ?? null,
+        zoneId: challenge.zoneId ?? null,
       };
     });
+}
+
+function focusMapOnZone(map: mapboxgl.Map, zone: GameStateSnapshot['zones'][number]): void {
+  const positions = collectGeometryPositions(zone.geometry);
+  if (!positions.length) {
+    return;
+  }
+
+  if (positions.length === 1) {
+    map.flyTo({
+      center: positions[0],
+      zoom: Math.max(map.getZoom(), 14),
+      duration: 700,
+      essential: true,
+    });
+    return;
+  }
+
+  const bounds = new mapboxgl.LngLatBounds(positions[0], positions[0]);
+  for (const position of positions.slice(1)) {
+    bounds.extend(position);
+  }
+
+  map.fitBounds(bounds, {
+    padding: 96,
+    duration: 700,
+    maxZoom: 15,
+  });
 }
 
 function createCurrentLocationMarkerElement(): HTMLDivElement {
@@ -906,6 +1229,119 @@ function createCurrentLocationMarkerElement(): HTMLDivElement {
   element.style.boxShadow = '0 0 0 6px rgba(31, 76, 99, 0.18), 0 10px 22px rgba(14, 24, 29, 0.2)';
   return element;
 }
+function buildRealtimeFeedEventRecord(
+  eventType: SocketServerEventType,
+  payload: SocketEventPayloadMap[SocketServerEventType],
+): GameEventRecord | null {
+  const base = {
+    id: buildSyntheticRealtimeEventId(eventType, payload),
+    gameId: payload.gameId,
+    stateVersion: payload.stateVersion,
+    beforeState: null,
+    afterState: null,
+    createdAt: payload.serverTime,
+  } as const;
+
+  switch (eventType) {
+    case socketServerEventTypes.zoneCaptured: {
+      const zonePayload = payload as SocketEventPayloadMap['zone_captured'];
+      return {
+        ...base,
+        eventType: 'ZONE_CAPTURED',
+        entityType: 'zone',
+        entityId: zonePayload.zone.id,
+        actorType: 'player',
+        actorId: zonePayload.claim.playerId,
+        actorTeamId: zonePayload.claim.teamId,
+        meta: { zone: { id: zonePayload.zone.id, name: zonePayload.zone.name }, challenge: { id: zonePayload.challenge.id, name: zonePayload.challenge.title }, claim: { id: zonePayload.claim.id } } as GameEventRecord['meta'],
+      };
+    }
+    case socketServerEventTypes.challengeCompleted: {
+      const completedPayload = payload as SocketEventPayloadMap['challenge_completed'];
+      return {
+        ...base,
+        eventType: 'CHALLENGE_COMPLETED',
+        entityType: 'challenge',
+        entityId: completedPayload.challenge.id,
+        actorType: 'player',
+        actorId: completedPayload.claim.playerId,
+        actorTeamId: completedPayload.claim.teamId,
+        meta: {
+          challenge: { id: completedPayload.challenge.id, name: completedPayload.challenge.title },
+          claim: { id: completedPayload.claim.id },
+          zone: completedPayload.zone ? { id: completedPayload.zone.id, name: completedPayload.zone.name } : null,
+        } as GameEventRecord['meta'],
+      };
+    }
+    case socketServerEventTypes.gameStarted:
+    case socketServerEventTypes.gamePaused:
+    case socketServerEventTypes.gameResumed:
+    case socketServerEventTypes.gameEnded: {
+      const gamePayload = payload as SocketEventPayloadMap['game_started'];
+      return {
+        ...base,
+        eventType: eventType === socketServerEventTypes.gameStarted
+          ? 'GAME_STARTED'
+          : eventType === socketServerEventTypes.gamePaused
+            ? 'GAME_PAUSED'
+            : eventType === socketServerEventTypes.gameResumed
+              ? 'GAME_RESUMED'
+              : 'GAME_ENDED',
+        entityType: 'game',
+        entityId: gamePayload.game.id,
+        actorType: 'system',
+        actorId: null,
+        actorTeamId: null,
+        meta: { game: { id: gamePayload.game.id, name: gamePayload.game.name } } as GameEventRecord['meta'],
+      };
+    }
+    case socketServerEventTypes.playerJoined: {
+      const joinedPayload = payload as SocketEventPayloadMap['player_joined'];
+      return {
+        ...base,
+        eventType: 'PLAYER_JOINED',
+        entityType: 'player',
+        entityId: joinedPayload.player.id,
+        actorType: 'player',
+        actorId: joinedPayload.player.id,
+        actorTeamId: joinedPayload.team?.id ?? null,
+        meta: {
+          player: { id: joinedPayload.player.id, name: joinedPayload.player.displayName },
+          team: joinedPayload.team ? { id: joinedPayload.team.id, name: joinedPayload.team.name } : null,
+        } as GameEventRecord['meta'],
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+function buildSyntheticRealtimeEventId(
+  eventType: SocketServerEventType,
+  payload: SocketEventPayloadMap[SocketServerEventType],
+): string {
+  switch (eventType) {
+    case socketServerEventTypes.zoneCaptured:
+      return `${eventType}:${payload.stateVersion}:${(payload as SocketEventPayloadMap['zone_captured']).zone.id}`;
+    case socketServerEventTypes.challengeCompleted:
+      return `${eventType}:${payload.stateVersion}:${(payload as SocketEventPayloadMap['challenge_completed']).challenge.id}`;
+    case socketServerEventTypes.playerJoined:
+      return `${eventType}:${payload.stateVersion}:${(payload as SocketEventPayloadMap['player_joined']).player.id}`;
+    case socketServerEventTypes.gameStarted:
+    case socketServerEventTypes.gamePaused:
+    case socketServerEventTypes.gameResumed:
+    case socketServerEventTypes.gameEnded:
+      return `${eventType}:${payload.stateVersion}:${(payload as SocketEventPayloadMap['game_started']).game.id}`;
+    default:
+      return `${eventType}:${payload.stateVersion}`;
+  }
+}
+
+function mergeRecentEvents(current: GameEventRecord[], nextEvent: GameEventRecord): GameEventRecord[] {
+  const filtered = current.filter((event) => event.id !== nextEvent.id);
+  return [nextEvent, ...filtered].slice(0, 40);
+}
+
 function pruneRealtimeKeys(appliedKeys: Map<number, Set<string>>, currentVersion: number): void {
   for (const version of appliedKeys.keys()) {
     if (version < currentVersion) {
