@@ -12,6 +12,7 @@ import {
   transitionGameLifecycle,
   type LifecycleTransition,
 } from "../services/game-service.js";
+import { getChallengeSetByIdOrThrow } from '../services/challenge-set-service.js';
 import { applyMapDefaultsToGame } from "../services/map-service.js";
 
 const winConditionItemSchema = {
@@ -38,6 +39,7 @@ const gameCreateBodySchema = {
     modeKey: { type: "string", enum: [...GAME_MODE_KEYS] },
     city: { type: "string", minLength: 1, maxLength: 255 },
     mapId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }] },
+    challengeSetId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }] },
     centerLat: { type: "number" },
     centerLng: { type: "number" },
     defaultZoom: { type: "integer" },
@@ -59,6 +61,7 @@ const gameUpdateBodySchema = {
     name: { type: "string", minLength: 1, maxLength: 255 },
     city: { type: "string", minLength: 1, maxLength: 255 },
     mapId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }] },
+    challengeSetId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }] },
     centerLat: { type: "number" },
     centerLng: { type: "number" },
     defaultZoom: { type: "integer" },
@@ -129,6 +132,7 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
           modeKey: string;
           city?: string;
           mapId?: string | null;
+          challengeSetId?: string | null;
           centerLat?: number;
           centerLng?: number;
           defaultZoom?: number;
@@ -137,6 +141,10 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
         };
 
         validateWinConditions(body.winCondition);
+
+        if (body.challengeSetId) {
+          await getChallengeSetByIdOrThrow(db, body.challengeSetId);
+        }
 
         const mapDefaults = body.mapId ? await applyMapDefaultsToGame(db, body.mapId) : null;
         const centerLat = body.centerLat ?? mapDefaults?.centerLat;
@@ -153,6 +161,7 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
           .insert(games)
           .values({
             mapId: body.mapId ?? null,
+            challengeSetId: body.challengeSetId ?? null,
             name: body.name,
             modeKey: body.modeKey,
             city: body.city ?? mapDefaults?.city ?? null,
@@ -204,6 +213,7 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
           name?: string;
           city?: string;
           mapId?: string | null;
+          challengeSetId?: string | null;
           centerLat?: number;
           centerLng?: number;
           defaultZoom?: number;
@@ -213,19 +223,24 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
 
         validateWinConditions(body.winCondition);
 
-        if (body.mapId !== undefined && existingGame.status !== "setup") {
+        if ((body.mapId !== undefined || body.challengeSetId !== undefined) && existingGame.status !== "setup") {
           throw new AppError(errorCodes.validationError, {
-            message: "Map assignment can only change while the game is in setup.",
+            message: "Map and challenge set assignment can only change while the game is in setup.",
           });
         }
 
         const nextMapId = body.mapId === undefined ? existingGame.mapId : body.mapId;
+        const nextChallengeSetId = body.challengeSetId === undefined ? existingGame.challengeSetId : body.challengeSetId;
+        if (nextChallengeSetId) {
+          await getChallengeSetByIdOrThrow(db, nextChallengeSetId);
+        }
         const mapDefaults = nextMapId ? await applyMapDefaultsToGame(db, nextMapId) : null;
 
         const [game] = await db
           .update(games)
           .set({
             mapId: nextMapId ?? null,
+            challengeSetId: nextChallengeSetId ?? null,
             name: body.name ?? existingGame.name,
             city: body.city ?? mapDefaults?.city ?? existingGame.city,
             centerLat: body.centerLat === undefined ? (mapDefaults ? String(mapDefaults.centerLat) : existingGame.centerLat) : body.centerLat.toString(),

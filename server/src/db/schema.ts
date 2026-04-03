@@ -21,6 +21,7 @@ import { geometryGeneric4326, geometryPoint4326, geometryPolygon4326 } from './g
 const defaultJsonObject = sql`'{}'::jsonb`;
 const defaultJsonArray = sql`'[]'::jsonb`;
 const defaultChallengeScoring = sql`'{"points":10}'::jsonb`;
+const defaultResourceAwards = sql`'{}'::jsonb`;
 
 export const maps = pgTable(
   'maps',
@@ -60,11 +61,48 @@ export const mapZones = pgTable(
   }),
 );
 
+export const challengeSets = pgTable(
+  'challenge_sets',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: varchar('name', { length: 255 }).notNull(),
+    description: text('description'),
+    metadata: jsonb('metadata').notNull().default(defaultJsonObject),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+export const challengeSetItems = pgTable(
+  'challenge_set_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    setId: uuid('set_id').notNull().references(() => challengeSets.id, { onDelete: 'cascade' }),
+    mapZoneId: uuid('map_zone_id').references(() => mapZones.id, { onDelete: 'set null' }),
+    title: varchar('title', { length: 255 }).notNull(),
+    description: text('description').notNull(),
+    kind: varchar('kind', { length: 50 }).notNull(),
+    config: jsonb('config').notNull().default(defaultJsonObject),
+    completionMode: varchar('completion_mode', { length: 20 }).notNull().default('self_report'),
+    scoring: jsonb('scoring').notNull().default(defaultResourceAwards),
+    difficulty: varchar('difficulty', { length: 10 }),
+    sortOrder: integer('sort_order').notNull().default(0),
+    metadata: jsonb('metadata').notNull().default(defaultJsonObject),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    challengeSetItemsSetIdx: index('idx_challenge_set_items_set').on(table.setId, table.sortOrder, table.createdAt),
+    challengeSetItemsMapZoneIdx: index('idx_challenge_set_items_map_zone').on(table.mapZoneId),
+  }),
+);
+
 export const games = pgTable(
   'games',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     mapId: uuid('map_id').references(() => maps.id),
+    challengeSetId: uuid('challenge_set_id').references(() => challengeSets.id, { onDelete: 'set null' }),
     name: varchar('name', { length: 255 }).notNull(),
     modeKey: varchar('mode_key', { length: 50 }).notNull(),
     city: varchar('city', { length: 255 }),
@@ -320,6 +358,8 @@ export const playerLocationSamples = pgTable(
 export const schema = {
   maps,
   mapZones,
+  challengeSets,
+  challengeSetItems,
   games,
   teams,
   players,

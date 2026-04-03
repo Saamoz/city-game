@@ -3,6 +3,8 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   type Challenge,
   type ChallengeClaim,
+  type ChallengeSet,
+  type ChallengeSetItem,
   type ErrorResponse,
   type Game,
   type GameEventRecord,
@@ -10,6 +12,7 @@ import {
   type GameStateSnapshot,
   type GeoJsonFeatureCollection,
   type GeoJsonGeometry,
+  type GeoJsonPoint,
   type GpsPayload,
   type JsonObject,
   type JsonValue,
@@ -46,6 +49,10 @@ interface ApiRequestOptions {
 }
 
 interface GameResponse { game: Game }
+interface ChallengeSetsResponse { challengeSets: ChallengeSet[] }
+interface ChallengeSetResponse { challengeSet: ChallengeSet }
+interface ChallengeSetItemsResponse { items: ChallengeSetItem[] }
+interface ChallengeSetItemResponse { item: ChallengeSetItem }
 interface MapsResponse { maps: MapDefinition[] }
 interface MapResponse { map: MapDefinition }
 interface PlayerResponse { player: Player }
@@ -133,6 +140,94 @@ export async function listMaps(signal?: AbortSignal): Promise<MapDefinition[]> {
 export async function getMap(mapId: string, signal?: AbortSignal): Promise<MapDefinition> {
   const response = await apiRequest<MapResponse>('/maps/' + mapId, { signal });
   return response.map;
+}
+
+export async function listChallengeSets(signal?: AbortSignal): Promise<ChallengeSet[]> {
+  const response = await apiRequest<ChallengeSetsResponse>('/challenge-sets', { signal });
+  return response.challengeSets;
+}
+
+export async function getChallengeSet(challengeSetId: string, signal?: AbortSignal): Promise<ChallengeSet> {
+  const response = await apiRequest<ChallengeSetResponse>('/challenge-sets/' + challengeSetId, { signal });
+  return response.challengeSet;
+}
+
+export async function createChallengeSetDefinition(input: { name: string; description?: string | null; metadata?: JsonObject }): Promise<ChallengeSet> {
+  const response = await apiRequest<ChallengeSetResponse>('/challenge-sets', {
+    method: 'POST',
+    body: input,
+  });
+  return response.challengeSet;
+}
+
+export async function updateChallengeSetDefinition(
+  challengeSetId: string,
+  input: { name?: string; description?: string | null; metadata?: JsonObject },
+): Promise<ChallengeSet> {
+  const response = await apiRequest<ChallengeSetResponse>('/challenge-sets/' + challengeSetId, {
+    method: 'PATCH',
+    body: input,
+  });
+  return response.challengeSet;
+}
+
+export async function deleteChallengeSetDefinition(challengeSetId: string): Promise<void> {
+  await apiRequest<null>('/challenge-sets/' + challengeSetId, {
+    method: 'DELETE',
+  });
+}
+
+export async function listChallengeSetItems(challengeSetId: string, signal?: AbortSignal): Promise<ChallengeSetItem[]> {
+  const response = await apiRequest<ChallengeSetItemsResponse>('/challenge-sets/' + challengeSetId + '/items', { signal });
+  return response.items;
+}
+
+export async function createChallengeSetItemDefinition(
+  challengeSetId: string,
+  input: {
+    mapZoneId?: string | null;
+    mapPoint?: GeoJsonPoint | null;
+    title: string;
+    description: string;
+    config?: JsonObject;
+    scoring?: Record<string, number>;
+    difficulty?: Challenge['difficulty'] | null;
+    sortOrder?: number;
+    metadata?: JsonObject;
+  },
+): Promise<ChallengeSetItem> {
+  const response = await apiRequest<ChallengeSetItemResponse>('/challenge-sets/' + challengeSetId + '/items', {
+    method: 'POST',
+    body: input,
+  });
+  return response.item;
+}
+
+export async function updateChallengeSetItemDefinition(
+  challengeSetItemId: string,
+  input: {
+    mapZoneId?: string | null;
+    mapPoint?: GeoJsonPoint | null;
+    title?: string;
+    description?: string;
+    config?: JsonObject;
+    scoring?: Record<string, number>;
+    difficulty?: Challenge['difficulty'] | null;
+    sortOrder?: number;
+    metadata?: JsonObject;
+  },
+): Promise<ChallengeSetItem> {
+  const response = await apiRequest<ChallengeSetItemResponse>('/challenge-set-items/' + challengeSetItemId, {
+    method: 'PATCH',
+    body: input,
+  });
+  return response.item;
+}
+
+export async function deleteChallengeSetItemDefinition(challengeSetItemId: string): Promise<void> {
+  await apiRequest<null>('/challenge-set-items/' + challengeSetItemId, {
+    method: 'DELETE',
+  });
 }
 
 export async function createMapDefinition(input: MapUpsertInput): Promise<MapDefinition> {

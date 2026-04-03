@@ -76,6 +76,7 @@ export type PlayerLocationSource =
 
 export type ChallengeCompletionMode = 'self_report' | (string & {});
 export type ChallengeDifficulty = 'easy' | 'medium' | 'hard' | (string & {});
+export type ChallengeSetItemLocationMode = 'portable' | 'zone' | 'point';
 export type AnnotationType = 'marker' | 'line' | 'polygon' | 'circle' | 'note' | (string & {});
 export type EventActorType = 'player' | 'team' | 'admin' | 'system';
 export type EventEntityType =
@@ -151,9 +152,37 @@ export interface MapZone {
   updatedAt: IsoTimestamp;
 }
 
+export interface ChallengeSet {
+  id: Uuid;
+  name: string;
+  description: string | null;
+  metadata: JsonObject;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+}
+
+export interface ChallengeSetItem {
+  id: Uuid;
+  setId: Uuid;
+  mapZoneId: Uuid | null;
+  mapPoint: GeoJsonPoint | null;
+  title: string;
+  description: string;
+  kind: ChallengeKind;
+  config: JsonObject;
+  completionMode: ChallengeCompletionMode;
+  scoring: ResourceAwardMap;
+  difficulty: ChallengeDifficulty | null;
+  sortOrder: number;
+  metadata: JsonObject;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+}
+
 export interface Game {
   id: Uuid;
   mapId: Uuid | null;
+  challengeSetId: Uuid | null;
   name: string;
   modeKey: GameModeKey;
   city: string | null;

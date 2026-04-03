@@ -9,6 +9,7 @@ import { registerIdempotency } from './middleware/idempotency.js';
 import { adminRoutes } from './routes/admin-routes.js';
 import { annotationRoutes } from './routes/annotation-routes.js';
 import { challengeRoutes } from './routes/challenge-routes.js';
+import { challengeSetRoutes } from './routes/challenge-set-routes.js';
 import { registerRealtime } from './socket/server.js';
 import { eventRoutes } from './routes/event-routes.js';
 import { gameRoutes } from './routes/game-routes.js';
@@ -75,6 +76,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.register(stateRoutes, { prefix: '/api/v1' });
   app.register(zoneRoutes, { prefix: '/api/v1' });
   app.register(challengeRoutes, { prefix: '/api/v1' });
+  app.register(challengeSetRoutes, { prefix: '/api/v1' });
   app.register(eventRoutes, { prefix: '/api/v1' });
   app.register(async (modeApp) => {
     modeRegistry.registerRoutes(modeApp);

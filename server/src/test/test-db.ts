@@ -15,6 +15,8 @@ const TRUNCATE_TABLES = [
   'players',
   'teams',
   'games',
+  'challenge_set_items',
+  'challenge_sets',
   'map_zones',
   'maps',
 ] as const;

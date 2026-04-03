@@ -181,3 +181,53 @@ Dev seed join codes: Winnipeg `RED12345`/`BLUE1234`/`GOLD1234`, Chicago `CHIBLUE
 **Planning notes:**
 - Distance tool deferred to Future Work — not required for Territory V1
 - Challenge Keeper (Phase 34) follows same authored-vs-runtime pattern as zone editor: `challenge_sets` + `challenge_set_items`, cloned into runtime `challenges` on game start
+
+## Phase 34 Notes
+
+**Phase 34 complete.** Challenge Keeper at `/admin/challenges`.
+
+- Added authored challenge-set model independent of running games:
+  - `challenge_sets`
+  - `challenge_set_items`
+  - `games.challenge_set_id`
+- Backend routes in `server/src/routes/challenge-set-routes.ts`:
+  - `GET/POST /api/v1/challenge-sets`
+  - `GET/PATCH/DELETE /api/v1/challenge-sets/:id`
+  - `GET/POST /api/v1/challenge-sets/:id/items`
+  - `PATCH/DELETE /api/v1/challenge-set-items/:id`
+- Runtime cloning implemented in `server/src/services/challenge-set-service.ts` and wired into `server/src/services/game-service.ts`.
+  - On game start, authored set items clone into runtime `challenges`
+  - Portable authored items clone with `zoneId = null`
+  - Zone-linked authored items resolve authored `map_zone_id` to the matching cloned runtime `zone_id` via `zones.metadata.source_map_zone_id`
+  - Authored provenance is stored in runtime `challenge.config` (`source_challenge_set_id`, `source_challenge_set_item_id`, `source_map_zone_id`)
+- Frontend admin UI in `client/src/features/admin-challenges/AdminChallenges.tsx`:
+  - desktop-first 3-column editor
+  - challenge set list/create/delete
+  - set metadata editing
+  - authored item create/edit/delete/reorder
+  - portable vs zone-linked placement
+  - authored map/zone picker for linked items
+  - JSON import/export for full sets
+- Game create/update now accepts `challengeSetId`; validation added in `server/src/routes/game-routes.ts`.
+- Shared contracts updated in `shared/src/types.ts` and `shared/src/errors.ts`.
+- DB migration generated: `server/src/db/migrations/0004_sloppy_rhino.sql`.
+
+**Compatibility fix landed during this phase:**
+- `POST /api/v1/map-zones/:id/split` again accepts an empty body as well as an optional `splitLine` payload. This restored the previous route behavior and fixed the authored-map regression test.
+
+**Validation completed:**
+- `pnpm db:generate`
+- `pnpm db:migrate`
+- `pnpm --filter @city-game/server exec vitest run src/routes/challenge-set-routes.test.ts src/routes/map-routes.test.ts`
+- `pnpm -r typecheck`
+- `pnpm -r build`
+
+**Important note on test infrastructure:**
+- During exploratory reruns of the full server suite, the existing integration tests showed nondeterministic shared test-DB contamination / isolation failures unrelated to the kept Phase 34 code.
+- I did not keep any speculative test-infrastructure changes from that investigation. The repo is left with only the feature code, migration, route compatibility fix, and log updates.
+
+**Phase 34 follow-up (point-linked authored challenges):**
+- Authored challenge items now support three placement modes in the active editor/API flow: `portable`, `zone`, and `point`.
+- Point-linked authored items persist a GeoJSON point in `challenge_set_items.config.map_point` and require `metadata.sourceMapId`.
+- The admin challenge editor no longer exposes `kind` or `completionMode`; authored item creation/update now relies on backend defaults (`text`, `self_report`).
+- Challenge set route coverage now includes point-linked item creation and runtime cloning metadata (`location_mode: 'point'`, `source_map_point`).

@@ -430,11 +430,16 @@ export const mapRoutes: FastifyPluginAsync = async (app) => {
       schema: {
         params: mapZoneParamsSchema,
         body: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            splitLine: { anyOf: [lineStringSchema, { type: 'null' }] },
-          },
+          anyOf: [
+            {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                splitLine: { anyOf: [lineStringSchema, { type: 'null' }] },
+              },
+            },
+            { type: 'null' },
+          ],
         },
       },
     },

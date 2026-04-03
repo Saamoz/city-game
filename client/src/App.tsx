@@ -12,6 +12,11 @@ const AdminZoneEditor = lazy(async () => {
   return { default: module.AdminZoneEditor };
 });
 
+const AdminChallenges = lazy(async () => {
+  const module = await import('./features/admin-challenges/AdminChallenges');
+  return { default: module.AdminChallenges };
+});
+
 export function App() {
   const [route, setRoute] = useState(() => parseRoute(window.location.pathname));
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
@@ -42,13 +47,13 @@ export function App() {
       return;
     }
 
-    setRoute({ kind: 'game', gameId, mapId: null });
+    setRoute({ kind: 'game', gameId, mapId: null, challengeSetId: null });
   };
 
   const handleLeaveMap = () => {
     setSuppressAutoEnter(true);
     setActiveGameId(null);
-    setRoute({ kind: 'landing', gameId: null, mapId: null });
+    setRoute({ kind: 'landing', gameId: null, mapId: null, challengeSetId: null });
     navigateToLanding({ suppressAutoEnter: true });
   };
 
@@ -56,6 +61,14 @@ export function App() {
     return (
       <Suspense fallback={<MapViewLoading />}>
         <AdminZoneEditor initialMapId={route.mapId} />
+      </Suspense>
+    );
+  }
+
+  if (route.kind === 'admin-challenges') {
+    return (
+      <Suspense fallback={<MapViewLoading />}>
+        <AdminChallenges initialChallengeSetId={route.challengeSetId} />
       </Suspense>
     );
   }

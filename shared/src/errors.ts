@@ -52,6 +52,10 @@ export const errorDefinitions = {
     statusCode: 404,
     defaultMessage: 'Map not found.',
   },
+  CHALLENGE_SET_NOT_FOUND: {
+    statusCode: 404,
+    defaultMessage: 'Challenge set not found.',
+  },
   ANNOTATION_NOT_FOUND: {
     statusCode: 404,
     defaultMessage: 'Annotation not found.',
@@ -121,6 +125,7 @@ export const errorCodes = {
   invalidGameStateTransition: 'INVALID_GAME_STATE_TRANSITION',
   gameNotFound: 'GAME_NOT_FOUND',
   mapNotFound: 'MAP_NOT_FOUND',
+  challengeSetNotFound: 'CHALLENGE_SET_NOT_FOUND',
   annotationNotFound: 'ANNOTATION_NOT_FOUND',
   annotationForbidden: 'ANNOTATION_FORBIDDEN',
   notOnTeam: 'NOT_ON_TEAM',

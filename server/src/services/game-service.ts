@@ -13,6 +13,7 @@ import type { DatabaseClient } from '../db/connection.js';
 import { gameEvents, games } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import type { ModeRegistry } from '../modes/index.js';
+import { cloneChallengeSetToGame } from './challenge-set-service.js';
 import { cloneMapZonesToGame } from './map-service.js';
 
 export type GameRecord = typeof games.$inferSelect;
@@ -114,6 +115,7 @@ export function serializeGameRecord(game: GameRecord): Game {
   return {
     id: game.id,
     mapId: game.mapId,
+    challengeSetId: game.challengeSetId,
     name: game.name,
     modeKey: game.modeKey as GameModeKey,
     city: game.city,
@@ -157,6 +159,9 @@ async function applyLifecycleTransition(
   if (transition === 'start') {
     if (updatedGame.mapId) {
       await cloneMapZonesToGame(db, updatedGame.mapId, updatedGame.id);
+    }
+    if (updatedGame.challengeSetId) {
+      await cloneChallengeSetToGame(db, updatedGame.challengeSetId, updatedGame.id);
     }
     await modeHandler.onGameStart({ db, game: updatedGame });
   }
