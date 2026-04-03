@@ -12,6 +12,7 @@ import { challengeRoutes } from './routes/challenge-routes.js';
 import { registerRealtime } from './socket/server.js';
 import { eventRoutes } from './routes/event-routes.js';
 import { gameRoutes } from './routes/game-routes.js';
+import { mapRoutes } from './routes/map-routes.js';
 import { playerRoutes } from './routes/player-routes.js';
 import { resourceRoutes } from './routes/resource-routes.js';
 import { scoreboardRoutes } from './routes/scoreboard-routes.js';
@@ -32,6 +33,7 @@ export interface BuildAppOptions {
 export function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({
     logger: false,
+    bodyLimit: 50 * 1024 * 1024, // 50 MB — GeoJSON imports can be large
   });
 
   const database = options.db
@@ -66,6 +68,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.register(adminRoutes, { prefix: '/api/v1' });
   app.register(annotationRoutes, { prefix: '/api/v1' });
   app.register(gameRoutes, { prefix: '/api/v1' });
+  app.register(mapRoutes, { prefix: '/api/v1' });
   app.register(playerRoutes, { prefix: '/api/v1' });
   app.register(resourceRoutes, { prefix: '/api/v1' });
   app.register(scoreboardRoutes, { prefix: '/api/v1' });
