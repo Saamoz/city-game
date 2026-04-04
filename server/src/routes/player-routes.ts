@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { and, eq } from 'drizzle-orm';
-import { errorCodes } from '@city-game/shared';
+import { errorCodes, socketServerEventTypes } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { games, players, teams } from '../db/schema.js';
 import { generateSessionToken, getSerializedSessionCookie } from '../lib/auth.js';
@@ -105,9 +105,11 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
+      let broadcastPayload: { gameId: string; modeKey: string; stateVersion: number; player: ReturnType<typeof serializePlayer>; team: ReturnType<typeof serializeTeam> } | null = null;
+
       await executeIdempotentMutation(app, request, reply, async (db) => {
         const { id } = request.params as { id: string };
-        await getGameById(db, id);
+        const game = await getGameById(db, id);
 
         if (request.player?.gameId !== id) {
           throw new AppError(errorCodes.teamNotFound);
@@ -131,6 +133,13 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
           .returning();
 
         request.player = player;
+        broadcastPayload = {
+          gameId: id,
+          modeKey: game.modeKey,
+          stateVersion: game.stateVersion,
+          player: serializePlayer(player),
+          team: serializeTeam(team),
+        };
 
         return {
           gameId: id,
@@ -141,6 +150,21 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
             team: serializeTeam(team),
           },
         };
+      }, async () => {
+        if (!broadcastPayload) {
+          return;
+        }
+
+        await app.broadcaster.send({
+          gameId: broadcastPayload.gameId,
+          modeKey: broadcastPayload.modeKey,
+          eventType: socketServerEventTypes.playerJoined,
+          stateVersion: broadcastPayload.stateVersion,
+          payload: {
+            player: broadcastPayload.player,
+            team: broadcastPayload.team,
+          },
+        });
       });
     },
   );

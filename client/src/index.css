@@ -56,3 +56,25 @@ input {
 .mapboxgl-ctrl-group .mapbox-gl-draw_trash {
   border-top: 1px solid rgba(31, 42, 47, 0.08);
 }
+
+@keyframes join-countdown-beat {
+  0% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+
+  10% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  70% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+}

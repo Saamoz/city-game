@@ -192,6 +192,49 @@ describe('player routes', () => {
     expect(storedPlayer?.teamId).toBe(TEAM_ID);
   });
 
+  it('broadcasts player_joined after a player joins a team', async () => {
+    await seedGame();
+    await seedTeam();
+    await seedPlayer({ teamId: null, sessionToken: 'broadcast-join-token' });
+    app = await createPlayerTestApp();
+
+    const broadcasts: unknown[] = [];
+    app.broadcaster.send = async (input) => {
+      broadcasts.push(input);
+      return 1;
+    };
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/game/${GAME_ID}/teams/join`,
+      headers: idempotencyHeaders('join-team-broadcast'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'broadcast-join-token',
+      },
+      payload: {
+        join_code: 'TEAM1234',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(broadcasts).toHaveLength(1);
+    expect(broadcasts[0]).toMatchObject({
+      gameId: GAME_ID,
+      modeKey: 'territory',
+      eventType: 'player_joined',
+      stateVersion: 0,
+      payload: {
+        player: {
+          id: PLAYER_ID,
+          teamId: TEAM_ID,
+        },
+        team: {
+          id: TEAM_ID,
+        },
+      },
+    });
+  });
+
   it('returns TEAM_NOT_FOUND for an invalid join code', async () => {
     await seedGame();
     await seedPlayer({ teamId: null, sessionToken: 'bad-join-token' });

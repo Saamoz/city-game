@@ -12,7 +12,7 @@ Running handoff log. Keep short, high-signal notes here: environment quirks, imp
 - Remote: `origin -> https://github.com/Saamoz/city-game.git`
 - Branch: `master`
 - Date: 2026-04-04
-- Stage: **Phases 28–35 complete. Phase 36 next: Join Flow & Pre-Game Lobby (home screen redesign, team picker, lobby with live rosters, animated countdown). Phase 37 follows: Active Challenge Window (rolling N-challenge deck with queue promotion and feed announcement). Pending: uncommitted `getDisplayTitle` change in `ChallengeDeck.tsx` — function is referenced but not yet defined; will be completed in Phase 37.**
+- Stage: **Phases 28–36 complete. Phase 37 next: Active Challenge Window (rolling N-challenge deck with queue promotion and feed announcement).**
 
 ---
 
@@ -105,3 +105,12 @@ See the Phases 28–35 summary block above and the git log for full detail. Key 
 - **Phase 33:** `sanitizeFeatureCollection()` strips `id`/`crs` fields rejected by Fastify strict schema. Fastify body limit raised to 50 MB. Authored-map routes bypass idempotency middleware (no `game_id` FK on `action_receipts`). Distance tool deferred to Future Work.
 - **Phase 34:** Point-linked authored items store GeoJSON point in `challenge_set_items.config.map_point`. Admin UI no longer exposes `kind` or `completionMode` — backend defaults to `text` / `self_report`. Full server suite has nondeterministic test-DB contamination on reruns (pre-existing, unrelated to Phase 34 code).
 - **Phase 35:** `requireAdmin` is a no-op; admin routes are intentionally unauthenticated for local V1. `GET /games` and `PATCH /teams/:id` added to backend in this phase.
+
+
+## Phase 36 Notes
+
+- `Landing.tsx` is replaced by a persisted Zustand-backed `JoinFlow` with `home -> team_picker -> lobby -> countdown` states. Root `/` is now the join flow.
+- Team picker is zero-knowledge: players never see join codes; the client uses existing team data and submits the hidden `join_code` for the selected team.
+- Lobby uses authored map geometry (`map_definitions` + `map_zones`), not runtime game zones, so it works before `start` clones runtime zones.
+- Added the missing `player_joined` socket broadcast on team join. Phase 36 depends on that event for live roster updates in the lobby.
+- `suppressAutoEnter` behavior is preserved: leaving the live map returns to `/` without immediately re-entering active gameplay; the home screen offers `Return to Game` instead.

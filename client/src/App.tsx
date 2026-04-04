@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { Landing } from './features/landing/Landing';
+import { JoinFlow } from './features/join/JoinFlow';
 import { navigateToGame, navigateToLanding, parseRoute, shouldSuppressAutoEnter } from './lib/routing';
 
 const GameView = lazy(async () => {
@@ -95,7 +95,7 @@ export function App() {
   }
 
   return (
-    <Landing
+    <JoinFlow
       initialGameId={route.gameId}
       onEnterGame={handleEnterGame}
       suppressAutoEnter={suppressAutoEnter}
