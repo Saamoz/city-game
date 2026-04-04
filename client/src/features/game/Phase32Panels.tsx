@@ -7,6 +7,7 @@ export interface FeedEntry {
   body: string | null;
   createdAt: string;
   accentColor?: string;
+  zoneId?: string;
 }
 
 interface MiniScoreboardCardProps {
@@ -26,6 +27,7 @@ interface FeedOverlayProps {
   isLoading: boolean;
   errorMessage: string | null;
   onClose(): void;
+  onFocusZone(zoneId: string): void;
 }
 
 export function buildZoneScoreboard(snapshot: GameStateSnapshot | null): ScoreboardEntry[] {
@@ -169,7 +171,7 @@ export function ScoreboardOverlay({ entries, onClose }: ScoreboardOverlayProps) 
   );
 }
 
-export function FeedOverlay({ entries, isLoading, errorMessage, onClose }: FeedOverlayProps) {
+export function FeedOverlay({ entries, isLoading, errorMessage, onClose, onFocusZone }: FeedOverlayProps) {
   return (
     <OverlayShell title="Field Feed" onClose={onClose}>
       {isLoading ? <PanelMessage tone="default" message="Loading recent events." /> : null}
@@ -177,23 +179,48 @@ export function FeedOverlay({ entries, isLoading, errorMessage, onClose }: FeedO
       {!isLoading && !errorMessage && entries.length === 0 ? <PanelMessage tone="default" message="No visible events yet." /> : null}
 
       {entries.length ? (
-        <div className="space-y-2.5">
-          {entries.map((entry) => (
-            <article key={entry.id} className="rounded-[1.2rem] border border-[#d6c59d]/55 bg-[#f7efdc] px-4 py-3">
-              <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1.5">
+          {entries.map((entry) => {
+            const isZoneLinked = Boolean(entry.zoneId);
+            const articleClassName = [
+              'w-full rounded-[1rem] border border-[#d6c59d]/55 bg-[#f7efdc] px-3 py-2.5 text-left transition',
+              isZoneLinked ? 'hover:bg-[#fbf3e2]' : '',
+            ].join(' ').trim();
+
+            const content = (
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     {entry.accentColor ? (
-                      <span className="h-3 w-3 shrink-0 rounded-full border border-[#f8f1df]" style={{ backgroundColor: entry.accentColor }} />
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-[#f8f1df]" style={{ backgroundColor: entry.accentColor }} />
                     ) : null}
-                    <h3 className="font-semibold text-[#24343a]">{entry.title}</h3>
+                    <h3 className="text-[13px] font-semibold leading-5 text-[#24343a]">{entry.title}</h3>
                   </div>
-                  {entry.body ? <p className="mt-1.5 text-sm leading-6 text-[#55656c]">{entry.body}</p> : null}
+                  {entry.body ? <p className="mt-1 text-xs leading-5 text-[#55656c]">{entry.body}</p> : null}
                 </div>
-                <p className="shrink-0 text-[11px] uppercase tracking-[0.18em] text-[#7a6a48]">{formatEventTime(entry.createdAt)}</p>
+                <p className="shrink-0 pt-0.5 text-[10px] uppercase tracking-[0.16em] text-[#7a6a48]">{formatEventTime(entry.createdAt)}</p>
               </div>
-            </article>
-          ))}
+            );
+
+            if (isZoneLinked && entry.zoneId) {
+              return (
+                <button
+                  key={entry.id}
+                  className={articleClassName}
+                  onClick={() => onFocusZone(entry.zoneId!)}
+                  type="button"
+                >
+                  {content}
+                </button>
+              );
+            }
+
+            return (
+              <article key={entry.id} className={articleClassName}>
+                {content}
+              </article>
+            );
+          })}
         </div>
       ) : null}
     </OverlayShell>
@@ -368,6 +395,7 @@ function formatFeedEntry(
         body: null,
         createdAt: event.createdAt,
         accentColor: event.actorTeamId ? teamColorById.get(event.actorTeamId) : undefined,
+        zoneId: zone?.id,
       };
     }
     case 'GAME_STARTED':

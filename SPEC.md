@@ -17,7 +17,11 @@ The architecture supports future modes (scavenger hunt, hide-and-seek, tag, curr
 
 ### Gameplay Loop (Territory)
 
-Admin first authors a reusable city map and its zones (Zone Editor), then authors a challenge set (Challenge Keeper), then creates a game that references both. Authored challenge items can be portable, linked to an authored zone, or pinned to a specific authored map point. When the game starts, authored map zones are cloned into live runtime zones and authored challenge set items are cloned into runtime challenges for that game. Territory V1 primarily uses the portable deck flow: players join via code, open the app, travel to zones, choose a card, and complete it to capture the zone they are currently standing in. Challenges are consumed on completion. Game ends when a win condition is met.
+Admin first authors a reusable city map and its zones (Zone Editor), then authors a challenge set (Challenge Keeper), then creates a game that references both. Authored challenge items can be portable, linked to an authored zone, or pinned to a specific authored map point. When the game starts, authored map zones are cloned into live runtime zones and authored challenge set items are cloned into runtime challenges for that game.
+
+**Join flow:** Players open the app and see the active game on the home screen. They enter a display name, then choose their team from a list showing current team compositions. After joining, they see a pre-game lobby: the map is visible in the background (dimmed, non-interactive) and a live panel shows team rosters updating in real time as others join. When the admin starts the game, a 3-second animated countdown plays for all players simultaneously, then the game screen appears.
+
+**Gameplay:** Territory V1 uses the portable deck flow. At game start, a configurable window of challenges (default 3, set via `game.settings.active_challenge_count`) is made active and visible to all players simultaneously. Players travel to zones, select a card from the shared deck, and complete it to capture the zone they are currently standing in. When a challenge is completed it disappears from the deck for all players and the next queued challenge slides in with an animation; the new challenge title is announced in the live feed. Challenges are consumed on completion. Game ends when a win condition is met.
 
 ### Future Modes (Not Built in V1)
 
@@ -184,7 +188,10 @@ CREATE TABLE games (
                                                    --   location_retention_hours, notification_config,
                                                    --   claim_timeout_minutes (overrides env default),
                                                    --   max_concurrent_claims,
-                                                   --   require_gps_accuracy (default false)
+                                                   --   require_gps_accuracy (default false),
+                                                   --   active_challenge_count (default 3) — how many
+                                                   --     challenge cards are visible in the deck at once;
+                                                   --     completing one surfaces the next from the queue.
                                                    -- Mode keys are mode-defined.
   started_at         TIMESTAMPTZ,
   ended_at           TIMESTAMPTZ,
@@ -270,7 +277,17 @@ CREATE TABLE challenges (
   scoring          JSONB NOT NULL DEFAULT '{}',
   difficulty       VARCHAR(10),
   status           VARCHAR(20) NOT NULL DEFAULT 'available',
-  current_claim_id UUID,                        -- FK added via ALTER TABLE (see migration note).
+                                               -- 'available' | 'claimed' | 'completed'
+  sort_order       INTEGER NOT NULL DEFAULT 0, -- Preserved from authored item sort_order on clone.
+                                               -- Controls deck queue position.
+  is_deck_active   BOOLEAN NOT NULL DEFAULT FALSE,
+                                               -- TRUE = currently visible in the active challenge
+                                               -- window. The first active_challenge_count challenges
+                                               -- (by sort_order) are activated on game start.
+                                               -- Completing one causes the next queued challenge to
+                                               -- be activated. Queued challenges (available but
+                                               -- is_deck_active = false) are invisible to clients.
+  current_claim_id UUID,                       -- FK added via ALTER TABLE (see migration note).
   expires_at       TIMESTAMPTZ,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -469,7 +486,7 @@ ORDER BY distance_meters;
 
 1. **Registration:** `POST /game/:id/players` with `{ display_name }`. Creates a player in the game. Response sets `session_token` as an `httpOnly; Secure; SameSite=Strict` cookie. Client JS never sees the token.
 
-2. **Team join:** `POST /game/:id/teams/join` with `{ join_code }`. Requires existing session cookie. Sets `player.team_id`. Returns updated player + team.
+2. **Team join:** `POST /game/:id/teams/join` with `{ join_code }`. Requires existing session cookie. Sets `player.team_id`. Returns updated player + team. The frontend presents teams as selectable cards (showing current members) and uses the chosen team's join_code transparently — players never type a code.
 
 3. **REST auth:** Browser attaches cookie automatically. Fastify middleware reads it, looks up player, attaches `request.player`. Team-requiring endpoints check `player.team_id IS NOT NULL` → `403 NOT_ON_TEAM` if null.
 
@@ -702,7 +719,7 @@ Every broadcast includes `state_version` and `server_time`.
 
 **Engine:** `game_state_sync`, `game_state_delta`, `game_started`, `game_paused`, `game_ended`, `player_joined`, `annotation_added`, `annotation_removed`, `resource_changed`.
 
-**Territory:** `zone_captured`, `challenge_claimed`, `challenge_completed`, `challenge_released`, `challenge_spawned` (future: dynamic/timed challenge creation during active game; V1 uses static pre-created challenges only).
+**Territory:** `zone_captured`, `challenge_claimed`, `challenge_completed`, `challenge_released`, `challenge_activated` (emitted when a queued challenge is promoted to the active deck window after a completion; includes challenge title for feed display), `challenge_spawned` (future: dynamic/timed challenge creation during active game; V1 uses static pre-created challenges only).
 
 ### Broadcaster
 

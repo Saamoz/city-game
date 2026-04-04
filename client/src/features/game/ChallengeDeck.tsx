@@ -139,8 +139,11 @@ export function ChallengeDeck({
                   style={{ transform: `rotate(${(index % 2 === 0 ? -1 : 1) * Math.min(index, 2) * 0.35}deg)` }}
                 >
                   <div className="flex items-start justify-between gap-4">
-                    <h3 className="font-[Georgia,Times_New_Roman,serif] text-lg lg:text-xl font-semibold text-[#1f2a2f]">
-                      {challenge.title}
+                    <h3
+                      className="font-[Georgia,Times_New_Roman,serif] text-lg lg:text-xl font-semibold text-[#1f2a2f]"
+                      title={challenge.title}
+                    >
+                      {getDisplayTitle(challenge.title)}
                     </h3>
                   </div>
 
@@ -251,8 +254,11 @@ export function ChallengeDeck({
                         {teamName ?? 'Unknown team'}
                       </p>
                     </div>
-                    <h3 className="mt-2 line-clamp-2 font-[Georgia,Times_New_Roman,serif] text-lg font-semibold text-[#24343a]">
-                      {challenge.title}
+                    <h3
+                      className="mt-2 line-clamp-2 font-[Georgia,Times_New_Roman,serif] text-lg font-semibold text-[#24343a]"
+                      title={challenge.title}
+                    >
+                      {getDisplayTitle(challenge.title)}
                     </h3>
                     <p className="mt-2 line-clamp-3 text-sm leading-6 text-[#55646b]">
                       {getShortDescription(challenge)}
@@ -419,6 +425,15 @@ function scrollDeck(container: HTMLDivElement | null, delta: number): void {
 
 function compareChallengeTitle(left: Challenge, right: Challenge): number {
   return left.title.localeCompare(right.title);
+}
+
+function getDisplayTitle(title: string): string {
+  const normalizedTitle = title.trim();
+  if (normalizedTitle.length <= 100) {
+    return normalizedTitle;
+  }
+
+  return normalizedTitle.slice(0, 97).trimEnd() + '...';
 }
 
 function locationPillClassName(status: GeolocationStatus): string {

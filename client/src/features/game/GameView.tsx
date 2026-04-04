@@ -694,24 +694,33 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     setMenuDragY(0);
   }, [requestMenuClose]);
 
-  const handleFocusCompletedCard = useCallback((challengeId: string) => {
+  const focusZoneById = useCallback((zoneId: string) => {
     const map = mapRef.current;
     if (!map || !snapshot) {
       return;
     }
 
-    const completedCard = completedCards.find((entry) => entry.challenge.id === challengeId);
-    if (!completedCard?.zoneId) {
-      return;
-    }
-
-    const zone = snapshot.zones.find((entry) => entry.id === completedCard.zoneId);
+    const zone = snapshot.zones.find((entry) => entry.id === zoneId);
     if (!zone) {
       return;
     }
 
     focusMapOnZone(map, zone);
-  }, [completedCards, snapshot]);
+  }, [snapshot]);
+
+  const handleFocusCompletedCard = useCallback((challengeId: string) => {
+    const completedCard = completedCards.find((entry) => entry.challenge.id === challengeId);
+    if (!completedCard?.zoneId) {
+      return;
+    }
+
+    focusZoneById(completedCard.zoneId);
+  }, [completedCards, focusZoneById]);
+
+  const handleFocusFeedZone = useCallback((zoneId: string) => {
+    focusZoneById(zoneId);
+    setActiveOverlay(null);
+  }, [focusZoneById]);
 
   return (
     <main className="relative h-screen overflow-hidden bg-[#dfe6e8] text-[#1f2a2f]">
@@ -1032,6 +1041,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           isLoading={feedStatus === 'loading'}
           errorMessage={feedErrorMessage}
           onClose={() => setActiveOverlay(null)}
+          onFocusZone={handleFocusFeedZone}
         />
       ) : null}
 

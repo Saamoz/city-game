@@ -11,8 +11,8 @@ Running handoff log. Keep short, high-signal notes here: environment quirks, imp
 - Repo: `E:\city game` / WSL: `/mnt/e/city game`
 - Remote: `origin -> https://github.com/Saamoz/city-game.git`
 - Branch: `master`
-- Date: 2026-04-03
-- Stage: **Phase 33 complete. Admin zone editor live: authored maps + zones with draw-split, snap, no-overlap enforcement, merge, file/OSM import. Phase 34 next: Challenge Keeper — authored challenge sets with portable and location-specific items.**
+- Date: 2026-04-04
+- Stage: **Phases 28–35 complete. Phase 36 next: Join Flow & Pre-Game Lobby (home screen redesign, team picker, lobby with live rosters, animated countdown). Phase 37 follows: Active Challenge Window (rolling N-challenge deck with queue promotion and feed announcement). Pending: uncommitted `getDisplayTitle` change in `ChallengeDeck.tsx` — function is referenced but not yet defined; will be completed in Phase 37.**
 
 ---
 
@@ -82,171 +82,26 @@ These were identified as flexibility improvements before frontend work begins:
 
 ---
 
-## Phases 28–30 Notes (Summary)
+## Phases 28–35 Notes (Summary)
 
-- **Phase 28:** Landing auto-discovers active game. Registration + team join hit real backend. Full-screen Mapbox with team-colored zone polygons. Dev proxy fix (Vite was stripping `/api` prefix). `ZoneLayer` fixed to use React state for map instance (ref-only wiring didn't mount). `VITE_MAPBOX_ACCESS_TOKEN` read from repo-root `.env`.
-- **Phase 29:** Socket.IO client wired with cookie auth. Reconnect re-emits `join_game`. Version ordering: ignore stale, gap → full sync. Per-version dedupe handles same-version sibling events. Reconnect banner in UI.
-- **Phase 30:** Pivoted to portable challenge deck (no map pins, no zone detail sheet). Deck is horizontal card tray with drag-scroll, collapsible dock. Fixed three bugs in `ChallengeDeck.tsx`: hooks naming violation (`createDragRefs` → `useDragRefs`), click bubbling resetting confirm state, `setPointerCapture` timing. City seed scripts added: `db:seed:toronto`, `db:seed:chicago` (destructive — each truncates live data).
+- **Phase 28–29:** Mapbox map shell + Socket.IO live sync. Dev proxy fix (`/api` prefix). `ZoneLayer` uses React state for map instance. Version ordering, gap recovery, reconnect banner.
+- **Phase 30:** Portable challenge deck; fixed hooks naming, click bubbling, setPointerCapture timing. City seed scripts: `db:seed:toronto`, `db:seed:chicago` (destructive).
+- **Phase 31:** GPS-gated completion flow; `useIdempotentAction`; mobile-first UI overhaul; swipe-up/down deck gestures; completed cards tray.
+- **Phase 32:** Team control strip; mini/full scoreboard; live feed overlay; toast stack; rival capture toasts.
+- **Phase 33:** Admin zone editor (`/admin/zones`) — draw-split, snap, merge, GeoJSON/OSM import. Migration 0003.
+- **Phase 34:** Challenge Keeper (`/admin/challenges`) — authored challenge sets, portable/zone/point items, runtime cloning. Migration 0004. Point-linked authored items. split-route compatibility fix.
+- **Phase 35:** Admin panel (`/admin`) — game lifecycle, team management, overrides, scoreboard view.
 
 Dev seed join codes: Winnipeg `RED12345`/`BLUE1234`/`GOLD1234`, Chicago `CHIBLUE1`/`CHIGOLD1`/`CHIRED01`.
 
 ---
 
-## Phase 31 Notes
+## Phase 31–35 Notes
 
-**Backend additions:**
-- `POST /challenges/:id/complete` now accepts optional nested `gps` body. When challenge is `available` + `config.portable = true`, Territory complete service resolves the player's current zone from GPS and completes atomically in one transaction — no separate `challenge_claimed` event emitted (rival teams don't see an in-progress state for portable cards).
-- Portable claim timeout job and release both clear `zoneId` on the challenge when a portable claim ends.
-- `/claim` and `/release` still exist for platform completeness and tests; not used by the primary frontend.
+See the Phases 28–35 summary block above and the git log for full detail. Key decisions worth keeping:
 
-**Frontend completion flow:**
-- `useIdempotentAction` deduplicates in-flight calls by key; callers always get back the same promise while a request is in flight.
-- `useGeolocation` runs `watchPosition` continuously; `refresh()` calls `getCurrentPosition` on demand before a claim if no fix is cached.
-- `GPS_TOO_OLD` → confirm dialog → retry with overridden `capturedAt: new Date().toISOString()`. Error in retry is wrapped in its own try/catch so toast fires rather than being silently swallowed.
-- Optimistic Zustand update on action start; socket arrival reconciles the authoritative state.
-- Deck shows only `available` challenges. Completed cards move to archived tray below the deck.
-
-**Mobile-first UI overhaul:**
-- Full-screen map on mobile; no fixed chrome columns.
-- Mobile top bar (`sm:hidden`): current zone pill + ☰ hamburger. Menu overlay: fixed bottom sheet with game name, player, team, Back to Lobby.
-- Desktop HUD (`hidden sm:flex`): left column with Field Brief card, GPS status pill, full deck with Prev/Next + counts, always-visible completed section, Back to Lobby.
-- Mobile deck: pill button (`sm:hidden`) when closed → tapping slides deck up from bottom (400ms spring). Drag handle at top. Swipe-down to close, swipe-up to reveal completed tray.
-- `touch-action: none` on deck wrapper + `e.preventDefault()` on committed drag prevents viewport pan competing with custom swipe gesture detection.
-- Completed tray uses `max-height` + `opacity` CSS transition (500ms spring) — chosen over translate-based because the deck is bottom-anchored and content below it naturally expands toward the bottom edge.
-- Deck close is two-stage: `setDeckDragY(500)` immediately (spring eject), then `setIsDeckOpen(false)` after 400ms so pill button reappears only after animation completes.
-- Removed Mapbox `NavigationControl` (zoom buttons) — map is a backdrop.
-- Removed scoring/reward pills from all cards and modals (V1 does not display points/coins to players).
-- Card selection: amber outline ring only; no "Selected" badge.
-
-**Swipe thresholds:**
-- Close: deltaY > 80px, or deltaY > 30px + velocity > 0.5 px/ms
-- Show completed: deltaY < −50px, or deltaY < −20px + velocity < −0.4 px/ms
-- Resistance factor on upward overscroll: 0.25×
-
-**Validation:**
-- `pnpm -r typecheck && pnpm -r build && pnpm --filter @city-game/server test`
-- Manual: Chicago seed → join → open deck → swipe → claim challenge → zone captures → completed tray appears correctly.
-- Current seed: `Chicago Territory Demo` — join codes `CHIBLUE1` / `CHIGOLD1` / `CHIRED01`
-
-## Phase 32 Notes
-
-**Territory V1 control HUD:**
-- Scoreboard presentation is now zone-only. Backend Territory standings sort by `zoneCount desc`, then team name/id for deterministic ties. Resource balances remain in platform data but are intentionally ignored by V1 ranking and UI.
-- New client-side panels in `client/src/features/game/Phase32Panels.tsx`: `TeamControlStrip`, `MiniScoreboardCard`, full standings overlay, and live feed overlay.
-- Mobile HUD keeps the map clear: top bar shows current zone + menu, and a compact team control strip sits below it. Menu now opens `Standings` and `Feed` instead of forcing those onto the map surface.
-- Desktop HUD keeps the existing field brief and status cards, with a standings card added as a second warm-paper module rather than a separate app-like pane.
-
-**Live feed / toast behavior:**
-- Feed overlay fetches `GET /game/:id/events?limit=40` on demand and renders the recent visible control history.
-- Realtime direct socket events synthesize lightweight `GameEventRecord` entries client-side for immediate feed updates while the overlay is open or cached. Only event types already surfaced in Phase 32 are synthesized: zone capture, challenge complete, game lifecycle, and player join.
-- Rival `zone_captured` and `game_ended` socket events now trigger neutral info toasts. Toasts support `success`, `error`, and `info`, plus optional team-color accent dots.
-
-**Design constraints kept in this pass:**
-- No points / coins / resource counters in the player-facing HUD.
-- Overlays use the same cartographic warm-paper treatment as the deck instead of introducing bright app-chrome panels.
-- Phase 31 deck interactions, map behavior, and mobile sheet layout were preserved; this phase only adds control/status surfaces around them.
-
-**Validation:**
-- `pnpm --filter @city-game/server exec vitest run src/routes/scoreboard-routes.test.ts`
-- `pnpm --filter @city-game/client exec tsc -b --pretty false`
-- `pnpm --filter @city-game/client build`
-- `pnpm -r typecheck`
-- `pnpm -r build`
-
-**Phase 32 compactness follow-up:**
-- Mobile top bar now uses three compact pills only: team, zone count, current zone. The separate collapsible control strip was removed.
-- Standings overlay was compressed: no game title, no duplicate sublabel under each team, just rank/name on the left and `Zones N` on the right.
-- Feed now suppresses per-player / per-challenge duplicate narration for captures. Territory V1 feed shows the team control outcome (`Team captured Zone`) plus lifecycle events.
-- Standings, feed, and the mobile hamburger sheet all support swipe-down-to-close from their sheet header / grab area.
-- Completed cards now show a team-color dot and clicking a completed card pans the map to the captured zone.
-
-## Phase 33 Notes
-
-**Phase 33 complete.** Admin zone editor at `/admin/zones`.
-
-- `map_definitions` + `map_zones` are now first-class authored data; running games are unaffected by later edits
-- Games reference `map_id`; `onGameStart` clones authored zones into runtime zones
-- Backend: `server/src/routes/map-routes.ts` + `server/src/services/map-service.ts`; DB migration 0003
-- Frontend: `client/src/features/admin-zones/AdminZoneEditor.tsx`
-  - Draw-to-split: user draws a LineString, PostGIS `ST_Split` cuts zone at exactly that line
-  - No-overlap: `turf.difference()` clips every new polygon against existing zones automatically
-  - Snap indicator: amber dot snaps new vertices to nearby zone edges during draw/split
-  - Simplified merge: select A → "Merge with…" → click B → Confirm (no staging queue)
-  - Import fix: `sanitizeFeatureCollection()` strips `id`/`crs` fields rejected by Fastify strict schema
-  - Fastify body limit raised to 50 MB (was 1 MB default) — city GeoJSON files routinely exceed 1 MB
-  - All mutations update local state from API response; no full refresh round-trips
-- Map authoring routes are currently public write (no admin token required); auth to be added before deployment
-- Authored-map routes bypass idempotency middleware (no `game_id` FK on `action_receipts`)
-
-**Planning notes:**
-- Distance tool deferred to Future Work — not required for Territory V1
-- Challenge Keeper (Phase 34) follows same authored-vs-runtime pattern as zone editor: `challenge_sets` + `challenge_set_items`, cloned into runtime `challenges` on game start
-
-## Phase 34 Notes
-
-**Phase 34 complete.** Challenge Keeper at `/admin/challenges`.
-
-- Added authored challenge-set model independent of running games:
-  - `challenge_sets`
-  - `challenge_set_items`
-  - `games.challenge_set_id`
-- Backend routes in `server/src/routes/challenge-set-routes.ts`:
-  - `GET/POST /api/v1/challenge-sets`
-  - `GET/PATCH/DELETE /api/v1/challenge-sets/:id`
-  - `GET/POST /api/v1/challenge-sets/:id/items`
-  - `PATCH/DELETE /api/v1/challenge-set-items/:id`
-- Runtime cloning implemented in `server/src/services/challenge-set-service.ts` and wired into `server/src/services/game-service.ts`.
-  - On game start, authored set items clone into runtime `challenges`
-  - Portable authored items clone with `zoneId = null`
-  - Zone-linked authored items resolve authored `map_zone_id` to the matching cloned runtime `zone_id` via `zones.metadata.source_map_zone_id`
-  - Authored provenance is stored in runtime `challenge.config` (`source_challenge_set_id`, `source_challenge_set_item_id`, `source_map_zone_id`)
-- Frontend admin UI in `client/src/features/admin-challenges/AdminChallenges.tsx`:
-  - desktop-first 3-column editor
-  - challenge set list/create/delete
-  - set metadata editing
-  - authored item create/edit/delete/reorder
-  - portable vs zone-linked placement
-  - authored map/zone picker for linked items
-  - JSON import/export for full sets
-- Game create/update now accepts `challengeSetId`; validation added in `server/src/routes/game-routes.ts`.
-- Shared contracts updated in `shared/src/types.ts` and `shared/src/errors.ts`.
-- DB migration generated: `server/src/db/migrations/0004_sloppy_rhino.sql`.
-
-**Compatibility fix landed during this phase:**
-- `POST /api/v1/map-zones/:id/split` again accepts an empty body as well as an optional `splitLine` payload. This restored the previous route behavior and fixed the authored-map regression test.
-
-**Validation completed:**
-- `pnpm db:generate`
-- `pnpm db:migrate`
-- `pnpm --filter @city-game/server exec vitest run src/routes/challenge-set-routes.test.ts src/routes/map-routes.test.ts`
-- `pnpm -r typecheck`
-- `pnpm -r build`
-
-**Important note on test infrastructure:**
-- During exploratory reruns of the full server suite, the existing integration tests showed nondeterministic shared test-DB contamination / isolation failures unrelated to the kept Phase 34 code.
-- I did not keep any speculative test-infrastructure changes from that investigation. The repo is left with only the feature code, migration, route compatibility fix, and log updates.
-
-**Phase 34 follow-up (point-linked authored challenges):**
-- Authored challenge items now support three placement modes in the active editor/API flow: `portable`, `zone`, and `point`.
-- Point-linked authored items persist a GeoJSON point in `challenge_set_items.config.map_point` and require `metadata.sourceMapId`.
-- The admin challenge editor no longer exposes `kind` or `completionMode`; authored item creation/update now relies on backend defaults (`text`, `self_report`).
-- Challenge set route coverage now includes point-linked item creation and runtime cloning metadata (`location_mode: 'point'`, `source_map_point`).
-
-## Phase 35 Notes
-
-**Phase 35 complete.** Admin panel at /admin.
-
-- Frontend: client/src/features/admin/AdminPanel.tsx
-- Route wiring: client/src/App.tsx and client/src/lib/routing.ts
-- Game management UI includes:
-  - game list and new-game draft workflow
-  - authored map picker and authored challenge set picker
-  - Territory lifecycle controls (start, pause, resume, end)
-  - team creation and inline team editing
-  - admin overrides for challenge force-complete/reset, zone owner assignment, player team moves, and rebroadcast
-  - zone-only scoreboard and runtime snapshot panels
-- Backend support finalized in:
-  - server/src/routes/game-routes.ts with GET /games and PATCH /teams/:id
-  - server/src/routes/player-routes.ts with GET /game/:id/players
-- Local V1 posture: admin routes are intentionally unauthenticated for now; requireAdmin is a no-op in server/src/lib/auth.ts.
-- Resource adjustment is not surfaced in the admin UI because Territory V1 is zone-only.
+- **Phase 31:** `useIdempotentAction` deduplicates in-flight calls by key. Swipe thresholds: close deltaY > 80px or deltaY > 30px + velocity > 0.5 px/ms; reveal-completed deltaY < −50px or deltaY < −20px + velocity < −0.4 px/ms. Resistance factor on upward overscroll: 0.25×. Deck close is two-stage (spring eject then pill reappear after 400ms).
+- **Phase 32:** Feed suppresses per-player / per-challenge duplicate narration for captures — shows team control outcome only. Standings/feed/hamburger sheet all support swipe-down-to-close. Completed cards pan map to captured zone on click.
+- **Phase 33:** `sanitizeFeatureCollection()` strips `id`/`crs` fields rejected by Fastify strict schema. Fastify body limit raised to 50 MB. Authored-map routes bypass idempotency middleware (no `game_id` FK on `action_receipts`). Distance tool deferred to Future Work.
+- **Phase 34:** Point-linked authored items store GeoJSON point in `challenge_set_items.config.map_point`. Admin UI no longer exposes `kind` or `completionMode` — backend defaults to `text` / `self_report`. Full server suite has nondeterministic test-DB contamination on reruns (pre-existing, unrelated to Phase 34 code).
+- **Phase 35:** `requireAdmin` is a no-op; admin routes are intentionally unauthenticated for local V1. `GET /games` and `PATCH /teams/:id` added to backend in this phase.

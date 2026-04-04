@@ -66,189 +66,188 @@ All backend phases are implemented, tested, and passing. Summary of what exists:
 
 ---
 
-## Phase 28: Frontend — Map Shell & Zone Rendering ✅
+## Phases 28–35: Frontend Complete ✅
 
-**Done.** Mapbox map with zones from API.
+All frontend phases shipped. Summary of what exists in the client:
 
-- `Landing.tsx`: auto-discovers `GET /game/active`, registration form, team join form, direct `/game/:id` routing
-- `GameView.tsx`: full-screen Mapbox map
-- `ZoneLayer.tsx`: zones from map-state, team-colored polygons
-- `gameStore.ts`: Zustand store from map-state
-- Dev proxy fix: Vite forwards `/api/v1` unchanged to Fastify on port 3000
-- `VITE_MAPBOX_ACCESS_TOKEN` read from repo-root `.env`
-
----
-
-## Phase 29: Frontend — Socket.IO & Live State ✅
-
-**Done.** Real-time sync with version ordering.
-
-- Socket.IO client connects after initial map-state, re-emits `join_game` on every reconnect
-- Version ordering: ignore events ≤ current version; gap → full sync
-- Per-version dedupe map handles same-version sibling events correctly
-- Reconnect banner surfaced in UI
+- **Phase 28–29:** Mapbox map shell with team-colored zone polygons; Socket.IO live sync with version ordering, reconnect banner, and gap recovery.
+- **Phase 30–31:** Portable challenge deck (horizontal card tray, swipe gestures, collapsible dock); full mobile-first UI overhaul; GPS-gated challenge completion; idempotent action hook; completed cards tray; `OUTSIDE_ZONE` / `GPS_TOO_OLD` error handling with optimistic rollback.
+- **Phase 32:** Team control strip; mini scoreboard; full scoreboard page; live event feed; notification toast stack; rival zone capture toasts.
+- **Phase 33:** Admin zone editor (`/admin/zones`) — draw, split, merge, snap, import GeoJSON/OSM, export.
+- **Phase 34:** Challenge Keeper (`/admin/challenges`) — challenge set CRUD, item authoring, portable/zone/point placement, JSON import/export.
+- **Phase 35:** Admin panel (`/admin`) — game lifecycle, team management, admin overrides, scoreboard view.
 
 ---
 
-## Phase 30: Frontend — Portable Challenge Deck ✅
+## Phase 36: Join Flow & Pre-Game Lobby
 
-**Done.** Card-style challenge deck over the map.
-
-- Removed challenge pins and zone detail sheet
-- Horizontal card tray with drag-scroll and tap-to-select
-- Deck is a collapsible dock; challenge details in a modal
-- Fixed three bugs before stabilization: hooks naming violation (`createDragRefs` → `useDragRefs`), click bubbling resetting confirm state, `setPointerCapture` timing (moved to first drag movement)
-
----
-
-## Phase 31: Frontend — Portable Completion UI + Mobile-First UI ✅
-
-**Done.** Full mobile-first redesign + complete challenge flow.
-
-### What was built
-
-**Challenge flow:**
-- `POST /challenges/:id/complete` with GPS — no claim/release step for portable deck
-- `useIdempotentAction` deduplicates in-flight requests
-- `useGeolocation` watches position continuously; `refresh()` for on-demand fix
-- Optimistic Zustand update on action start; socket arrival reconciles
-- `GPS_TOO_OLD` → confirm dialog → retry with overridden `capturedAt`
-- `OUTSIDE_ZONE` → toast with clear message
-
-**Mobile-first UI:**
-- Map is full-screen on mobile; no permanent chrome overlapping it
-- Mobile top bar: zone pill + ☰ hamburger → menu overlay with Back to Lobby
-- Desktop: left-column HUD with Field Brief, GPS pill, full deck chrome, and zone-control summary
-- Mobile deck: floating overlay that slides up from bottom; pill button when closed
-- Swipe-down to close (spring animation, 400ms); pill reappears only after animation
-- Swipe-up to reveal completed cards tray from below
-- Completed tray: `max-height` + `opacity` CSS transition, 500ms spring
-- Removed Mapbox NavigationControl (zoom buttons)
-- No scoring/reward pills on cards in V1
-
-### Validation
-- Selecting and completing a card captures current zone. Errors toast + rollback. Double-tap idempotent. GPS adaptive. Swipe gestures work on real devices.
-
----
-
-## Phase 32: Frontend — HUD, Scoreboard & Feed
-
-**Goal:** Team control strip, mini scoreboard, full scoreboard page, live event feed, notification toasts.
-
-### Work
-
-**Team Control Strip (mobile):**
-- Compact row below the top bar: team color swatch + team name + zones owned
-- Auto-hides when deck is open to preserve map visibility
-- Tap to collapse/expand
-
-**Desktop HUD expansion:**
-- Field Brief card gains live controlled-zone count and concise standings context
-- No points or currency counters in V1 Territory
-
-**MiniScoreboard:**
-- Accessible from ☰ menu on mobile (Standings item)
-- Desktop: compact 2-3 row leaderboard below the control summary in left column
-- Shows: rank, color swatch, team name, zones owned
-- Tap → full Scoreboard page
-
-**Full Scoreboard (`/game/:id/scores`):**
-- Full-page view: game name, time elapsed/remaining
-- Table: rank, team color bar, team name, zones owned
-- Territory ranking: zones owned descending, then deterministic team name/id fallback
-- Rows animate in on mount
-- "Live" badge pulses when connected
-
-**Live Feed (`/game/:id/feed`):**
-- Chronological `EventCard` list
-- Zone captured: team color indicator + "Team X captured Zone Y"
-- Challenge completed: player + challenge title
-- Game lifecycle: banner entries
-- Loads recent events on mount, appends via socket
-- Infinite scroll upward for history
-- Mobile: full page. Desktop: TBD collapsible panel.
-
-**NotificationToast:**
-- Bottom-center stack (max 3 visible)
-- Types: success (green-tinted amber), error (red), info (neutral cream)
-- Auto-dismiss 4s, tap to dismiss early
-- Rival zone capture → toast with team color
-
-### Validation
-- Zone-control counts match server ownership. Scoreboard matches Territory V1 ranking. Events animate live. Toasts fire for rival captures and GPS warnings.
-
----
-
-## Phase 33: Frontend — Admin Zone Editor (`/admin/zones`) ✅
-
-**Done.** Full-screen Mapbox editor for authoring reusable maps and zone layouts.
-
-- Authored map list (create/select/rename); maps are independent of any running game
-- Tool modes: Select, Draw Polygon, Draw Split Line, Edit Vertices, Delete
-- Draw polygon → auto-clips against existing zones (turf.difference) so zones never overlap
-- Draw split line → PostGIS ST_Split cuts the selected zone exactly where drawn
-- Vertex snap indicator: amber dot on mousemove snaps new vertices to nearby zone edges
-- Vertex delete: click vertex in direct_select mode → Delete/Backspace
-- Simplified merge: select zone A → "Merge with…" → click zone B → Confirm
-- File import: drag-drop GeoJSON FeatureCollection → preview on map → Import (sanitized before POST to strip fields rejected by strict schema)
-- OSM import: preview administrative boundaries for map city → confirm bulk import
-- Export: download current authored zones as GeoJSON
-- All mutations update local state from API response — no full-refresh round trips
-- Backend: `map_definitions` + `map_zones` tables (migration 0003); full CRUD routes; `onGameStart` clones authored zones into runtime zones
-- Fastify body limit raised to 50 MB to handle city-level GeoJSON files
-
----
-
-## Phase 34: Frontend — Challenge Keeper (`/admin/challenges`)
-
-**Goal:** Authoring UI for reusable challenge sets, analogous to the zone editor for maps.
+**Goal:** Replace the current join-code home screen with a clean mobile-first join experience and a live pre-game lobby that transitions smoothly into the game.
 
 ### Why
 
-Challenges need the same authored-vs-runtime separation that maps now have. A challenge set is created once, stored independently, and attached to a game at creation time. When the game starts, set items are cloned into runtime challenges — exactly like map zones. This lets the same challenge set be reused across multiple playtests and edited between games without touching a running session.
+The current `Landing.tsx` requires players to know a team join code, is not mobile-optimized, and drops players directly into the game view with no sense of anticipation or group formation. The new flow is zero-knowledge for players (no codes to share), socially engaging (see who's joining each team), and builds excitement through a shared countdown.
 
-### Work
+### Flow State Machine
 
-**Backend:**
-- `challenge_sets` table: `id`, `name`, `description`, `metadata`, timestamps
-- `challenge_set_items` table: `id`, `set_id` (FK), `map_zone_id` (nullable FK to `map_zones` — NULL means portable), `title`, `description`, `kind`, `config`, `completion_mode`, `scoring`, `difficulty`, `sort_order`, `metadata`, timestamps
-- `games.challenge_set_id` nullable FK — set at game creation, resolved on start
-- `onGameStart` hook: if `challenge_set_id` is set, clone `challenge_set_items` into runtime `challenges`; location-specific items resolve `zone_id` by matching `map_zone_id` to the corresponding cloned runtime zone
-- Routes: `GET/POST /challenge-sets`, `GET/PATCH/DELETE /challenge-sets/:id`, `GET/POST /challenge-sets/:id/items`, `PATCH/DELETE /set-items/:id`
+```
+home → name_entry → team_picker → lobby → countdown → game
+```
 
-**Frontend (`/admin/challenges`):**
-- Left panel: list of challenge sets + "New Set" button
-- Right panel: set name/description editor + scrollable item list
-- Each item row: title, kind badge, difficulty, zone tag (or "Portable"), drag to reorder
-- Item editor (slide-in or inline): title, description, kind selector, difficulty, `map_zone_id` picker (shows zones from a chosen authored map — optional; leave blank for portable)
-- Import/export: JSON bulk load/dump of a full set
-- No map chrome — this is a form-based admin tool
+Each state is a full-screen view. Transitions are smooth slides/fades. State is stored in Zustand and persisted to `localStorage` so a page refresh returns to the correct step (lobby if already joined, game if already started).
+
+### Detailed UI Design
+
+**Home Screen (`home` state)**
+- Full-height layout. Background: warm cream `#f5f0e8`. No map visible yet — keep it clean.
+- App wordmark at top (League Mono, small, muted) — e.g. "TERRITORY".
+- Game name displayed large in Georgia serif, centered vertically in the upper half.
+- Optional: city/subtitle in a smaller muted serif below the game name.
+- Single text input: placeholder "Your name", large font, centered, max-width ~320px on desktop.
+- Submit button: full-width on mobile, amber background `#c8a86b`, Georgia serif label "Join Game →". Disabled until name ≥ 2 chars.
+- If game status is not `setup`: show "No game is currently accepting players." in muted text with no form. Poll every 10s.
+- No join code field anywhere.
+
+**Team Picker (`team_picker` state)**
+- Appears after name is submitted and player is registered via `POST /game/:id/players`.
+- Header: "Choose your team" in Georgia serif, centered.
+- Vertical scrollable list of team cards. Each card:
+  - Left accent bar (4px wide, full card height) in the team's hex color.
+  - Team name in Georgia serif, lg weight.
+  - Member count pill (right-aligned): "4 players" in League Mono, muted.
+  - Below the name: horizontal row of player name chips (small rounded pills, cream bg with color-tinted border). Show up to 5; "+N more" chip if overflow. Empty teams show "No players yet" in muted italic.
+  - Card has a subtle warm shadow on hover/focus; scales 1.02 on press.
+- Tapping a card immediately calls `POST /game/:id/teams/join` with that team's `join_code` (player never sees the code). Loading spinner on the tapped card while in-flight.
+- Back chevron at top-left to re-enter name if needed.
+- Team list is fetched on mount and also polled every 5s so member counts stay fresh while the picker is open.
+
+**Lobby Screen (`lobby` state)**
+- Map is mounted and fills the entire screen as a background. Zones rendered in neutral warm grey (no team colors — game hasn't started). Map is non-interactive: pointer events disabled, no controls.
+- Over the map: a semi-transparent warm overlay `rgba(245, 240, 232, 0.72)` covers the full screen.
+- Centered panel (warm paper card, same `#f0ebe0` bg + subtle border as the challenge deck):
+  - **Top:** Game name in Georgia serif, medium.
+  - **Below:** A pulsing amber dot + "Waiting for the game to start…" in muted serif.
+  - **Team rosters section:** Each team rendered as a column (or row if ≥ 4 teams: grid). Per team:
+    - Color swatch circle + team name in Georgia serif.
+    - Player name list, one per line, small text. Your own name is rendered in the team color with a subtle "You" badge.
+    - Empty slots shown as "—" placeholders if team has < expected player count (optional — only if count is configured).
+  - Panel scrolls if too tall on small screens.
+- Socket is connected here (`join_game` emitted). Listen for `player_joined` events — update the roster live (smooth fade-in of new names, no full refresh).
+- Listen for `game_started` event → trigger countdown.
+
+**Countdown Overlay (`countdown` state)**
+- Full-screen overlay fades in over the lobby in 200ms. Background: `rgba(31, 42, 47, 0.92)` (near-black, same dark tone as game HUD).
+- Countdown sequence: 3 → 2 → 1 → GO!
+- Each number fills ~60vw height, centered, Georgia serif, cream `#f5f0e8`.
+- Animation per beat: number appears at scale 1.4 + opacity 0 → snaps to scale 1.0 + opacity 1 in 100ms (pop-in) → holds 600ms → scale 0.8 + opacity 0 over 300ms (shrink-out). Total per beat: 1000ms.
+- "GO!" text: amber `#c8a86b`, same scale animation but holds 600ms then the entire overlay fades out over 400ms.
+- After overlay fades: map becomes interactive, zones take team colors, challenge deck pill appears. Full `GameView` is now live.
+- No audio in V1.
+
+### Components
+
+- `client/src/features/join/JoinFlow.tsx` — top-level state machine; manages `home | team_picker | lobby | countdown` states; persists to localStorage
+- `client/src/features/join/TeamPicker.tsx` — team card list with live polling
+- `client/src/features/join/LobbyScreen.tsx` — map background + centered roster panel; socket listener
+- `client/src/features/join/CountdownOverlay.tsx` — animated countdown; framer-motion or pure CSS keyframes
+- `client/src/App.tsx` — route `/` now renders `JoinFlow` instead of `Landing`; existing `Landing.tsx` retired
+
+### Backend
+
+No new endpoints required. All needed APIs already exist:
+- `GET /api/v1/game/active` — discover the setup game on home screen
+- `GET /api/v1/game/:id/teams` — team list for picker (with player counts from join)
+- `GET /api/v1/game/:id/players` — roster for lobby panel
+- `POST /api/v1/game/:id/players` — register name
+- `POST /api/v1/game/:id/teams/join` — join chosen team
+- Socket `player_joined` — already broadcast on join; lobby uses it for live updates
+- Socket `game_started` — already emitted; triggers countdown
 
 ### Validation
-- Challenge sets persist independently. A game created with a `challengeSetId` starts with the correct cloned runtime challenges. Location-specific items resolve to the right zone. Portable items have `zone_id = null`. Editing the set after game start does not affect the running game.
+- Name entry → team picker shows live member counts (update while open) → join → lobby appears with your name highlighted → second player joins different team → their name appears live → admin starts → all clients see simultaneous countdown → game screen with live zones and deck.
 
 ---
 
-## Phase 35: Frontend — Admin Panel (`/admin`) ✅
+## Phase 37: Active Challenge Window
 
-**Goal:** Game management and overrides UI.
+**Goal:** Show only a configurable window of N challenges at a time in the deck. Completing one removes it and promotes the next from the queue for all players simultaneously, with a slide-in animation and a feed announcement.
 
-### Work
+### Why
 
-Clean sidebar navigation (no cartographic chrome). Sections:
+Showing all 20–30 challenges at once is overwhelming and removes the strategic element of not knowing what's coming next. A rolling active window creates tension, pacing, and a shared event ("new card!") when a challenge slots in.
 
-- **New Game wizard**: name, mode, map picker (from authored maps), challenge set picker (from challenge sets), win condition, claim timeout, GPS accuracy
-- **Lifecycle**: Start / Pause / Resume / End with confirm modals + status badge
-- **Teams**: list with join codes + player counts; create team form; edit name/color inline
-- **Overrides**: force-complete, reset, assign zone owner, move player team, rebroadcast state
-- **Scoreboard**: read-only live view
+### Concept
+
+The challenge deck is a window into a sorted queue. At game start the first N challenges (by `sort_order`) are `is_deck_active = true`; the rest are queued (`is_deck_active = false`, invisible to clients). When any player completes a challenge, the server atomically: marks it completed, finds the next queued challenge by `sort_order`, sets its `is_deck_active = true`, emits `challenge_activated`, and broadcasts the updated state. All players see the change simultaneously via the existing socket broadcast.
+
+### Backend Changes
+
+**Migration 0005:**
+```sql
+ALTER TABLE challenges
+  ADD COLUMN sort_order     INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN is_deck_active BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE INDEX idx_challenges_game_active
+  ON challenges (game_id, is_deck_active, sort_order)
+  WHERE status = 'available';
+```
+
+**`game.settings`:** Add `active_challenge_count` (integer, default 3). Validated as ≥ 1 on game create/update.
+
+**`onGameStart` clone logic** (`challenge-set-service.ts`):
+- Clone items ordered by `sort_order ASC`.
+- After insert, set `is_deck_active = true` on the first `active_challenge_count` rows via a single `UPDATE ... WHERE id = ANY($1)`.
+
+**Challenge complete handler** (`territory/complete.ts`):
+- Inside the same transaction, after marking the challenge completed:
+  ```sql
+  UPDATE challenges SET is_deck_active = TRUE, updated_at = NOW()
+  WHERE id = (
+    SELECT id FROM challenges
+    WHERE game_id = $1
+      AND status = 'available'
+      AND is_deck_active = FALSE
+    ORDER BY sort_order ASC
+    LIMIT 1
+  )
+  RETURNING id, title;
+  ```
+- If a row is returned, emit a `CHALLENGE_ACTIVATED` `game_event` record (entity_type = `challenge`, entity_id = new challenge id, meta = `{ title: "..." }`).
+- This event increments `state_version` alongside the completion event in the same transaction.
+
+**Map-state snapshot builder** (`game-service.ts`):
+- Filter returned challenges: `WHERE is_deck_active = TRUE OR status != 'available'`. Queued challenges (`is_deck_active = FALSE AND status = 'available'`) are never sent to clients.
+
+**New socket event:** `challenge_activated` is included in the delta broadcast after a completion (it's part of the state update; no separate socket event type needed — the `game_state_delta` carries the new challenge data).
+
+**Feed endpoint (`GET /game/:id/events`):**
+- `CHALLENGE_ACTIVATED` events render in the feed as: "A new challenge is available: [title]".
+
+### Frontend Changes
+
+**`ChallengeDeck.tsx`:**
+- Define `getDisplayTitle(title: string): string` — truncates at 38 characters with `…` for card headers. Full title in `title` attribute (already partially in the uncommitted diff; complete the implementation).
+- Available challenge cards displayed are exactly those returned by the server (already filtered to active window). No client-side N-limit logic needed.
+- **New card entry animation:** When the store gains a new challenge that wasn't previously in the deck (detected by comparing previous vs. new challenge IDs), apply a mount animation to that card: slide in from the right + fade (`translateX(40px) opacity:0` → `translateX(0) opacity:1`, 350ms ease-out). Use a React `key`-based animation trigger or a `useRef` to track "new" IDs.
+- **Progress indicator:** Below the deck (or on the deck dock button), show "X remaining" or "X / Y done" in small muted text so players have a sense of progress without seeing the full queue.
+
+**Feed (`Phase32Panels.tsx` or feed component):**
+- Add a case for `CHALLENGE_ACTIVATED` event type: renders with a card-draw icon (e.g. ✦ or a simple card outline), amber accent, text: "New challenge: [title]". Slightly more prominent than a plain info entry — use a warm amber left border.
+
+**`gameStore.ts`:**
+- Track previous challenge IDs to detect newly activated ones for the entry animation. Store a `Set<string>` of seen challenge IDs; new arrivals trigger the animation flag.
+
+### Admin Panel Integration
+
+- The admin panel runtime snapshot should show both active and queued challenges (all challenges), with an `is_deck_active` badge or "Queued" label so the admin can see the full deck state.
+- `active_challenge_count` is surfaced as a setting field in the New Game wizard (number input, default 3, min 1).
 
 ### Validation
-- Game created with chosen map + challenge set starts with correct cloned zones and challenges. Lifecycle controls work. Overrides apply and broadcast. Scoreboard live.
+- Game starts with 3 active challenges visible in deck. Complete one → it disappears for all players simultaneously → new card slides in from the right → feed shows "New challenge: [title]" with amber styling. Admin panel still shows queued challenges. If fewer than N total challenges in the set, deck shows all without error. Completing the last active challenge when no queued ones remain: deck shows 0 available cards gracefully (no crash).
 
 ---
 
-## Phase 36: PWA & Service Worker
+## Phase 38: PWA & Service Worker
 
 **Goal:** Installable, offline-capable, push-enabled.
 
@@ -257,14 +256,14 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 - `manifest.json`: name "Territory", `display: standalone`, theme `#c8b48a`, bg `#f5f0e8`, 192/512px icons
 - Service worker: cache-first for app shell, network-first for API; offline fallback screen
 - Push: `POST /players/me/push-subscribe` stores VAPID subscription; server pushes on rival zone capture
-- Zustand persistence: game ID, player ID, team ID in `localStorage` to skip re-join on return
+- Zustand persistence: game ID, player ID, team ID in `localStorage` to skip re-join on return (note: Phase 36 lobby already adds game/player/team persistence for the join flow; Phase 38 extends this with push + service worker)
 
 ### Validation
 - Add to Home Screen works. Offline loads cached shell. Push arrives on rival capture. Return visit skips join flow.
 
 ---
 
-## Phase 37: Rate Limiting
+## Phase 39: Rate Limiting
 
 **Goal:** Prevent abuse.
 
@@ -278,7 +277,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 38: End-to-End Integration Test
+## Phase 40: End-to-End Integration Test
 
 **Goal:** Full game scenario automated.
 
@@ -293,7 +292,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 39: Mobile Testing & Polish
+## Phase 41: Mobile Testing & Polish
 
 **Goal:** Works on real phones.
 
@@ -307,7 +306,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 40: Deployment
+## Phase 42: Deployment
 
 **Goal:** Production on Proxmox.
 
@@ -322,7 +321,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 41: Playtest Prep
+## Phase 43: Playtest Prep
 
 **Goal:** Game configured for real play.
 
@@ -336,7 +335,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 
 ---
 
-## Phase 42: Playtest & Post-Mortem
+## Phase 44: Playtest & Post-Mortem
 
 **Goal:** Real game, real data, real learning.
 
