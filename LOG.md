@@ -231,3 +231,22 @@ Dev seed join codes: Winnipeg `RED12345`/`BLUE1234`/`GOLD1234`, Chicago `CHIBLUE
 - Point-linked authored items persist a GeoJSON point in `challenge_set_items.config.map_point` and require `metadata.sourceMapId`.
 - The admin challenge editor no longer exposes `kind` or `completionMode`; authored item creation/update now relies on backend defaults (`text`, `self_report`).
 - Challenge set route coverage now includes point-linked item creation and runtime cloning metadata (`location_mode: 'point'`, `source_map_point`).
+
+## Phase 35 Notes
+
+**Phase 35 complete.** Admin panel at /admin.
+
+- Frontend: client/src/features/admin/AdminPanel.tsx
+- Route wiring: client/src/App.tsx and client/src/lib/routing.ts
+- Game management UI includes:
+  - game list and new-game draft workflow
+  - authored map picker and authored challenge set picker
+  - Territory lifecycle controls (start, pause, resume, end)
+  - team creation and inline team editing
+  - admin overrides for challenge force-complete/reset, zone owner assignment, player team moves, and rebroadcast
+  - zone-only scoreboard and runtime snapshot panels
+- Backend support finalized in:
+  - server/src/routes/game-routes.ts with GET /games and PATCH /teams/:id
+  - server/src/routes/player-routes.ts with GET /game/:id/players
+- Local V1 posture: admin routes are intentionally unauthenticated for now; requireAdmin is a no-op in server/src/lib/auth.ts.
+- Resource adjustment is not surfaced in the admin UI because Territory V1 is zone-only.

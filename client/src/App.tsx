@@ -17,6 +17,11 @@ const AdminChallenges = lazy(async () => {
   return { default: module.AdminChallenges };
 });
 
+const AdminPanel = lazy(async () => {
+  const module = await import('./features/admin/AdminPanel');
+  return { default: module.AdminPanel };
+});
+
 export function App() {
   const [route, setRoute] = useState(() => parseRoute(window.location.pathname));
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
@@ -69,6 +74,14 @@ export function App() {
     return (
       <Suspense fallback={<MapViewLoading />}>
         <AdminChallenges initialChallengeSetId={route.challengeSetId} />
+      </Suspense>
+    );
+  }
+
+  if (route.kind === 'admin') {
+    return (
+      <Suspense fallback={<MapViewLoading />}>
+        <AdminPanel initialGameId={route.gameId} />
       </Suspense>
     );
   }

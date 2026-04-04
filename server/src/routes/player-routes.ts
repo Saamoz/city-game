@@ -146,6 +146,26 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
   );
 
   app.get(
+    '/game/:id/players',
+    {
+      schema: {
+        params: paramsWithGameIdSchema,
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      await getGameById(app.db, id);
+
+      const rows = await app.db
+        .select()
+        .from(players)
+        .where(eq(players.gameId, id));
+
+      reply.send({ players: rows.map(serializePlayer) });
+    },
+  );
+
+  app.get(
     '/players/me',
     {
       preHandler: [app.authenticate],

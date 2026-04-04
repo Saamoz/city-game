@@ -91,17 +91,14 @@ export function registerAuth(app: FastifyInstance, options: AuthOptions = {}): v
   });
 
   app.decorate('isAdminRequest', (request) => {
-    const bearerToken = extractBearerToken(request.headers.authorization);
-    return Boolean(bearerToken && bearerToken === (options.adminToken ?? env.adminToken));
+    const expectedToken = options.adminToken ?? env.adminToken;
+    const providedToken = extractBearerToken(request.headers.authorization);
+    return Boolean(expectedToken && providedToken && providedToken === expectedToken);
   });
 
-  app.decorate('requireAdmin', async (request) => {
-    const bearerToken = extractBearerToken(request.headers.authorization);
-
-    if (!app.isAdminRequest(request) || !bearerToken) {
-      throw new AppError(errorCodes.adminRequired);
-    }
-  });
+  // Local V1 admin surfaces are intentionally unauthenticated.
+  // Routes still detect explicit bearer tokens so mixed player/admin flows keep working.
+  app.decorate('requireAdmin', async () => {});
 }
 
 function extractBearerToken(headerValue?: string) {

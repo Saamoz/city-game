@@ -66,23 +66,19 @@ describe('admin override routes', () => {
     await closeTestDatabase();
   });
 
-  it('requires admin auth for override endpoints', async () => {
+  it('allows override endpoints without admin auth', async () => {
     await seedGame();
     app = await createAdminTestApp();
 
     const response = await app.inject({
       method: 'POST',
       url: `/api/v1/admin/game/${GAME_ID}/rebroadcast-state`,
+      headers: { 'idempotency-key': 'rebroadcast-without-auth' },
       payload: {},
     });
 
-    expect(response.statusCode).toBe(403);
-    expect(response.json()).toEqual({
-      error: {
-        code: 'ADMIN_REQUIRED',
-        message: 'Admin token required.',
-      },
-    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ gameId: GAME_ID });
   });
 
   it('force-completes a claimed challenge and logs an admin override event', async () => {

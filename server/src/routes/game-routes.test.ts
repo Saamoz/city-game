@@ -31,7 +31,7 @@ describe("game and team routes", () => {
     await closeTestDatabase();
   });
 
-  it("creates a game with admin auth and validates winCondition as an array", async () => {
+  it("creates a game and validates winCondition as an array", async () => {
     app = await createGameTestApp();
 
     const response = await app.inject({
@@ -61,14 +61,17 @@ describe("game and team routes", () => {
     });
   });
 
-  it("rejects game creation without an admin token", async () => {
+  it("allows game creation without an admin token", async () => {
     app = await createGameTestApp();
 
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/game",
+      headers: {
+        "idempotency-key": "create-game-no-admin",
+      },
       payload: {
-        name: "Unauthorized Game",
+        name: "Unauthed Game",
         modeKey: "territory",
         centerLat: 49.8951,
         centerLng: -97.1384,
@@ -76,13 +79,8 @@ describe("game and team routes", () => {
       },
     });
 
-    expect(response.statusCode).toBe(403);
-    expect(response.json()).toEqual({
-      error: {
-        code: "ADMIN_REQUIRED",
-        message: "Admin token required.",
-      },
-    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().game.name).toBe("Unauthed Game");
   });
 
   it("rejects winCondition objects that are not arrays", async () => {
@@ -141,6 +139,40 @@ describe("game and team routes", () => {
         name: "Updated Test Game",
         defaultZoom: 15,
         winCondition: [{ type: "score_threshold", target: 500 }],
+      },
+    });
+  });
+
+  it("lists games and updates teams without admin auth", async () => {
+    await seedGame();
+    await seedTeam({ name: "Original Team", color: "#ff0000" });
+    app = await createGameTestApp();
+
+    const listGamesResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/games",
+    });
+
+    expect(listGamesResponse.statusCode).toBe(200);
+    expect(listGamesResponse.json().games).toHaveLength(1);
+    expect(listGamesResponse.json().games[0].id).toBe(GAME_ID);
+
+    const patchTeamResponse = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/teams/" + TEAM_ID,
+      headers: { "idempotency-key": "update-team-1" },
+      payload: {
+        name: "Updated Team",
+        color: "#0000ff",
+      },
+    });
+
+    expect(patchTeamResponse.statusCode).toBe(200);
+    expect(patchTeamResponse.json()).toMatchObject({
+      team: {
+        id: TEAM_ID,
+        name: "Updated Team",
+        color: "#0000ff",
       },
     });
   });

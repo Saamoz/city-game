@@ -229,7 +229,7 @@ Challenges need the same authored-vs-runtime separation that maps now have. A ch
 
 ---
 
-## Phase 35: Frontend — Admin Panel (`/admin`)
+## Phase 35: Frontend — Admin Panel (`/admin`) ✅
 
 **Goal:** Game management and overrides UI.
 
@@ -240,7 +240,7 @@ Clean sidebar navigation (no cartographic chrome). Sections:
 - **New Game wizard**: name, mode, map picker (from authored maps), challenge set picker (from challenge sets), win condition, claim timeout, GPS accuracy
 - **Lifecycle**: Start / Pause / Resume / End with confirm modals + status badge
 - **Teams**: list with join codes + player counts; create team form; edit name/color inline
-- **Overrides**: force-complete, reset, assign zone owner, adjust resources (team + type + delta + reason), rebroadcast state
+- **Overrides**: force-complete, reset, assign zone owner, move player team, rebroadcast state
 - **Scoreboard**: read-only live view
 
 ### Validation

@@ -17,7 +17,7 @@ The architecture supports future modes (scavenger hunt, hide-and-seek, tag, curr
 
 ### Gameplay Loop (Territory)
 
-Admin first authors a reusable city map and its zones (Zone Editor), then authors a challenge set (Challenge Keeper), then creates a game that references both. When the game starts, authored map zones are cloned into live runtime zones and authored challenge set items are cloned into runtime challenges for that game. Players join via code, open the app, travel to zones, choose a challenge card, and complete it to capture the zone they are currently in. Challenges are consumed on completion. Game ends when a win condition is met.
+Admin first authors a reusable city map and its zones (Zone Editor), then authors a challenge set (Challenge Keeper), then creates a game that references both. Authored challenge items can be portable, linked to an authored zone, or pinned to a specific authored map point. When the game starts, authored map zones are cloned into live runtime zones and authored challenge set items are cloned into runtime challenges for that game. Territory V1 primarily uses the portable deck flow: players join via code, open the app, travel to zones, choose a card, and complete it to capture the zone they are currently standing in. Challenges are consumed on completion. Game ends when a win condition is met.
 
 ### Future Modes (Not Built in V1)
 
@@ -136,17 +136,24 @@ CREATE TABLE challenge_set_items (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   set_id           UUID NOT NULL REFERENCES challenge_sets(id) ON DELETE CASCADE,
   map_zone_id      UUID REFERENCES map_zones(id) ON DELETE SET NULL,
-                   -- NULL = portable (not location-specific).
-                   -- When set, onGameStart resolves the corresponding cloned runtime zone.
+                   -- Optional authored-zone link. On game start this resolves
+                   -- to the matching cloned runtime zone via source_map_zone_id.
   title            VARCHAR(255) NOT NULL,
   description      TEXT NOT NULL,
-  kind             VARCHAR(50) NOT NULL DEFAULT 'self_report',
+  kind             VARCHAR(50) NOT NULL DEFAULT 'text',
+                   -- Runtime seam. The authored UI does not expose kind in V1.
   config           JSONB NOT NULL DEFAULT '{}',
+                   -- Stores authored metadata such as:
+                   --   location_mode: 'portable' | 'zone' | 'point'
+                   --   map_point: GeoJSON Point for point-linked authored items
+                   --   short_description / long_description
   completion_mode  VARCHAR(20) NOT NULL DEFAULT 'self_report',
+                   -- Runtime seam. The authored UI does not expose completion mode in V1.
   scoring          JSONB NOT NULL DEFAULT '{}',
   difficulty       VARCHAR(10),
   sort_order       INTEGER NOT NULL DEFAULT 0,
   metadata         JSONB NOT NULL DEFAULT '{}',
+                   -- sourceMapId for zone-linked or point-linked authored items
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -567,8 +574,8 @@ Challenge Sets (admin/authored):
   DELETE /challenge-sets/:id             Delete challenge set (and all items)
   GET    /challenge-sets/:id/items       List items in set (ordered by sort_order)
   POST   /challenge-sets/:id/items       Create item in set
-  PATCH  /set-items/:id                  Update item
-  DELETE /set-items/:id                  Delete item
+  PATCH  /challenge-set-items/:id        Update item
+  DELETE /challenge-set-items/:id        Delete item
 
 Game (admin):
   POST   /game                           Create game (optionally with map_id, challenge_set_id)
@@ -779,7 +786,7 @@ Utilitarian. The admin panel prioritizes speed and clarity over visual personali
 /game/:id/feed         Event feed (Phase 32)
 /game/:id/scores       Scoreboard (Phase 32)
 /admin/zones           Zone editor — authored maps + zones (Phase 33 ✅)
-/admin/challenges      Challenge keeper — authored challenge sets + items (Phase 34)
+/admin/challenges      Challenge keeper — desktop-first authored challenge sets + items (Phase 34)
 /admin                 Admin panel — game lifecycle + teams + overrides (Phase 35)
 ```
 
@@ -955,7 +962,7 @@ A toggleable ruler mode for measuring distances on the map. Activated from a too
 
 Powered by Terra Draw. Full-screen map view (same Mapbox style) with a tool panel on the left (desktop) or bottom sheet (mobile).
 
-Desktop-first authored map workflow. `/admin/zones` operates on reusable maps, not running games. The left panel lets admins select an existing map or create a new one, edit map metadata (name, city, center, zoom), then author zones inside that map.
+Desktop-first authored map workflow. `/admin/zones` operates on reusable maps, not running games. The left panel lets admins select an existing map or create a new one. New-map creation currently uses built-in city presets (Toronto and Chicago) instead of raw center-lat/lng entry, then authors zones inside that map.
 
 **Modes (mutually exclusive toolbar buttons):**
 - **Select**: click to select an existing authored zone polygon. Sidebar shows zone name and claim parameters. Edit in-place and save.
@@ -967,29 +974,53 @@ Desktop-first authored map workflow. `/admin/zones` operates on reusable maps, n
 
 **Save/export model**: authored maps persist in the database independently from games, and the editor can export the current authored zone set as GeoJSON for backup or reuse.
 
+**Current auth posture:** zone editor writes are unauthenticated in local V1 development. Admin auth can be reintroduced later if needed.
+
 **Zone styling in editor**: authored zones use neutral utilitarian fills; selected zone gets a dashed animated border. Zone name labels stay visible in editor mode.
 
 ---
 
-### Phase 34 Frontend Design — Admin Panel (`/admin`)
+### Phase 34 Frontend Design — Challenge Keeper (`/admin/challenges`)
 
-Utilitarian. Clean sidebar navigation, no cartographic chrome. Sections:
+Desktop-first authored challenge workflow. The challenge keeper operates on reusable challenge sets, not running games. The left column selects or creates a set, the center column manages ordered authored items, and the right column edits the selected item.
 
-**Game Settings**: name, city, win condition picker (dropdown + config fields), claim timeout, max concurrent claims, GPS accuracy requirement toggle, location tracking toggle.
+**Authored item model:**
+- **Portable**: no location binding. This is the primary Territory V1 card type.
+- **Zone-linked**: references an authored map zone. On game start it resolves to the matching cloned runtime zone.
+- **Point-linked**: stores a specific GeoJSON point on an authored map. This is authored now for future location-bound variants.
 
-**Game Lifecycle**: Start / Pause / Resume / End buttons with confirmation modals. Current status badge. `POST /game/:id/start|pause|end`.
+**Item fields exposed in V1:** title, short description, long description, difficulty, placement mode, authored source map, optional authored source zone, optional authored point.
 
-**Teams**: list with join codes, colors, player counts. Create team form. Edit name/color inline.
+**Not exposed in the authored UI:** `kind` and `completion_mode`. Backend defaults remain `text` and `self_report` as platform seams, but Territory V1 authors do not configure them.
 
-**Challenges**: table with title, kind, status, zone. Create/edit form (title, description, kind, config JSON editor, scoring JSON). Delete with confirm. Filter by status.
+**Import/export model:** full challenge sets can be exported to JSON and re-imported. Point-linked items preserve `config.map_point`; zone-linked items preserve `map_zone_id` + `metadata.sourceMapId`.
 
-**Overrides**: quick-action panel — force-complete a challenge (select from list), reset a challenge, assign zone owner (select zone + team), adjust resources (team + resource + delta + reason), rebroadcast state.
-
-**Scoreboard**: read-only live scoreboard (same data as player view).
+**Current auth posture:** challenge keeper writes are unauthenticated in local V1 development. Admin auth can be reintroduced later if needed.
 
 ---
 
-### Phase 35 — PWA
+### Phase 35 Frontend Design — Admin Panel (/admin)
+
+Desktop-first operational UI. The admin panel intentionally uses utilitarian controls and standard clean layouts instead of the cartographic game chrome.
+
+**Information architecture:**
+- left sidebar: game list + new-game draft entry point
+- main setup panel: name, city, mode, authored map picker, authored challenge set picker, claim timeout, GPS accuracy gate, win condition
+- lifecycle panel: start, pause, resume, end
+- teams panel: create team, edit team name/color inline, inspect join codes and player counts
+- overrides panel: challenge force-complete/reset, zone owner assignment, player team moves, realtime rebroadcast
+- standings + runtime snapshot: zone-only scoreboard plus live runtime counts for zones, challenges, and players
+
+**Current Territory V1 posture:**
+- games are expected to bind authored maps and authored challenge sets before start
+- map/challenge-set bindings are editable in setup and treated as locked once the game leaves setup
+- resource adjustment exists in backend infrastructure but is not surfaced in the admin panel because Territory V1 is zone-only
+
+**Current auth posture:** admin routes are intentionally unauthenticated in local V1 development. Mixed routes still distinguish explicit bearer-token admin requests from player-session requests.
+
+---
+
+### Phase 36 — PWA
 
 - `manifest.json`: name "Territory", short_name "Territory", `display: standalone`, theme color amber `#c8b48a`, background color cream `#f5f0e8`, icons at 192px and 512px.
 - Service worker: cache-first for app shell (HTML, JS, CSS), network-first for API calls. Offline shows a cached "You're offline — reconnect to play" screen.
@@ -1018,7 +1049,7 @@ Trust-based. The platform assumes players are honest; validation catches technic
 
 ### Rules
 
-First playable draft: challenges come from a shared portable deck. Players physically enter a zone, choose a card, and complete it against their current zone. Completion captures the zone and consumes the challenge. Territory V1 uses zones owned as the only player-facing score. There are no points, coins, shops, or spendable currencies in the first version. Claims auto-expire after timeout. Max concurrent claims: configurable (default 1).
+First playable draft: challenges come from a shared portable deck. Players physically enter a zone, choose a card, and complete it against their current zone. Completion captures the zone and consumes the challenge. Territory V1 uses zones owned as the only player-facing score. There are no points, coins, shops, or spendable currencies in the first version. Authored challenge infrastructure also supports zone-linked and point-linked items for future location-bound variants, but the primary V1 player loop is portable-card capture. Claims auto-expire after timeout. Max concurrent claims: configurable (default 1).
 
 ### Resources
 

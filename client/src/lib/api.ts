@@ -48,6 +48,7 @@ interface ApiRequestOptions {
   signal?: AbortSignal;
 }
 
+interface GamesResponse { games: Game[] }
 interface GameResponse { game: Game }
 interface ChallengeSetsResponse { challengeSets: ChallengeSet[] }
 interface ChallengeSetResponse { challengeSet: ChallengeSet }
@@ -57,7 +58,10 @@ interface MapsResponse { maps: MapDefinition[] }
 interface MapResponse { map: MapDefinition }
 interface PlayerResponse { player: Player }
 interface JoinTeamResponse { player: Player; team: Team }
+interface TeamResponse { team: Team }
 interface TeamsResponse { teams: Team[] }
+interface PlayersResponse { players: Player[] }
+interface ChallengesResponse { challenges: Challenge[] }
 interface MapStateResponse { snapshot: GameStateSnapshot }
 interface ScoreboardResponse { scoreboard: ScoreboardEntry[] }
 interface RecentEventsResponse { events: GameEventRecord[] }
@@ -127,8 +131,60 @@ export async function getActiveGame(signal?: AbortSignal): Promise<Game> {
   return response.game;
 }
 
+export async function listGames(signal?: AbortSignal): Promise<Game[]> {
+  const response = await apiRequest<GamesResponse>('/games', { signal });
+  return response.games;
+}
+
 export async function getGame(gameId: string, signal?: AbortSignal): Promise<Game> {
   const response = await apiRequest<GameResponse>('/game/' + gameId, { signal });
+  return response.game;
+}
+
+export async function createGameDefinition(input: {
+  name: string;
+  modeKey: Game['modeKey'];
+  city?: string | null;
+  mapId?: string | null;
+  challengeSetId?: string | null;
+  centerLat?: number;
+  centerLng?: number;
+  defaultZoom?: number;
+  winCondition?: JsonValue[];
+  settings?: JsonObject;
+}): Promise<Game> {
+  const response = await apiRequest<GameResponse>('/game', {
+    method: 'POST',
+    body: input,
+  });
+  return response.game;
+}
+
+export async function updateGameDefinition(
+  gameId: string,
+  input: {
+    name?: string;
+    city?: string | null;
+    mapId?: string | null;
+    challengeSetId?: string | null;
+    centerLat?: number;
+    centerLng?: number;
+    defaultZoom?: number;
+    winCondition?: JsonValue[];
+    settings?: JsonObject;
+  },
+): Promise<Game> {
+  const response = await apiRequest<GameResponse>('/game/' + gameId, {
+    method: 'PATCH',
+    body: input,
+  });
+  return response.game;
+}
+
+export async function transitionGameLifecycle(gameId: string, transition: 'start' | 'pause' | 'resume' | 'end'): Promise<Game> {
+  const response = await apiRequest<GameResponse>('/game/' + gameId + '/' + transition, {
+    method: 'POST',
+  });
   return response.game;
 }
 
@@ -343,6 +399,32 @@ export async function getTeams(gameId: string, signal?: AbortSignal): Promise<Te
   return response.teams;
 }
 
+export async function createTeamDefinition(gameId: string, input: { name: string; color: string; icon?: string | null; metadata?: JsonObject }): Promise<Team> {
+  const response = await apiRequest<TeamResponse>('/game/' + gameId + '/teams', {
+    method: 'POST',
+    body: input,
+  });
+  return response.team;
+}
+
+export async function updateTeamDefinition(teamId: string, input: { name?: string; color?: string; icon?: string | null; metadata?: JsonObject }): Promise<Team> {
+  const response = await apiRequest<TeamResponse>('/teams/' + teamId, {
+    method: 'PATCH',
+    body: input,
+  });
+  return response.team;
+}
+
+export async function listPlayers(gameId: string, signal?: AbortSignal): Promise<Player[]> {
+  const response = await apiRequest<PlayersResponse>('/game/' + gameId + '/players', { signal });
+  return response.players;
+}
+
+export async function listGameChallenges(gameId: string, signal?: AbortSignal): Promise<Challenge[]> {
+  const response = await apiRequest<ChallengesResponse>('/game/' + gameId + '/challenges', { signal });
+  return response.challenges;
+}
+
 export async function getScoreboard(gameId: string, signal?: AbortSignal): Promise<ScoreboardEntry[]> {
   const response = await apiRequest<ScoreboardResponse>('/game/' + gameId + '/scoreboard', { signal });
   return response.scoreboard;
@@ -399,40 +481,35 @@ export async function listZones(gameId: string, signal?: AbortSignal): Promise<Z
   return response.zones;
 }
 
-export async function createAdminZone(gameId: string, input: ZoneUpsertInput, adminToken: string): Promise<Zone> {
+export async function createAdminZone(gameId: string, input: ZoneUpsertInput): Promise<Zone> {
   const response = await apiRequest<ZoneResponse>('/game/' + gameId + '/zones', {
     method: 'POST',
     body: input,
-    headers: adminHeaders(adminToken),
   });
   return response.zone;
 }
 
-export async function updateAdminZone(zoneId: string, input: Partial<ZoneUpsertInput>, adminToken: string): Promise<Zone> {
+export async function updateAdminZone(zoneId: string, input: Partial<ZoneUpsertInput>): Promise<Zone> {
   const response = await apiRequest<ZoneResponse>('/zones/' + zoneId, {
     method: 'PATCH',
     body: input,
-    headers: adminHeaders(adminToken),
   });
   return response.zone;
 }
 
-export async function deleteAdminZone(zoneId: string, adminToken: string): Promise<void> {
+export async function deleteAdminZone(zoneId: string): Promise<void> {
   await apiRequest<null>('/zones/' + zoneId, {
     method: 'DELETE',
-    headers: adminHeaders(adminToken),
   });
 }
 
 export async function importAdminZones(
   gameId: string,
   featureCollection: GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject>,
-  adminToken: string,
 ): Promise<Zone[]> {
   const response = await apiRequest<ZoneImportResponse>('/game/' + gameId + '/zones/import', {
     method: 'POST',
     body: featureCollection,
-    headers: adminHeaders(adminToken),
   });
   return response.zones;
 }
@@ -440,15 +517,48 @@ export async function importAdminZones(
 export async function previewOsmZones(
   gameId: string,
   city: string,
-  adminToken: string,
   signal?: AbortSignal,
 ): Promise<GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject>> {
   return apiRequest<GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject>>('/game/' + gameId + '/zones/import-osm', {
     method: 'POST',
     body: { city },
-    headers: adminHeaders(adminToken),
     signal,
     idempotent: false,
+  });
+}
+
+export async function adminForceCompleteChallenge(challengeId: string, input?: { submission?: JsonValue | null; notes?: string }): Promise<CompleteChallengeResponse> {
+  return apiRequest<CompleteChallengeResponse>('/admin/challenges/' + challengeId + '/force-complete', {
+    method: 'POST',
+    body: { submission: input?.submission ?? null, notes: input?.notes },
+  });
+}
+
+export async function adminResetChallenge(challengeId: string, notes?: string): Promise<{ challenge: Challenge; claim: ChallengeClaim | null; stateVersion: number }> {
+  return apiRequest('/admin/challenges/' + challengeId + '/reset', {
+    method: 'POST',
+    body: notes ? { notes } : {},
+  });
+}
+
+export async function adminAssignZoneOwner(zoneId: string, teamId: string | null, notes?: string): Promise<{ zone: Zone; stateVersion: number }> {
+  return apiRequest('/admin/zones/' + zoneId + '/assign-owner', {
+    method: 'POST',
+    body: { teamId, notes },
+  });
+}
+
+export async function adminMovePlayerTeam(playerId: string, teamId: string | null, notes?: string): Promise<{ player: Player; stateVersion: number }> {
+  return apiRequest('/admin/players/' + playerId + '/move-team', {
+    method: 'POST',
+    body: { teamId, notes },
+  });
+}
+
+export async function adminRebroadcastGameState(gameId: string, notes?: string): Promise<{ gameId: string; stateVersion: number }> {
+  return apiRequest('/admin/game/' + gameId + '/rebroadcast-state', {
+    method: 'POST',
+    body: notes ? { notes } : {},
   });
 }
 
@@ -492,12 +602,6 @@ async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Pro
   }
 
   return payload as T;
-}
-
-function adminHeaders(adminToken: string): HeadersInit {
-  return {
-    Authorization: 'Bearer ' + adminToken,
-  };
 }
 
 async function readJson(response: Response): Promise<unknown> {
