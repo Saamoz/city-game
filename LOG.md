@@ -12,7 +12,7 @@ Running handoff log. Keep short, high-signal notes here: environment quirks, imp
 - Remote: `origin -> https://github.com/Saamoz/city-game.git`
 - Branch: `master`
 - Date: 2026-04-04
-- Stage: **Phases 28–36 complete. Phase 37 next: Active Challenge Window (rolling N-challenge deck with queue promotion and feed announcement).**
+- Stage: **Phases 36–37 complete. Join flow + pre-game lobby + countdown live. Active challenge window (rolling N-card deck) live. Phase 38 next: Push Notifications (slim — no PWA install or offline cache).**
 
 ---
 
@@ -114,3 +114,13 @@ See the Phases 28–35 summary block above and the git log for full detail. Key 
 - Lobby uses authored map geometry (`map_definitions` + `map_zones`), not runtime game zones, so it works before `start` clones runtime zones.
 - Added the missing `player_joined` socket broadcast on team join. Phase 36 depends on that event for live roster updates in the lobby.
 - `suppressAutoEnter` behavior is preserved: leaving the live map returns to `/` without immediately re-entering active gameplay; the home screen offers `Return to Game` instead.
+
+## Phase 37 Notes
+
+- Runtime `challenges` now carry `sort_order` and `is_deck_active`. Migration `0005_flaky_infant_terrible.sql` adds the fields and index.
+- `game.settings.active_challenge_count` is normalized on create/update with a default of `3`. On `start`, the first N cloned runtime challenges are activated and `game.settings.challenge_total_count` is stored for client progress text.
+- Player snapshots now hide queued runtime challenges. Admin/runtime challenge lists still show all challenges, with queued vs active visible in `/admin`.
+- Completing a challenge now promotes the next queued one inside the same DB transaction and appends `CHALLENGE_SPAWNED` in the same `state_version`.
+- Client deck now follows server sort order, truncates headers to 38 chars, shows deck progress, and animates newly activated cards. Feed now renders `CHALLENGE_SPAWNED` as `New challenge: ...`.
+- Validation that passed: `pnpm db:generate`, `pnpm db:migrate`, `pnpm --filter @city-game/server exec vitest run src/routes/challenge-set-routes.test.ts src/modes/territory/complete-routes.test.ts`, `pnpm --filter @city-game/server exec vitest run src/routes/game-routes.test.ts`, `pnpm -r typecheck`, `pnpm -r build`.
+- Full server suite still has the known auth expectation failure in `src/lib/auth.test.ts` because local V1 keeps admin auth disabled. That is pre-existing and outside Phase 37.

@@ -167,7 +167,13 @@ No new endpoints required. All needed APIs already exist:
 
 ---
 
-## Phase 37: Active Challenge Window
+## Phase 37: Active Challenge Window ✅
+
+**Done.** Rolling N-challenge deck with queue promotion, slide-in animation, and feed announcement.
+
+---
+
+## Phase 37 Notes
 
 **Goal:** Show only a configurable window of N challenges at a time in the deck. Completing one removes it and promotes the next from the queue for all players simultaneously, with a slide-in animation and a feed announcement.
 
@@ -247,19 +253,40 @@ CREATE INDEX idx_challenges_game_active
 
 ---
 
-## Phase 38: PWA & Service Worker
+## Phase 38: Push Notifications
 
-**Goal:** Installable, offline-capable, push-enabled.
+**Goal:** Players receive a push notification when a rival team captures a zone, so they stay aware of the game state without keeping the screen on.
+
+No PWA manifest, no service worker offline cache, no install-to-home-screen — just the push subscription plumbing and the notification trigger. The backend already has the full stack implemented (VAPID key generation, `web_push` npm package, per-player subscription storage in `players.push_subscription`, rate limiting, and rival-capture trigger). This phase is frontend-only.
 
 ### Work
 
-- `manifest.json`: name "Territory", `display: standalone`, theme `#c8b48a`, bg `#f5f0e8`, 192/512px icons
-- Service worker: cache-first for app shell, network-first for API; offline fallback screen
-- Push: `POST /players/me/push-subscribe` stores VAPID subscription; server pushes on rival zone capture
-- Zustand persistence: game ID, player ID, team ID in `localStorage` to skip re-join on return (note: Phase 36 lobby already adds game/player/team persistence for the join flow; Phase 38 extends this with push + service worker)
+**Service worker (push-only):**
+- Register a minimal service worker (`/sw.js`) whose sole job is handling the `push` event and calling `self.registration.showNotification(...)`. No caching, no fetch interception, no offline behavior.
+- Register it from the app on mount: `navigator.serviceWorker.register('/sw.js')`.
+
+**Subscription flow:**
+- After a player joins a team and lands in the lobby (Phase 36), prompt for notification permission.
+- Use a soft-ask first: a small dismissible banner inside the lobby panel — "Get notified when zones change? [Enable] [Not now]". Don't use the raw browser permission prompt as a first touch on mobile.
+- On "Enable": call `Notification.requestPermission()`, then subscribe via `pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: VAPID_PUBLIC_KEY })`.
+- `POST /api/v1/players/me/push-subscribe` with the serialized `PushSubscription` object. This endpoint already exists on the backend.
+- If permission is denied or the player dismisses, proceed silently — push is optional.
+
+**Notification content (already implemented on backend, just confirming shape):**
+- Rival zone capture: title "Territory", body "[Team] captured [Zone]", icon the app icon.
+
+**Environment:**
+- `VITE_VAPID_PUBLIC_KEY` added to `.env` (client needs the public key to create subscriptions).
+- Backend already reads `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` from env.
+
+### What's explicitly not in scope
+- `manifest.json` or app icons
+- Cache-first / network-first service worker strategies
+- Offline fallback screen
+- "Add to Home Screen" prompt
 
 ### Validation
-- Add to Home Screen works. Offline loads cached shell. Push arrives on rival capture. Return visit skips join flow.
+- Player in lobby enables notifications → permission granted → subscription POSTed successfully → admin starts game → rival team completes a challenge and captures a zone → push notification arrives on the subscribed device with the correct team and zone name. Player who dismissed the prompt sees no errors and plays normally.
 
 ---
 

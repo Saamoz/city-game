@@ -10,11 +10,13 @@ interface LobbyScreenProps {
   mapDefinition: MapDefinition | null;
   mapZones: MapZone[];
   connectionMessage: string | null;
+  onLeaveTeam(): void;
+  isLeavingTeam: boolean;
 }
 
 const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env.MAPBOX_ACCESS_TOKEN ?? '').trim();
 
-export function LobbyScreen({ game, teams, players, player, mapDefinition, mapZones, connectionMessage }: LobbyScreenProps) {
+export function LobbyScreen({ game, teams, players, player, mapDefinition, mapZones, connectionMessage, onLeaveTeam, isLeavingTeam }: LobbyScreenProps) {
   const playersByTeamId = useMemo(() => {
     const roster = new Map<string, Player[]>();
     for (const team of teams) {
@@ -39,6 +41,18 @@ export function LobbyScreen({ game, teams, players, player, mapDefinition, mapZo
       <div className="relative z-10 flex min-h-screen items-center justify-center px-4 py-6 sm:px-6 lg:px-8">
         <section className="max-h-[calc(100vh-3rem)] w-full max-w-5xl overflow-y-auto rounded-[2rem] border border-[#d2c19d]/70 bg-[#f0ebe0]/95 px-5 py-6 shadow-[0_28px_80px_rgba(31,42,47,0.18)] backdrop-blur sm:px-8 sm:py-8">
           <header className="text-center">
+            <div className="flex items-center justify-between gap-3">
+              <div className="w-20" />
+              <div className="flex-1" />
+              <button
+                className="w-20 rounded-full border border-[#d8c6a0]/70 bg-[#fbf6ea] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#5a676c] transition hover:bg-[#fffaf0] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isLeavingTeam}
+                onClick={onLeaveTeam}
+                type="button"
+              >
+                {isLeavingTeam ? 'Leaving…' : 'Leave'}
+              </button>
+            </div>
             <p className="text-[11px] uppercase tracking-[0.34em] text-[#8c7a57]">Pre-Game Lobby</p>
             <h1 className="mt-4 font-[Georgia,Times_New_Roman,serif] text-3xl font-semibold text-[#223238] sm:text-4xl">
               {game.name}

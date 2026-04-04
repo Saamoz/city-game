@@ -18,6 +18,8 @@ interface ChallengeRow {
   completionMode: string;
   scoring: Record<string, number>;
   difficulty: Challenge['difficulty'];
+  sortOrder: number;
+  isDeckActive: boolean;
   status: Challenge['status'];
   currentClaimId: string | null;
   expiresAt: Date | null;
@@ -211,7 +213,7 @@ export const challengeRoutes: FastifyPluginAsync = async (app) => {
         .select()
         .from(challenges)
         .where(and(...conditions))
-        .orderBy(asc(challenges.createdAt));
+        .orderBy(asc(challenges.sortOrder), asc(challenges.createdAt));
 
       reply.send({
         challenges: rows.map((row) => serializeChallengeRow(row as ChallengeRow)),
@@ -336,6 +338,8 @@ function serializeChallengeRow(row: ChallengeRow): Challenge {
     completionMode: row.completionMode,
     scoring: row.scoring,
     difficulty: row.difficulty,
+    sortOrder: row.sortOrder,
+    isDeckActive: row.isDeckActive,
     status: row.status,
     currentClaimId: row.currentClaimId,
     expiresAt: row.expiresAt?.toISOString() ?? null,

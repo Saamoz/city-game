@@ -162,6 +162,17 @@ describe('challenge set routes', () => {
       },
     });
 
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/challenge-sets/' + challengeSetId + '/items',
+      headers: idempotencyHeaders('create-fourth-for-start'),
+      payload: {
+        title: 'Fourth Proof',
+        description: 'Queued at start.',
+        sortOrder: 3,
+      },
+    });
+
     const createGameResponse = await app.inject({
       method: 'POST',
       url: '/api/v1/game',
@@ -171,6 +182,7 @@ describe('challenge set routes', () => {
         modeKey: 'territory',
         mapId: authored.mapId,
         challengeSetId,
+        settings: { active_challenge_count: 2 },
       },
     });
 
@@ -198,18 +210,23 @@ describe('challenge set routes', () => {
         id: challenges.id,
         title: challenges.title,
         zoneId: challenges.zoneId,
+        sortOrder: challenges.sortOrder,
+        isDeckActive: challenges.isDeckActive,
         config: challenges.config,
       })
       .from(challenges)
       .where(eq(challenges.gameId, gameId));
 
-    expect(runtimeChallenges).toHaveLength(3);
+    expect(runtimeChallenges).toHaveLength(4);
 
     const portable = runtimeChallenges.find((entry) => entry.title === 'Portable Proof');
     const linked = runtimeChallenges.find((entry) => entry.title === 'Zone Proof');
     const pointLinked = runtimeChallenges.find((entry) => entry.title === 'Pinned Proof');
+    const queued = runtimeChallenges.find((entry) => entry.title === 'Fourth Proof');
 
     expect(portable?.zoneId).toBeNull();
+    expect(portable?.sortOrder).toBe(0);
+    expect(portable?.isDeckActive).toBe(true);
     expect(portable?.config).toMatchObject({
       portable: true,
       location_mode: 'portable',
@@ -217,6 +234,8 @@ describe('challenge set routes', () => {
     });
 
     expect(linked?.zoneId).toBe(runtimeZones[0]?.id);
+    expect(linked?.sortOrder).toBe(1);
+    expect(linked?.isDeckActive).toBe(true);
     expect(linked?.config).toMatchObject({
       portable: false,
       location_mode: 'zone',
@@ -224,6 +243,8 @@ describe('challenge set routes', () => {
     });
 
     expect(pointLinked?.zoneId).toBeNull();
+    expect(pointLinked?.sortOrder).toBe(2);
+    expect(pointLinked?.isDeckActive).toBe(false);
     expect(pointLinked?.config).toMatchObject({
       portable: false,
       location_mode: 'point',
@@ -232,6 +253,10 @@ describe('challenge set routes', () => {
         coordinates: [-79.381, 43.647],
       },
     });
+
+    expect(queued?.zoneId).toBeNull();
+    expect(queued?.sortOrder).toBe(3);
+    expect(queued?.isDeckActive).toBe(false);
   });
 });
 
@@ -300,3 +325,4 @@ function createSquarePolygon(centerLng: number, centerLat: number, radius: numbe
     ]],
   };
 }
+

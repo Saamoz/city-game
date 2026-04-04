@@ -46,6 +46,7 @@ export interface TerritoryChallengeCompletedPostCommit {
   challenge: Challenge;
   claim: ChallengeClaim;
   zone: Zone | null;
+  activatedChallenge: Challenge | null;
   resourcesAwarded: ResourceAwardMap;
   resourceEntries: ResourceLedgerEntry[];
 }
@@ -138,6 +139,7 @@ export function createTerritoryModeHandler(): ModeHandler {
               challenge: result.challenge,
               claim: result.claim,
               zone: result.zone,
+              activatedChallenge: result.activatedChallenge,
               resourcesAwarded: result.resourcesAwarded,
               stateVersion: result.stateVersion,
             },
@@ -151,6 +153,7 @@ export function createTerritoryModeHandler(): ModeHandler {
               challenge: result.challenge,
               claim: result.claim,
               zone: result.zone,
+              activatedChallenge: result.activatedChallenge,
               resourcesAwarded: result.resourcesAwarded,
               resourceEntries: result.resourceEntries,
             } satisfies TerritoryChallengeCompletedPostCommit,

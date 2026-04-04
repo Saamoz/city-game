@@ -66,6 +66,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const appliedRealtimeKeysRef = useRef<Map<number, Set<string>>>(new Map());
   const hasConnectedRef = useRef(false);
   const locationMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const seenChallengeIdsRef = useRef<Set<string>>(new Set());
+  const clearAnimatedChallengesTimerRef = useRef<number | null>(null);
   const [mapForLayer, setMapForLayer] = useState<mapboxgl.Map | null>(null);
   const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
   const [isDeckOpen, setIsDeckOpen] = useState(false);
@@ -84,6 +86,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const [feedStatus, setFeedStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [feedErrorMessage, setFeedErrorMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [animatedChallengeIds, setAnimatedChallengeIds] = useState<string[]>([]);
 
   const snapshot = useGameStore((state) => state.snapshot);
   const status = useGameStore((state) => state.status);
@@ -106,6 +109,12 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     const controller = new AbortController();
     setLoading(gameId);
     setSelectedChallengeId(null);
+    seenChallengeIdsRef.current.clear();
+    setAnimatedChallengeIds([]);
+    if (clearAnimatedChallengesTimerRef.current !== null) {
+      window.clearTimeout(clearAnimatedChallengesTimerRef.current);
+      clearAnimatedChallengesTimerRef.current = null;
+    }
 
     void getMapState(gameId, controller.signal)
       .then((nextSnapshot) => {
@@ -451,25 +460,56 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     didFitBoundsRef.current = true;
   }, [snapshot]);
 
-  useEffect(() => {
-    const availableChallenges = snapshot?.challenges.filter((challenge) => challenge.status === 'available') ?? [];
+  const activeChallenges = useMemo(() => getAvailableDeckChallenges(snapshot), [snapshot]);
 
-    if (!availableChallenges.length) {
+  useEffect(() => {
+    if (!activeChallenges.length) {
       setSelectedChallengeId(null);
       return;
     }
 
-    if (selectedChallengeId && availableChallenges.some((challenge) => challenge.id === selectedChallengeId)) {
+    if (selectedChallengeId && activeChallenges.some((challenge) => challenge.id === selectedChallengeId)) {
       return;
     }
 
-    const nextChallenge = [...availableChallenges].sort((left, right) => left.title.localeCompare(right.title))[0] ?? null;
-    setSelectedChallengeId(nextChallenge?.id ?? null);
-  }, [selectedChallengeId, snapshot]);
+    setSelectedChallengeId(activeChallenges[0]?.id ?? null);
+  }, [activeChallenges, selectedChallengeId]);
+
+  useEffect(() => {
+    const currentIds = activeChallenges.map((challenge) => challenge.id);
+
+    if (currentIds.length === 0) {
+      return;
+    }
+
+    if (seenChallengeIdsRef.current.size === 0) {
+      seenChallengeIdsRef.current = new Set(currentIds);
+      return;
+    }
+
+    const nextAnimatedIds = currentIds.filter((id) => !seenChallengeIdsRef.current.has(id));
+    if (nextAnimatedIds.length === 0) {
+      return;
+    }
+
+    for (const id of nextAnimatedIds) {
+      seenChallengeIdsRef.current.add(id);
+    }
+
+    setAnimatedChallengeIds(nextAnimatedIds);
+    if (clearAnimatedChallengesTimerRef.current !== null) {
+      window.clearTimeout(clearAnimatedChallengesTimerRef.current);
+    }
+    clearAnimatedChallengesTimerRef.current = window.setTimeout(() => {
+      setAnimatedChallengeIds([]);
+      clearAnimatedChallengesTimerRef.current = null;
+    }, 450);
+  }, [activeChallenges]);
 
   const missingToken = mapboxToken.length === 0;
   const team = snapshot?.team ?? null;
   const challengeCounts = useMemo(() => buildChallengeCounts(snapshot), [snapshot]);
+  const challengeProgressLabel = useMemo(() => buildChallengeProgressLabel(challengeCounts), [challengeCounts]);
   const completedCards = useMemo(() => buildCompletedCards(snapshot), [snapshot]);
   const controlledZoneCount = useMemo(() => buildControlledZoneCount(snapshot, team?.id ?? null), [snapshot, team?.id]);
   const scoreboardEntries = useMemo(() => buildZoneScoreboard(snapshot), [snapshot]);
@@ -851,10 +891,12 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               </div>
 
               <ChallengeDeck
+                animatedChallengeIds={animatedChallengeIds}
                 challenges={snapshot.challenges}
                 completedCards={completedCards}
                 currentZoneName={currentZone?.name ?? null}
                 isActionPending={isPending}
+                progressLabel={challengeProgressLabel}
                 locationMessage={locationErrorMessage}
                 locationStatus={locationStatus}
                 onCaptureChallenge={handleCaptureChallenge}
@@ -909,7 +951,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 <div>
                   <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">Field Deck</p>
                   <p className="mt-2 text-sm leading-6 text-[#44545c]">
-                    {challengeCounts.available} ready · {challengeCounts.completed} complete
+                    {challengeProgressLabel}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -939,10 +981,12 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 ].join(' ')}
               >
                 <ChallengeDeck
+                  animatedChallengeIds={animatedChallengeIds}
                   challenges={snapshot.challenges}
                   completedCards={completedCards}
                   currentZoneName={currentZone?.name ?? null}
                   isActionPending={isPending}
+                  progressLabel={challengeProgressLabel}
                   locationMessage={locationErrorMessage}
                   locationStatus={locationStatus}
                   onCaptureChallenge={handleCaptureChallenge}
@@ -1059,6 +1103,16 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       zone: response.zone,
       resourcesAwarded: response.resourcesAwarded,
     });
+
+    if (response.activatedChallenge) {
+      applyRealtimePayload(targetGameId, socketServerEventTypes.challengeSpawned, {
+        gameId: targetGameId,
+        stateVersion: response.stateVersion,
+        serverTime: new Date().toISOString(),
+        challenge: response.activatedChallenge,
+        zone: null,
+      });
+    }
   }
 }
 
@@ -1147,13 +1201,38 @@ function getBoundsFromSnapshot(snapshot: GameStateSnapshot): mapboxgl.LngLatBoun
 }
 
 function buildChallengeCounts(snapshot: GameStateSnapshot | null) {
-  return (snapshot?.challenges ?? []).reduce(
-    (counts, challenge) => {
-      counts[challenge.status] += 1;
-      return counts;
+  const counts = (snapshot?.challenges ?? []).reduce(
+    (current, challenge) => {
+      current[challenge.status] += 1;
+      return current;
     },
     { available: 0, claimed: 0, completed: 0 },
   );
+
+  const configuredTotal = snapshot?.game.settings?.challenge_total_count;
+  const total = typeof configuredTotal === 'number' && Number.isFinite(configuredTotal)
+    ? configuredTotal
+    : (snapshot?.challenges.length ?? 0);
+
+  return {
+    ...counts,
+    total,
+    remaining: Math.max(0, total - counts.completed),
+  };
+}
+
+function buildChallengeProgressLabel(counts: ReturnType<typeof buildChallengeCounts>): string {
+  if (counts.total <= 0) {
+    return 'No active deck';
+  }
+
+  return `${counts.completed} / ${counts.total} done`;
+}
+
+function getAvailableDeckChallenges(snapshot: GameStateSnapshot | null) {
+  return [...(snapshot?.challenges ?? [])]
+    .filter((challenge) => challenge.status === 'available')
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title));
 }
 
 function buildControlledZoneCount(snapshot: GameStateSnapshot | null, teamId: string | null): number {
@@ -1305,6 +1384,22 @@ function buildRealtimeFeedEventRecord(
         meta: { game: { id: gamePayload.game.id, name: gamePayload.game.name } } as GameEventRecord['meta'],
       };
     }
+    case socketServerEventTypes.challengeSpawned: {
+      const spawnedPayload = payload as SocketEventPayloadMap['challenge_spawned'];
+      return {
+        ...base,
+        eventType: 'CHALLENGE_SPAWNED',
+        entityType: 'challenge',
+        entityId: spawnedPayload.challenge.id,
+        actorType: 'system',
+        actorId: null,
+        actorTeamId: null,
+        meta: {
+          challenge: { id: spawnedPayload.challenge.id, title: spawnedPayload.challenge.title, name: spawnedPayload.challenge.title },
+          zone: spawnedPayload.zone ? { id: spawnedPayload.zone.id, name: spawnedPayload.zone.name } : null,
+        } as GameEventRecord['meta'],
+      };
+    }
     case socketServerEventTypes.playerJoined: {
       const joinedPayload = payload as SocketEventPayloadMap['player_joined'];
       return {
@@ -1335,6 +1430,8 @@ function buildSyntheticRealtimeEventId(
       return `${eventType}:${payload.stateVersion}:${(payload as SocketEventPayloadMap['zone_captured']).zone.id}`;
     case socketServerEventTypes.challengeCompleted:
       return `${eventType}:${payload.stateVersion}:${(payload as SocketEventPayloadMap['challenge_completed']).challenge.id}`;
+    case socketServerEventTypes.challengeSpawned:
+      return `${eventType}:${payload.stateVersion}:${(payload as SocketEventPayloadMap['challenge_spawned']).challenge.id}`;
     case socketServerEventTypes.playerJoined:
       return `${eventType}:${payload.stateVersion}:${(payload as SocketEventPayloadMap['player_joined']).player.id}`;
     case socketServerEventTypes.gameStarted:

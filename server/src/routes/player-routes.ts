@@ -169,6 +169,63 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
+  app.post(
+    '/players/me/leave-team',
+    {
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      let broadcastPayload: { gameId: string; modeKey: string; stateVersion: number; player: ReturnType<typeof serializePlayer> } | null = null;
+
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const player = request.player!;
+        const game = await getGameById(db, player.gameId);
+
+        if (game.status !== 'setup') {
+          throw new AppError(errorCodes.validationError, {
+            message: 'Teams can only be changed before the game starts.',
+          });
+        }
+
+        const [updatedPlayer] = await db
+          .update(players)
+          .set({ teamId: null })
+          .where(eq(players.id, player.id))
+          .returning();
+
+        request.player = updatedPlayer;
+        broadcastPayload = {
+          gameId: updatedPlayer.gameId,
+          modeKey: game.modeKey,
+          stateVersion: game.stateVersion,
+          player: serializePlayer(updatedPlayer),
+        };
+
+        return {
+          gameId: updatedPlayer.gameId,
+          playerId: updatedPlayer.id,
+          statusCode: 200,
+          body: { player: serializePlayer(updatedPlayer) },
+        };
+      }, async () => {
+        if (!broadcastPayload) {
+          return;
+        }
+
+        await app.broadcaster.send({
+          gameId: broadcastPayload.gameId,
+          modeKey: broadcastPayload.modeKey,
+          eventType: socketServerEventTypes.playerJoined,
+          stateVersion: broadcastPayload.stateVersion,
+          payload: {
+            player: broadcastPayload.player,
+            team: null,
+          },
+        });
+      });
+    },
+  );
+
   app.get(
     '/game/:id/players',
     {

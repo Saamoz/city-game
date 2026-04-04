@@ -11,7 +11,9 @@ interface CompletedChallengeCard {
 interface ChallengeDeckProps {
   challenges: Challenge[];
   completedCards: CompletedChallengeCard[];
+  animatedChallengeIds: string[];
   currentZoneName: string | null;
+  progressLabel: string;
   locationStatus: GeolocationStatus;
   locationMessage: string | null;
   selectedChallengeId: string | null;
@@ -33,8 +35,10 @@ interface DragStateRefs {
 export function ChallengeDeck({
   challenges,
   completedCards,
+  animatedChallengeIds,
   currentZoneName,
   locationStatus,
+  progressLabel,
   locationMessage,
   selectedChallengeId,
   onSelectChallenge,
@@ -44,7 +48,7 @@ export function ChallengeDeck({
 }: ChallengeDeckProps) {
   const availableChallenges = [...challenges]
     .filter((challenge) => challenge.status === 'available')
-    .sort(compareChallengeTitle);
+    .sort(compareChallengesForDeck);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRefs = useDragRefs();
@@ -59,7 +63,7 @@ export function ChallengeDeck({
       <div className="hidden lg:flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <p className="text-xs uppercase tracking-[0.22em] text-[#6d7c82]">
-            {availableChallenges.length} ready
+            {progressLabel}
           </p>
           <span className={locationPillClassName(locationStatus)}>
             {currentZoneName
@@ -116,8 +120,11 @@ export function ChallengeDeck({
               const shortDescription = getShortDescription(challenge);
 
               return (
-                <article
+                <div
                   key={challenge.id}
+                  className={animatedChallengeIds.includes(challenge.id) ? 'animate-[deck-card-in_350ms_cubic-bezier(0.22,1,0.36,1)]' : ''}
+                >
+                <article
                   className={[
                     'relative snap-start min-w-[13rem] max-w-[13rem] lg:min-w-[17rem] lg:max-w-[17rem] flex-none rounded-[1.8rem] border p-4 lg:p-5 text-[#1f2a2f] shadow-[0_18px_40px_rgba(24,32,36,0.14)] transition duration-150',
                     isSelected
@@ -208,6 +215,7 @@ export function ChallengeDeck({
                     ) : null}
                   </div>
                 </article>
+                </div>
               );
             })}
           </div>
@@ -423,17 +431,17 @@ function scrollDeck(container: HTMLDivElement | null, delta: number): void {
   container?.scrollBy({ left: delta, behavior: 'smooth' });
 }
 
-function compareChallengeTitle(left: Challenge, right: Challenge): number {
-  return left.title.localeCompare(right.title);
+function compareChallengesForDeck(left: Challenge, right: Challenge): number {
+  return left.sortOrder - right.sortOrder || left.title.localeCompare(right.title);
 }
 
 function getDisplayTitle(title: string): string {
   const normalizedTitle = title.trim();
-  if (normalizedTitle.length <= 100) {
+  if (normalizedTitle.length <= 38) {
     return normalizedTitle;
   }
 
-  return normalizedTitle.slice(0, 97).trimEnd() + '...';
+  return normalizedTitle.slice(0, 37).trimEnd() + '…';
 }
 
 function locationPillClassName(status: GeolocationStatus): string {

@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import type {
   ChallengeSet,
   ChallengeSetItem,
@@ -204,7 +204,12 @@ export async function deleteChallengeSetItemById(db: DatabaseClient, challengeSe
   return Boolean(deleted);
 }
 
-export async function cloneChallengeSetToGame(db: DatabaseClient, challengeSetId: string, gameId: string): Promise<number> {
+export async function cloneChallengeSetToGame(
+  db: DatabaseClient,
+  challengeSetId: string,
+  gameId: string,
+  activeChallengeCount: number,
+): Promise<number> {
   const existingRuntimeChallenges = await db.select({ id: challenges.id }).from(challenges).where(eq(challenges.gameId, gameId)).limit(1);
   if (existingRuntimeChallenges.length > 0) {
     return 0;
@@ -226,6 +231,8 @@ export async function cloneChallengeSetToGame(db: DatabaseClient, challengeSetId
     }
   }
 
+  const insertedChallengeIds: string[] = [];
+
   for (const item of items) {
     let runtimeZoneId: string | null = null;
     if (item.mapZoneId) {
@@ -243,7 +250,7 @@ export async function cloneChallengeSetToGame(db: DatabaseClient, challengeSetId
       }
     }
 
-    await db.insert(challenges).values({
+    const [insertedChallenge] = await db.insert(challenges).values({
       gameId,
       zoneId: runtimeZoneId,
       title: item.title,
@@ -262,8 +269,20 @@ export async function cloneChallengeSetToGame(db: DatabaseClient, challengeSetId
       completionMode: item.completionMode,
       scoring: item.scoring,
       difficulty: item.difficulty,
+      sortOrder: item.sortOrder,
+      isDeckActive: false,
       status: 'available',
-    });
+    }).returning({ id: challenges.id });
+
+    insertedChallengeIds.push(insertedChallenge.id);
+  }
+
+  const initialActiveIds = insertedChallengeIds.slice(0, Math.max(1, activeChallengeCount));
+  if (initialActiveIds.length > 0) {
+    await db.update(challenges).set({
+      isDeckActive: true,
+      updatedAt: new Date(),
+    }).where(inArray(challenges.id, initialActiveIds));
   }
 
   return items.length;

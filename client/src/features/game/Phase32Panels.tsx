@@ -398,6 +398,16 @@ function formatFeedEntry(
         zoneId: zone?.id,
       };
     }
+    case 'CHALLENGE_SPAWNED': {
+      const challenge = asNamedObject(event.meta.challenge);
+      return {
+        id: event.id,
+        title: `New challenge: ${challenge?.name ?? 'Untitled challenge'}`,
+        body: null,
+        createdAt: event.createdAt,
+        accentColor: '#c8a86b',
+      };
+    }
     case 'GAME_STARTED':
       return { id: event.id, title: 'Game started', body: null, createdAt: event.createdAt };
     case 'GAME_PAUSED':

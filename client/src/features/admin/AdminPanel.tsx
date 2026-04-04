@@ -59,6 +59,7 @@ interface GameFormState {
   zoneMajorityThreshold: string;
   timeLimitMinutes: string;
   claimTimeoutMinutes: string;
+  activeChallengeCount: string;
   requireGpsAccuracy: boolean;
 }
 
@@ -77,6 +78,7 @@ const INITIAL_GAME_FORM: GameFormState = {
   zoneMajorityThreshold: '60',
   timeLimitMinutes: '60',
   claimTimeoutMinutes: '20',
+  activeChallengeCount: '3',
   requireGpsAccuracy: false,
 };
 
@@ -690,6 +692,16 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                     className={inputClassName}
                   />
                 </Field>
+                <Field label="Active Deck Size">
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={gameForm.activeChallengeCount}
+                    onChange={(event) => { setGameForm((current) => ({ ...current, activeChallengeCount: event.target.value })); }}
+                    className={inputClassName}
+                  />
+                </Field>
                 <Field label="Win Condition">
                   <select
                     value={gameForm.winConditionType}
@@ -1002,8 +1014,8 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                   items={challenges.map((challenge) => ({
                     id: challenge.id,
                     label: challenge.title,
-                    meta: challenge.status,
-                    tone: challenge.status === 'completed' ? '#2E6F57' : challenge.status === 'claimed' ? '#C14C33' : '#c4cbcf',
+                    meta: challenge.status === 'available' ? (challenge.isDeckActive ? 'active' : 'queued') : challenge.status,
+                    tone: challenge.status === 'completed' ? '#2E6F57' : challenge.status === 'claimed' ? '#C14C33' : challenge.isDeckActive ? '#c8a86b' : '#c4cbcf',
                   }))}
                 />
               </div>
@@ -1029,6 +1041,7 @@ function buildGameForm(game: Game): GameFormState {
     zoneMajorityThreshold: winCondition.type === 'zone_majority' ? String(winCondition.threshold) : '60',
     timeLimitMinutes: winCondition.type === 'time_limit' ? String(winCondition.duration_minutes) : '60',
     claimTimeoutMinutes: String(settings.claim_timeout_minutes ?? 20),
+    activeChallengeCount: String(settings.active_challenge_count ?? 3),
     requireGpsAccuracy: Boolean(settings.require_gps_accuracy),
   };
 }
@@ -1061,6 +1074,7 @@ function buildWinCondition(form: GameFormState): WinCondition[] {
 function buildSettings(form: GameFormState, existing: JsonObject): JsonObject {
   const next: JsonObject = { ...existing };
   next.claim_timeout_minutes = Math.max(1, Number(form.claimTimeoutMinutes) || 1);
+  next.active_challenge_count = Math.max(1, Number(form.activeChallengeCount) || 1);
   next.require_gps_accuracy = form.requireGpsAccuracy;
   return next;
 }

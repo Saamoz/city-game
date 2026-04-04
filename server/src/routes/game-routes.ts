@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { and, asc, desc, eq, ne, sql } from 'drizzle-orm';
-import { GAME_MODE_KEYS, STATE_VERSION_HEADER, errorCodes, socketServerEventTypes } from '@city-game/shared';
+import { GAME_MODE_KEYS, STATE_VERSION_HEADER, errorCodes, socketServerEventTypes, type JsonObject } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { games, teams } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
@@ -161,6 +161,7 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
         };
 
         validateWinConditions(body.winCondition);
+        const nextSettings = normalizeGameSettings(body.settings as JsonObject | undefined);
 
         if (body.challengeSetId) {
           await getChallengeSetByIdOrThrow(db, body.challengeSetId);
@@ -192,7 +193,7 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
               ? sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(mapDefaults.boundary)}), 4326)::geometry(Polygon,4326)`
               : null,
             winCondition: body.winCondition ?? [],
-            settings: body.settings ?? {},
+            settings: nextSettings,
           })
           .returning();
 
@@ -244,6 +245,9 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
         };
 
         validateWinConditions(body.winCondition);
+        const nextSettings = body.settings === undefined
+          ? normalizeGameSettings(existingGame.settings as JsonObject)
+          : normalizeGameSettings(body.settings as JsonObject, existingGame.settings as JsonObject);
 
         if ((body.mapId !== undefined || body.challengeSetId !== undefined) && existingGame.status !== 'setup') {
           throw new AppError(errorCodes.validationError, {
@@ -272,7 +276,7 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
               ? existingGame.boundary
               : (mapDefaults?.boundary ? sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(mapDefaults.boundary)}), 4326)::geometry(Polygon,4326)` : null),
             winCondition: body.winCondition ?? existingGame.winCondition,
-            settings: body.settings ?? existingGame.settings,
+            settings: nextSettings,
             updatedAt: new Date(),
           })
           .where(eq(games.id, id))
@@ -458,6 +462,25 @@ function registerLifecycleRoute(app: FastifyInstance, transition: LifecycleTrans
       );
     },
   );
+}
+
+function normalizeGameSettings(input: JsonObject | undefined, existing: JsonObject = {}): JsonObject {
+  const next: JsonObject = { ...existing, ...(input ?? {}) };
+  const activeChallengeCount = next.active_challenge_count;
+
+  if (activeChallengeCount === undefined || activeChallengeCount === null) {
+    next.active_challenge_count = 3;
+    return next;
+  }
+
+  if (typeof activeChallengeCount !== 'number' || !Number.isFinite(activeChallengeCount) || activeChallengeCount < 1) {
+    throw new AppError(errorCodes.validationError, {
+      message: 'settings.active_challenge_count must be an integer greater than or equal to 1.',
+    });
+  }
+
+  next.active_challenge_count = Math.floor(activeChallengeCount);
+  return next;
 }
 
 function getLifecycleSocketEventType(transition: LifecycleTransition) {

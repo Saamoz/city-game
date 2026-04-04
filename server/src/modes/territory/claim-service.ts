@@ -383,6 +383,8 @@ export function serializeChallenge(row: typeof challenges.$inferSelect): Challen
     completionMode: row.completionMode,
     scoring: row.scoring as Challenge['scoring'],
     difficulty: row.difficulty as Challenge['difficulty'],
+    sortOrder: row.sortOrder,
+    isDeckActive: row.isDeckActive,
     status: row.status as Challenge['status'],
     currentClaimId: row.currentClaimId,
     expiresAt: row.expiresAt?.toISOString() ?? null,

@@ -199,6 +199,8 @@ export const challenges = pgTable(
     completionMode: varchar('completion_mode', { length: 20 }).notNull().default('self_report'),
     scoring: jsonb('scoring').notNull().default(defaultChallengeScoring),
     difficulty: varchar('difficulty', { length: 10 }),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isDeckActive: boolean('is_deck_active').notNull().default(false),
     status: varchar('status', { length: 20 }).notNull().default('available'),
     currentClaimId: uuid('current_claim_id').references((): AnyPgColumn => challengeClaims.id),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
@@ -207,6 +209,7 @@ export const challenges = pgTable(
   },
   (table) => ({
     challengesGameStatusIdx: index('idx_challenges_game_status').on(table.gameId, table.status),
+    challengesGameActiveIdx: index('idx_challenges_game_active').on(table.gameId, table.isDeckActive, table.sortOrder),
     challengesZoneIdx: index('idx_challenges_zone').on(table.zoneId),
   }),
 );

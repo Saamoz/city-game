@@ -90,6 +90,7 @@ export interface ChallengeActionResponse {
 
 export interface CompleteChallengeResponse extends ChallengeActionResponse {
   zone: Zone | null;
+  activatedChallenge?: Challenge | null;
   resourcesAwarded: ResourceAwardMap;
 }
 
@@ -387,6 +388,13 @@ export async function joinTeam(gameId: string, joinCode: string): Promise<JoinTe
     method: 'POST',
     body: { join_code: joinCode },
   });
+}
+
+export async function leaveCurrentTeam(): Promise<Player> {
+  const response = await apiRequest<PlayerResponse>('/players/me/leave-team', {
+    method: 'POST',
+  });
+  return response.player;
 }
 
 export async function getMapState(gameId: string, signal?: AbortSignal): Promise<GameStateSnapshot> {

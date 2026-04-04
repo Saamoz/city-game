@@ -8,6 +8,7 @@ import {
   getMap,
   getTeams,
   joinTeam,
+  leaveCurrentTeam,
   listMapZones,
   listPlayers,
   registerPlayer,
@@ -42,6 +43,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
   const [name, setName] = useState(persistedDisplayName);
   const [submitting, setSubmitting] = useState<'register' | null>(null);
   const [joiningTeamId, setJoiningTeamId] = useState<string | null>(null);
+  const [isLeavingTeam, setIsLeavingTeam] = useState(false);
   const [step, setStep] = useState(persistedStep);
   const [countdownActive, setCountdownActive] = useState(false);
   const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
@@ -239,6 +241,9 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
       }
 
       setPlayers((currentPlayers) => upsertPlayer(currentPlayers, payload.player));
+      if (payload.player.id === player.id) {
+        setPlayer(payload.player);
+      }
       const joinedTeam = payload.team;
       if (joinedTeam) {
         setTeams((currentTeams) => upsertTeam(currentTeams, joinedTeam));
@@ -329,6 +334,33 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
     }
   }
 
+  async function handleLeaveTeam() {
+    if (!game || !player || isLeavingTeam) {
+      return;
+    }
+
+    setIsLeavingTeam(true);
+    setMessage(null);
+
+    try {
+      const nextPlayer = await leaveCurrentTeam();
+      setPlayer(nextPlayer);
+      setPlayers((currentPlayers) => upsertPlayer(currentPlayers, nextPlayer));
+      setStep('team_picker');
+      setSession({
+        step: 'team_picker',
+        gameId: game.id,
+        playerId: nextPlayer.id,
+        teamId: null,
+        displayName: nextPlayer.displayName,
+      });
+    } catch (error) {
+      setMessage(getErrorMessage(error, 'Unable to leave the team right now.'));
+    } finally {
+      setIsLeavingTeam(false);
+    }
+  }
+
   function handleBackToHome() {
     setStep('home');
     setSession({ step: 'home' });
@@ -398,6 +430,8 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
             player={player}
             players={players}
             teams={teams}
+            onLeaveTeam={handleLeaveTeam}
+            isLeavingTeam={isLeavingTeam}
           />
           <CountdownOverlay active={countdownActive} onComplete={handleCountdownComplete} />
         </>

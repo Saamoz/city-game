@@ -110,6 +110,8 @@ export type GameSettings = JsonObject & {
   notification_config?: NotificationConfig;
   max_concurrent_claims?: number;
   claim_timeout_minutes?: number;
+  active_challenge_count?: number;
+  challenge_total_count?: number;
   require_gps_accuracy?: boolean;  // default false. When true, enforces global and per-zone
                                    // GPS error radius checks on claim. Spatial containment
                                    // (ST_Covers) always applies regardless of this setting.
@@ -254,6 +256,8 @@ export interface Challenge {
   completionMode: ChallengeCompletionMode;
   scoring: ResourceAwardMap;
   difficulty: ChallengeDifficulty | null;
+  sortOrder: number;
+  isDeckActive: boolean;
   status: ChallengeStatus;
   currentClaimId: Uuid | null;
   expiresAt: IsoTimestamp | null;

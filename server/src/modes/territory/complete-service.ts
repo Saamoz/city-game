@@ -46,6 +46,7 @@ export interface CompleteChallengeSuccessResult {
   challenge: Challenge;
   claim: ChallengeClaim;
   zone: Zone | null;
+  activatedChallenge: Challenge | null;
   resourcesAwarded: ResourceAwardMap;
   resourceEntries: ResourceLedgerEntry[];
 }
@@ -143,6 +144,7 @@ export async function completeChallenge(
       status: 'completed',
       currentClaimId: null,
       expiresAt: null,
+      isDeckActive: false,
       updatedAt: now,
     })
     .where(and(eq(challenges.id, lockedChallenge.id), eq(challenges.currentClaimId, lockedClaim.id)))
@@ -234,6 +236,7 @@ async function completePortableChallengeDirectly(
       status: 'completed',
       currentClaimId: null,
       expiresAt: null,
+      isDeckActive: false,
       updatedAt: input.now,
     })
     .where(eq(challenges.id, input.challenge.id))
@@ -271,6 +274,9 @@ async function finishChallengeCompletion(
   },
 ): Promise<CompleteChallengeSuccessResult> {
   let updatedZone: Zone | null = null;
+  let activatedChallenge: Challenge | null = null;
+  let activatedZone: Zone | null = null;
+
   if (input.updatedChallenge.zoneId) {
     await db
       .update(zones)
@@ -282,6 +288,14 @@ async function finishChallengeCompletion(
       .where(eq(zones.id, input.updatedChallenge.zoneId));
 
     updatedZone = await getZoneByIdOrThrow(db, input.updatedChallenge.zoneId);
+  }
+
+  const activatedChallengeRow = await activateNextQueuedChallenge(db, input.gameId, input.now);
+  if (activatedChallengeRow) {
+    activatedChallenge = serializeChallenge(activatedChallengeRow);
+    if (activatedChallengeRow.zoneId) {
+      activatedZone = await getZoneByIdOrThrow(db, activatedChallengeRow.zoneId);
+    }
   }
 
   const resourcesAwarded = normalizeResourceAwards(input.updatedChallenge.scoring as ResourceAwardMap);
@@ -406,6 +420,22 @@ async function finishChallengeCompletion(
     } as unknown as JsonObject,
   });
 
+  if (activatedChallenge) {
+    events.push({
+      eventType: eventTypes.challengeSpawned,
+      entityType: 'challenge',
+      entityId: activatedChallenge.id,
+      actorType: 'system',
+      actorId: null,
+      actorTeamId: null,
+      afterState: activatedChallenge as unknown as JsonValue,
+      meta: {
+        challenge: activatedChallenge,
+        zone: activatedZone,
+      } as unknown as JsonObject,
+    });
+  }
+
   const { stateVersion } = await appendEvents(db, {
     gameId: input.gameId,
     events,
@@ -418,9 +448,39 @@ async function finishChallengeCompletion(
     challenge,
     claim,
     zone: updatedZone,
+    activatedChallenge,
     resourcesAwarded,
     resourceEntries,
   };
+}
+
+async function activateNextQueuedChallenge(
+  db: DatabaseClient,
+  gameId: string,
+  now: Date,
+): Promise<typeof challenges.$inferSelect | null> {
+  const [nextQueued] = await db
+    .select()
+    .from(challenges)
+    .where(and(eq(challenges.gameId, gameId), eq(challenges.status, 'available'), eq(challenges.isDeckActive, false)))
+    .orderBy(challenges.sortOrder, challenges.createdAt)
+    .limit(1)
+    .for('update');
+
+  if (!nextQueued) {
+    return null;
+  }
+
+  const [updatedChallenge] = await db
+    .update(challenges)
+    .set({
+      isDeckActive: true,
+      updatedAt: now,
+    })
+    .where(eq(challenges.id, nextQueued.id))
+    .returning();
+
+  return updatedChallenge ?? null;
 }
 
 async function lockActiveClaim(

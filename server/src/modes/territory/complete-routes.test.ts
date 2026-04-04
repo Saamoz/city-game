@@ -25,6 +25,7 @@ const PLAYER_ONE_ID = '33333333-3333-4333-8333-333333333333';
 const PLAYER_TWO_ID = 'bbbbbbbb-3333-4333-8333-bbbbbbbbbbbb';
 const CHALLENGE_ID = '55555555-5555-4555-8555-555555555555';
 const CLAIM_ID = '77777777-7777-4777-8777-777777777777';
+const NEXT_CHALLENGE_ID = '88888888-8888-4888-8888-888888888888';
 const OUTSIDE_GAME_ID = '99999999-1111-4111-8111-999999999999';
 const OUTSIDE_GAME_TEAM_ID = '99999999-2222-4222-8222-999999999999';
 
@@ -176,6 +177,61 @@ describe('territory complete route', () => {
     ].sort());
   });
 
+
+  it('activates the next queued challenge in the same completion transaction', async () => {
+    await seedGame({ settings: { active_challenge_count: 1, challenge_total_count: 2 } });
+    await seedTeam();
+    await seedPlayer({ sessionToken: 'complete-promote-session' });
+    const zone = await seedZone();
+    await seedChallenge({ zoneId: zone.id, sortOrder: 0, isDeckActive: true, scoring: { points: 4 } });
+    await testDatabase.db.insert(challenges).values(createTestChallenge({
+      id: NEXT_CHALLENGE_ID,
+      gameId: GAME_ID,
+      zoneId: null,
+      title: 'Next Challenge',
+      description: 'Promoted after completion.',
+      sortOrder: 1,
+      isDeckActive: false,
+      status: 'available',
+      scoring: { points: 6 },
+    }));
+    await seedClaimedChallenge({ expiresAt: new Date(Date.now() + 5 * 60_000) });
+    app = await createTestApp({ db: testDatabase.db });
+
+    const response = await completeRequest({
+      sessionToken: 'complete-promote-session',
+      actionId: 'complete-promote',
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      stateVersion: 1,
+      activatedChallenge: {
+        id: NEXT_CHALLENGE_ID,
+        status: 'available',
+        isDeckActive: true,
+        sortOrder: 1,
+      },
+    });
+
+    const [storedNextChallenge] = await testDatabase.db
+      .select()
+      .from(challenges)
+      .where(eq(challenges.id, NEXT_CHALLENGE_ID));
+
+    expect(storedNextChallenge?.isDeckActive).toBe(true);
+    expect(storedNextChallenge?.status).toBe('available');
+
+    const storedEvents = await testDatabase.db
+      .select({ eventType: gameEvents.eventType, stateVersion: gameEvents.stateVersion })
+      .from(gameEvents)
+      .where(eq(gameEvents.gameId, GAME_ID))
+      .orderBy(asc(gameEvents.createdAt));
+
+    expect(storedEvents.every((event) => event.stateVersion === 1)).toBe(true);
+    expect(storedEvents.map((event) => event.eventType)).toContain(eventTypes.challengeSpawned);
+  });
 
   it('completes a portable card directly from the current zone without creating a visible claimed state', async () => {
     await seedGame();

@@ -78,3 +78,15 @@ input {
     opacity: 0;
   }
 }
+
+@keyframes deck-card-in {
+  from {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

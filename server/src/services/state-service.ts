@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, or } from 'drizzle-orm';
 import type {
   Annotation,
   Challenge,
@@ -32,7 +32,10 @@ export async function buildGameStateSnapshot(
     db.select().from(teams).where(eq(teams.gameId, input.gameId)).orderBy(asc(teams.createdAt)),
     db.select().from(players).where(eq(players.gameId, input.gameId)).orderBy(asc(players.createdAt)),
     listZonesByGame(db, input.gameId),
-    db.select().from(challenges).where(eq(challenges.gameId, input.gameId)).orderBy(asc(challenges.createdAt)),
+    db.select()
+      .from(challenges)
+      .where(and(eq(challenges.gameId, input.gameId), or(eq(challenges.isDeckActive, true), eq(challenges.status, 'claimed'), eq(challenges.status, 'completed'))))
+      .orderBy(asc(challenges.sortOrder), asc(challenges.createdAt)),
     db.select().from(challengeClaims).where(eq(challengeClaims.gameId, input.gameId)).orderBy(asc(challengeClaims.createdAt)),
     db.select().from(annotations).where(eq(annotations.gameId, input.gameId)).orderBy(asc(annotations.createdAt)),
     getAllBalances(db, input.gameId),
@@ -134,6 +137,8 @@ function serializeChallengeRow(row: typeof challenges.$inferSelect): Challenge {
     completionMode: row.completionMode,
     scoring: row.scoring as Challenge['scoring'],
     difficulty: row.difficulty as Challenge['difficulty'],
+    sortOrder: row.sortOrder,
+    isDeckActive: row.isDeckActive,
     status: row.status as Challenge['status'],
     currentClaimId: row.currentClaimId,
     expiresAt: row.expiresAt?.toISOString() ?? null,

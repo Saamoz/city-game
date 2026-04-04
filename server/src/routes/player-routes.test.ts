@@ -235,6 +235,91 @@ describe('player routes', () => {
     });
   });
 
+  it('lets an authenticated player leave their team before game start', async () => {
+    await seedGame({ status: 'setup' });
+    await seedTeam();
+    await seedPlayer({ teamId: TEAM_ID, sessionToken: 'leave-team-token' });
+    app = await createPlayerTestApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/leave-team',
+      headers: idempotencyHeaders('leave-team-success'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'leave-team-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      player: {
+        id: PLAYER_ID,
+        teamId: null,
+      },
+    });
+
+    const [storedPlayer] = await testDatabase.db.select().from(players).where(eq(players.id, PLAYER_ID)).limit(1);
+    expect(storedPlayer?.teamId).toBeNull();
+  });
+
+  it('broadcasts a null team when a player leaves their team', async () => {
+    await seedGame({ status: 'setup' });
+    await seedTeam();
+    await seedPlayer({ teamId: TEAM_ID, sessionToken: 'leave-team-broadcast-token' });
+    app = await createPlayerTestApp();
+
+    const broadcasts: unknown[] = [];
+    app.broadcaster.send = async (input) => {
+      broadcasts.push(input);
+      return 1;
+    };
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/leave-team',
+      headers: idempotencyHeaders('leave-team-broadcast'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'leave-team-broadcast-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(broadcasts).toHaveLength(1);
+    expect(broadcasts[0]).toMatchObject({
+      gameId: GAME_ID,
+      modeKey: 'territory',
+      eventType: 'player_joined',
+      payload: {
+        player: { id: PLAYER_ID, teamId: null },
+        team: null,
+      },
+    });
+  });
+
+  it('rejects leave-team after the game has started', async () => {
+    await seedGame({ status: 'active' });
+    await seedTeam();
+    await seedPlayer({ teamId: TEAM_ID, sessionToken: 'leave-team-active-token' });
+    app = await createPlayerTestApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/leave-team',
+      headers: idempotencyHeaders('leave-team-active'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'leave-team-active-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Teams can only be changed before the game starts.',
+      },
+    });
+  });
+
   it('returns TEAM_NOT_FOUND for an invalid join code', async () => {
     await seedGame();
     await seedPlayer({ teamId: null, sessionToken: 'bad-join-token' });

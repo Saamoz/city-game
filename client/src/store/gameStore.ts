@@ -255,7 +255,8 @@ function applyGameEventRecord(snapshot: GameStateSnapshot, event: GameEventRecor
     }
     case 'CHALLENGE_CLAIMED':
     case 'CHALLENGE_RELEASED':
-    case 'CHALLENGE_COMPLETED': {
+    case 'CHALLENGE_COMPLETED':
+    case 'CHALLENGE_SPAWNED': {
       const challenge = asChallenge(event.meta.challenge);
       const claim = asChallengeClaim(event.meta.claim) ?? asChallengeClaim(event.afterState);
       const zone = asZone(event.meta.zone);

@@ -147,6 +147,8 @@ async function applyLifecycleTransition(
   const nextTimestamp = options.timestamp ?? new Date();
   const lifecycleUpdate = buildLifecycleUpdate(currentGame, transition, nextTimestamp);
 
+  let runtimeGame = currentGame;
+
   const [updatedGame] = await db
     .update(games)
     .set({
@@ -156,14 +158,35 @@ async function applyLifecycleTransition(
     .where(eq(games.id, currentGame.id))
     .returning();
 
+  runtimeGame = updatedGame;
+
   if (transition === 'start') {
-    if (updatedGame.mapId) {
-      await cloneMapZonesToGame(db, updatedGame.mapId, updatedGame.id);
+
+    if (runtimeGame.mapId) {
+      await cloneMapZonesToGame(db, runtimeGame.mapId, runtimeGame.id);
     }
-    if (updatedGame.challengeSetId) {
-      await cloneChallengeSetToGame(db, updatedGame.challengeSetId, updatedGame.id);
+
+    if (runtimeGame.challengeSetId) {
+      const activeChallengeCount = getActiveChallengeCount(runtimeGame.settings as JsonObject);
+      const challengeTotalCount = await cloneChallengeSetToGame(db, runtimeGame.challengeSetId, runtimeGame.id, activeChallengeCount);
+      const nextSettings = normalizeRuntimeSettings(runtimeGame.settings as JsonObject, {
+        activeChallengeCount,
+        challengeTotalCount,
+      });
+
+      const [nextGame] = await db
+        .update(games)
+        .set({
+          settings: nextSettings,
+          updatedAt: nextTimestamp,
+        })
+        .where(eq(games.id, runtimeGame.id))
+        .returning();
+
+      runtimeGame = nextGame;
     }
-    await modeHandler.onGameStart({ db, game: updatedGame });
+
+    await modeHandler.onGameStart({ db, game: runtimeGame });
   }
 
   if (transition === 'end') {
@@ -172,7 +195,7 @@ async function applyLifecycleTransition(
 
   const stateVersion = await incrementVersion(db, currentGame.id);
   const gameForEvent = {
-    ...updatedGame,
+    ...runtimeGame,
     stateVersion,
   } satisfies GameRecord;
 
@@ -200,6 +223,22 @@ async function applyLifecycleTransition(
   };
 }
 
+
+function getActiveChallengeCount(settings: JsonObject): number {
+  const value = settings.active_challenge_count;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1 ? Math.floor(value) : 3;
+}
+
+function normalizeRuntimeSettings(
+  settings: JsonObject,
+  input: { activeChallengeCount: number; challengeTotalCount: number },
+): JsonObject {
+  return {
+    ...settings,
+    active_challenge_count: input.activeChallengeCount,
+    challenge_total_count: input.challengeTotalCount,
+  };
+}
 function assertValidTransition(game: GameRecord, transition: LifecycleTransition): void {
   const validCurrentStatuses = getValidCurrentStatuses(transition);
 
