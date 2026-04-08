@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { JoinFlow } from './features/join/JoinFlow';
+import { registerPushServiceWorker } from './lib/push-notifications';
 import { navigateToGame, navigateToLanding, parseRoute, shouldSuppressAutoEnter } from './lib/routing';
 
 const GameView = lazy(async () => {
@@ -26,6 +27,10 @@ export function App() {
   const [route, setRoute] = useState(() => parseRoute(window.location.pathname));
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
   const [suppressAutoEnter, setSuppressAutoEnter] = useState(() => shouldSuppressAutoEnter());
+
+  useEffect(() => {
+    void registerPushServiceWorker();
+  }, []);
 
   useEffect(() => {
     const handleLocationChange = () => {
@@ -56,10 +61,11 @@ export function App() {
   };
 
   const handleLeaveMap = () => {
+    const currentGameId = route.kind === 'game' ? route.gameId : activeGameId;
     setSuppressAutoEnter(true);
     setActiveGameId(null);
-    setRoute({ kind: 'landing', gameId: null, mapId: null, challengeSetId: null });
-    navigateToLanding({ suppressAutoEnter: true });
+    setRoute({ kind: 'landing', gameId: currentGameId, mapId: null, challengeSetId: null });
+    navigateToLanding({ suppressAutoEnter: true, gameId: currentGameId });
   };
 
   if (route.kind === 'admin-zones') {

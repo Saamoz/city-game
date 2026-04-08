@@ -12,7 +12,7 @@ Running handoff log. Keep short, high-signal notes here: environment quirks, imp
 - Remote: `origin -> https://github.com/Saamoz/city-game.git`
 - Branch: `master`
 - Date: 2026-04-04
-- Stage: **Phases 36–37 complete. Join flow + pre-game lobby + countdown live. Active challenge window (rolling N-card deck) live. Phase 38 next: Push Notifications (slim — no PWA install or offline cache).**
+- Stage: **Phases 36–38 complete locally. Join flow + pre-game lobby + countdown live. Active challenge window live. Optional push notifications are wired from the lobby soft-ask through to `/players/me/push-subscribe`. Phase 39 next: Rate Limiting.**
 
 ---
 
@@ -122,5 +122,15 @@ See the Phases 28–35 summary block above and the git log for full detail. Key 
 - Player snapshots now hide queued runtime challenges. Admin/runtime challenge lists still show all challenges, with queued vs active visible in `/admin`.
 - Completing a challenge now promotes the next queued one inside the same DB transaction and appends `CHALLENGE_SPAWNED` in the same `state_version`.
 - Client deck now follows server sort order, truncates headers to 38 chars, shows deck progress, and animates newly activated cards. Feed now renders `CHALLENGE_SPAWNED` as `New challenge: ...`.
+- Pre-game lobby now supports `Leave` before start via `POST /players/me/leave-team`, with a `player_joined` broadcast carrying `team: null` so other lobby clients update immediately.
 - Validation that passed: `pnpm db:generate`, `pnpm db:migrate`, `pnpm --filter @city-game/server exec vitest run src/routes/challenge-set-routes.test.ts src/modes/territory/complete-routes.test.ts`, `pnpm --filter @city-game/server exec vitest run src/routes/game-routes.test.ts`, `pnpm -r typecheck`, `pnpm -r build`.
 - Full server suite still has the known auth expectation failure in `src/lib/auth.test.ts` because local V1 keeps admin auth disabled. That is pre-existing and outside Phase 37.
+
+## Phase 38 Notes
+
+- Phase 38 is frontend-only. Backend push support was already present (`web-push`, VAPID config, `/players/me/push-subscribe`, rival-capture trigger).
+- Added a minimal push-only service worker at `client/public/sw.js`. It handles `push` and `notificationclick` only; no fetch interception, caching, manifest, or install UX.
+- App now registers the service worker on mount. Lobby shows a soft-ask banner after team join when push is supported, permission is not denied, and the current player has no stored subscription.
+- `Not now` is persisted per `gameId + playerId` in local storage. `Enable` requests browser permission, subscribes with `VITE_VAPID_PUBLIC_KEY`, and posts the serialized `PushSubscription` to `/players/me/push-subscribe`.
+- If permission is denied or the browser lacks Push/ServiceWorker support, the lobby proceeds silently with no blocking UI.
+- Validation that passed: `pnpm --filter @city-game/client exec tsc -b --pretty false`, `pnpm --filter @city-game/client build`, `pnpm -r typecheck`, `pnpm -r build`.

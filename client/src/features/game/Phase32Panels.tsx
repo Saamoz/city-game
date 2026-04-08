@@ -83,35 +83,42 @@ export function MiniScoreboardCard({ entries, teamId, onOpenScoreboard, onOpenFe
   const leaders = entries.slice(0, 3);
 
   return (
-    <section className="rounded-[1.55rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] px-4 py-4 shadow-[0_20px_60px_rgba(46,58,62,0.18)]">
+    <section className="rounded-[1.55rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] px-3 py-3 shadow-[0_20px_60px_rgba(46,58,62,0.18)]">
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">Standings</p>
+        <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">Standings</p>
+        <div className="flex items-center gap-1.5">
+          <button
+            className="rounded-full border border-[#c8b48a]/55 bg-[#efe5cf] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#e7dbc0]"
+            onClick={onOpenFeed}
+            type="button"
+          >
+            Feed
+          </button>
+          <button
+            className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#f2ead6]"
+            onClick={onOpenScoreboard}
+            type="button"
+          >
+            Standings
+          </button>
         </div>
-        <button
-          className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#f2ead6]"
-          onClick={onOpenScoreboard}
-          type="button"
-        >
-          Open
-        </button>
       </div>
 
-      <div className="mt-4 space-y-2.5">
+      <div className="mt-2 space-y-1.5">
         {leaders.map((entry) => {
           const isCurrentTeam = entry.team.id === teamId;
           return (
             <div
               key={entry.team.id}
               className={[
-                'flex items-center justify-between rounded-[1.1rem] border px-3 py-3',
+                'flex items-center justify-between rounded-[0.9rem] border px-2.5 py-1.5',
                 isCurrentTeam ? 'border-[#24343a]/25 bg-[#fff8eb]' : 'border-[#d6c59d]/55 bg-[#f7efdc]',
               ].join(' ')}
             >
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="w-5 text-sm font-semibold text-[#7a5e2d]">{entry.rank}</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="w-4 text-xs font-semibold text-[#7a5e2d]">{entry.rank}</span>
                 <span
-                  className="h-3.5 w-3.5 shrink-0 rounded-full border border-[#f8f1df]"
+                  className="h-3 w-3 shrink-0 rounded-full border border-[#f8f1df]"
                   style={{ backgroundColor: entry.team.color }}
                 />
                 <p className="truncate text-sm font-medium text-[#24343a]">{entry.team.name}</p>
@@ -121,23 +128,6 @@ export function MiniScoreboardCard({ entries, teamId, onOpenScoreboard, onOpenFe
           );
         })}
       </div>
-
-      <div className="mt-4 flex items-center gap-2">
-        <button
-          className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#f2ead6]"
-          onClick={onOpenScoreboard}
-          type="button"
-        >
-          Full Standings
-        </button>
-        <button
-          className="rounded-full border border-[#c8b48a]/55 bg-[#efe5cf] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#e7dbc0]"
-          onClick={onOpenFeed}
-          type="button"
-        >
-          Feed
-        </button>
-      </div>
     </section>
   );
 }
@@ -145,24 +135,24 @@ export function MiniScoreboardCard({ entries, teamId, onOpenScoreboard, onOpenFe
 export function ScoreboardOverlay({ entries, onClose }: ScoreboardOverlayProps) {
   return (
     <OverlayShell title="Standings" onClose={onClose}>
-      <div className="space-y-2.5">
+      <div className="space-y-1.5">
         {entries.map((entry) => (
           <article
             key={entry.team.id}
-            className="flex items-center justify-between gap-4 rounded-[1.2rem] border border-[#d6c59d]/55 bg-[#f7efdc] px-4 py-3"
+            className="flex items-center justify-between gap-3 rounded-[1.1rem] border border-[#d6c59d]/55 bg-[#f7efdc] px-3 py-2"
           >
-            <div className="flex min-w-0 items-center gap-3">
-              <p className="w-7 text-center text-base font-semibold text-[#7a5e2d]">{entry.rank}</p>
+            <div className="flex min-w-0 items-center gap-2.5">
+              <p className="w-5 text-center text-sm font-semibold text-[#7a5e2d]">{entry.rank}</p>
               <span
-                className="h-3.5 w-3.5 shrink-0 rounded-full border border-[#f8f1df] shadow-sm"
+                className="h-3 w-3 shrink-0 rounded-full border border-[#f8f1df] shadow-sm"
                 style={{ backgroundColor: entry.team.color }}
               />
-              <h3 className="truncate font-[Georgia,Times_New_Roman,serif] text-lg font-semibold text-[#24343a]">
+              <h3 className="truncate font-[Georgia,Times_New_Roman,serif] text-base font-semibold text-[#24343a]">
                 {entry.team.name}
               </h3>
             </div>
-            <p className="shrink-0 text-sm font-semibold uppercase tracking-[0.12em] text-[#24343a]">
-              Zones {entry.zoneCount}
+            <p className="shrink-0 text-xs font-semibold uppercase tracking-[0.12em] text-[#24343a]">
+              {entry.zoneCount} zones
             </p>
           </article>
         ))}
@@ -179,11 +169,11 @@ export function FeedOverlay({ entries, isLoading, errorMessage, onClose, onFocus
       {!isLoading && !errorMessage && entries.length === 0 ? <PanelMessage tone="default" message="No visible events yet." /> : null}
 
       {entries.length ? (
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           {entries.map((entry) => {
             const isZoneLinked = Boolean(entry.zoneId);
             const articleClassName = [
-              'w-full rounded-[1rem] border border-[#d6c59d]/55 bg-[#f7efdc] px-3 py-2.5 text-left transition',
+              'w-full rounded-[0.9rem] border border-[#d6c59d]/55 bg-[#f7efdc] px-3 py-2 text-left transition',
               isZoneLinked ? 'hover:bg-[#fbf3e2]' : '',
             ].join(' ').trim();
 
@@ -259,18 +249,19 @@ function OverlayShell({ title, onClose, children }: { title: string; onClose(): 
     }, 220);
   };
 
-  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
     if (isClosing) {
       return;
     }
 
+    event.currentTarget.setPointerCapture(event.pointerId);
     dragRefs.pointerId.current = event.pointerId;
     dragRefs.startY.current = event.clientY;
     dragRefs.startTime.current = Date.now();
     dragRefs.didDrag.current = false;
   };
 
-  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const handlePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     if (isClosing || dragRefs.pointerId.current !== event.pointerId) {
       return;
     }
@@ -282,7 +273,6 @@ function OverlayShell({ title, onClose, children }: { title: string; onClose(): 
     }
 
     if (!dragRefs.didDrag.current) {
-      event.currentTarget.setPointerCapture(event.pointerId);
       dragRefs.didDrag.current = true;
     }
 
@@ -291,7 +281,7 @@ function OverlayShell({ title, onClose, children }: { title: string; onClose(): 
     setDragOffset(deltaY > 0 ? deltaY : Math.round(deltaY * 0.2));
   };
 
-  const handlePointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const handlePointerEnd = (event: ReactPointerEvent<HTMLElement>) => {
     if (isClosing || dragRefs.pointerId.current !== event.pointerId) {
       return;
     }
@@ -315,29 +305,33 @@ function OverlayShell({ title, onClose, children }: { title: string; onClose(): 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#162126]/42 p-0 [touch-action:none] lg:items-center lg:p-6" onClick={() => requestClose(false)}>
+    <div className="pointer-events-none fixed inset-0 z-50 flex items-end justify-center p-0 lg:items-center lg:p-6">
       <section
-        className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] shadow-[0_30px_80px_rgba(24,32,36,0.28)] lg:rounded-[2rem]"
-        onClick={(event) => event.stopPropagation()}
+        className="pointer-events-auto flex max-h-[72vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] shadow-[0_30px_80px_rgba(24,32,36,0.28)] lg:rounded-[2rem]"
         style={{
           transform: `translateY(${dragOffset}px)`,
           transition: isDragging ? 'none' : 'transform 0.24s ease',
         }}
       >
-        <header className="border-b border-[#d6c59d]/55 px-5 py-4 lg:px-6">
-          <div
-            className="mb-3 flex cursor-grab touch-none justify-center active:cursor-grabbing"
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerEnd}
-            onPointerCancel={handlePointerEnd}
-          >
+        <header
+          className="touch-none cursor-grab border-b border-[#d6c59d]/55 px-5 py-2.5 active:cursor-grabbing lg:px-6"
+          onPointerDown={(event) => {
+            if (isOverlayInteractiveTarget(event.target)) {
+              return;
+            }
+            handlePointerDown(event);
+          }}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+          onPointerCancel={handlePointerEnd}
+        >
+          <div className="mb-1.5 flex justify-center">
             <div className="h-1 w-10 rounded-full bg-[#c8b48a]/70" />
           </div>
           <div className="flex items-center justify-between gap-4">
-            <h2 className="truncate font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#24343a] lg:text-[2rem]">{title}</h2>
+            <h2 className="truncate font-[Georgia,Times_New_Roman,serif] text-xl font-semibold text-[#24343a] lg:text-2xl">{title}</h2>
             <button
-              className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#f2ead6]"
+              className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#f2ead6]"
               onClick={() => requestClose(true)}
               type="button"
             >
@@ -345,7 +339,7 @@ function OverlayShell({ title, onClose, children }: { title: string; onClose(): 
             </button>
           </div>
         </header>
-        <div className="overflow-y-auto px-5 py-5 lg:px-6">{children}</div>
+        <div className="overflow-y-auto overscroll-contain px-4 py-3 [touch-action:pan-y] lg:px-5">{children}</div>
       </section>
     </div>
   );
@@ -455,4 +449,8 @@ function formatEventTime(value: string): string {
     hour: 'numeric',
     minute: '2-digit',
   }).format(date);
+}
+
+function isOverlayInteractiveTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(target.closest('button, a, input, textarea, select, [data-overlay-interactive=\"true\"]'));
 }

@@ -54,9 +54,10 @@ export function parseRoute(pathname: string): ParsedRoute {
     };
   }
 
+  const searchParams = new URLSearchParams(window.location.search);
   return {
     kind: 'landing',
-    gameId: null,
+    gameId: searchParams.get('gameId'),
     mapId: null,
     challengeSetId: null,
   };
@@ -76,9 +77,14 @@ export function navigateToGame(gameId: string): void {
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
-export function navigateToLanding(options: { suppressAutoEnter?: boolean } = {}): void {
+export function navigateToLanding(options: { suppressAutoEnter?: boolean; gameId?: string | null } = {}): void {
   setSuppressAutoEnter(Boolean(options.suppressAutoEnter));
-  window.history.pushState({}, '', '/');
+  const searchParams = new URLSearchParams();
+  if (options.gameId) {
+    searchParams.set('gameId', options.gameId);
+  }
+  const targetPath = searchParams.size ? '/?' + searchParams.toString() : '/';
+  window.history.pushState({}, '', targetPath);
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 

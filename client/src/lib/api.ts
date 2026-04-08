@@ -19,6 +19,7 @@ import {
   type MapDefinition,
   type MapZone,
   type Player,
+  type PushSubscriptionData,
   type ResourceAwardMap,
   type ScoreboardEntry,
   type Team,
@@ -393,6 +394,14 @@ export async function joinTeam(gameId: string, joinCode: string): Promise<JoinTe
 export async function leaveCurrentTeam(): Promise<Player> {
   const response = await apiRequest<PlayerResponse>('/players/me/leave-team', {
     method: 'POST',
+  });
+  return response.player;
+}
+
+export async function subscribeCurrentPlayerPush(pushSubscription: PushSubscriptionData): Promise<Player> {
+  const response = await apiRequest<PlayerResponse>('/players/me/push-subscribe', {
+    method: 'POST',
+    body: pushSubscription,
   });
   return response.player;
 }

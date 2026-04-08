@@ -12,11 +12,31 @@ interface LobbyScreenProps {
   connectionMessage: string | null;
   onLeaveTeam(): void;
   isLeavingTeam: boolean;
+  canShowNotificationPrompt: boolean;
+  notificationPromptMessage: string | null;
+  notificationPromptPending: boolean;
+  onEnableNotifications(): void;
+  onDismissNotifications(): void;
 }
 
 const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env.MAPBOX_ACCESS_TOKEN ?? '').trim();
 
-export function LobbyScreen({ game, teams, players, player, mapDefinition, mapZones, connectionMessage, onLeaveTeam, isLeavingTeam }: LobbyScreenProps) {
+export function LobbyScreen({
+  game,
+  teams,
+  players,
+  player,
+  mapDefinition,
+  mapZones,
+  connectionMessage,
+  onLeaveTeam,
+  isLeavingTeam,
+  canShowNotificationPrompt,
+  notificationPromptMessage,
+  notificationPromptPending,
+  onEnableNotifications,
+  onDismissNotifications,
+}: LobbyScreenProps) {
   const playersByTeamId = useMemo(() => {
     const roster = new Map<string, Player[]>();
     for (const team of teams) {
@@ -63,6 +83,37 @@ export function LobbyScreen({ game, teams, players, player, mapDefinition, mapZo
             </div>
             {connectionMessage ? (
               <p className="mt-3 text-xs uppercase tracking-[0.2em] text-[#7e7258]">{connectionMessage}</p>
+            ) : null}
+            {canShowNotificationPrompt ? (
+              <div className="mx-auto mt-5 max-w-2xl rounded-[1.4rem] border border-[#d2c19d]/70 bg-[#fbf6ea]/96 px-4 py-4 text-left shadow-[0_16px_34px_rgba(31,42,47,0.08)] sm:px-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-[#8c7a57]">Zone Alerts</p>
+                    <p className="mt-1 text-sm leading-6 text-[#44545b]">Get notified when rival teams capture a zone.</p>
+                    {notificationPromptMessage ? (
+                      <p className="mt-2 text-sm text-[#8a5a42]">{notificationPromptMessage}</p>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      className="rounded-full bg-[#c8a86b] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#1f2a2f] transition hover:bg-[#d3b57c] disabled:cursor-not-allowed disabled:bg-[#d8ceb9] disabled:text-[#867c69]"
+                      disabled={notificationPromptPending}
+                      onClick={onEnableNotifications}
+                      type="button"
+                    >
+                      {notificationPromptPending ? 'Enabling…' : 'Enable'}
+                    </button>
+                    <button
+                      className="rounded-full border border-[#d2c19d]/70 bg-transparent px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#5a676c] transition hover:bg-[#f5ecdb]"
+                      disabled={notificationPromptPending}
+                      onClick={onDismissNotifications}
+                      type="button"
+                    >
+                      Not now
+                    </button>
+                  </div>
+                </div>
+              </div>
             ) : null}
           </header>
 

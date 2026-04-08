@@ -12,7 +12,13 @@ import {
   listMapZones,
   listPlayers,
   registerPlayer,
+  subscribeCurrentPlayerPush,
 } from '../../lib/api';
+import {
+  getNotificationPermission,
+  subscribeToPushNotifications,
+  supportsPushNotifications,
+} from '../../lib/push-notifications';
 import { createRealtimeSocket, joinRealtimeGame, leaveRealtimeGame } from '../../lib/realtime';
 import { useJoinFlowStore } from '../../store/joinFlowStore';
 import { CountdownOverlay } from './CountdownOverlay';
@@ -26,6 +32,7 @@ interface JoinFlowProps {
 }
 
 type LoadStatus = 'loading' | 'ready' | 'empty' | 'error';
+type PushPromptState = 'hidden' | 'ready' | 'subscribing' | 'enabled';
 
 export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: JoinFlowProps) {
   const persistedStep = useJoinFlowStore((state) => state.step);
@@ -47,6 +54,8 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
   const [step, setStep] = useState(persistedStep);
   const [countdownActive, setCountdownActive] = useState(false);
   const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
+  const [pushPromptState, setPushPromptState] = useState<PushPromptState>('hidden');
+  const [pushPromptMessage, setPushPromptMessage] = useState<string | null>(null);
   const countdownStartedRef = useRef(false);
 
   const loadRoster = useCallback(async (gameId: string, signal?: AbortSignal) => {
@@ -122,7 +131,11 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
       if (resolvedGame.status !== 'setup') {
         setStatus('ready');
         setStep('home');
-        setMessage('No game is currently accepting players.');
+        if (resolvedGame.status === 'active' && currentPlayer?.teamId) {
+          setMessage('Game in progress. Return to the live map when you are ready.');
+        } else {
+          setMessage('No game is currently accepting players.');
+        }
         return;
       }
 
@@ -210,6 +223,35 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
 
     return () => window.clearInterval(interval);
   }, [game, loadRoster, status, step]);
+
+  useEffect(() => {
+    if (status !== 'ready' || step !== 'lobby' || !game || !player?.teamId) {
+      setPushPromptState('hidden');
+      setPushPromptMessage(null);
+      return;
+    }
+
+    if (!supportsPushNotifications()) {
+      setPushPromptState('hidden');
+      setPushPromptMessage(null);
+      return;
+    }
+
+    if (player.pushSubscription) {
+      clearPushPromptDismissed(game.id, player.id);
+      setPushPromptState('enabled');
+      setPushPromptMessage(null);
+      return;
+    }
+
+    if (getNotificationPermission() === 'denied' || isPushPromptDismissed(game.id, player.id)) {
+      setPushPromptState('hidden');
+      setPushPromptMessage(null);
+      return;
+    }
+
+    setPushPromptState((currentState) => currentState === 'subscribing' ? currentState : 'ready');
+  }, [game, player?.id, player?.pushSubscription, player?.teamId, status, step]);
 
   useEffect(() => {
     if (status !== 'ready' || step !== 'lobby' || !game || !player?.teamId) {
@@ -361,6 +403,44 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
     }
   }
 
+  async function handleEnableNotifications() {
+    if (!game || !player || pushPromptState === 'subscribing') {
+      return;
+    }
+
+    setPushPromptState('subscribing');
+    setPushPromptMessage(null);
+
+    try {
+      const subscription = await subscribeToPushNotifications();
+      const nextPlayer = await subscribeCurrentPlayerPush(subscription);
+      setPlayer(nextPlayer);
+      setPlayers((currentPlayers) => upsertPlayer(currentPlayers, nextPlayer));
+      clearPushPromptDismissed(game.id, nextPlayer.id);
+      setPushPromptState('enabled');
+    } catch (error) {
+      if (getNotificationPermission() === 'denied') {
+        dismissPushPrompt(game.id, player.id);
+        setPushPromptState('hidden');
+        setPushPromptMessage(null);
+        return;
+      }
+
+      setPushPromptState('ready');
+      setPushPromptMessage(getErrorMessage(error, 'Unable to enable notifications right now.'));
+    }
+  }
+
+  function handleDismissNotifications() {
+    if (!game || !player) {
+      return;
+    }
+
+    dismissPushPrompt(game.id, player.id);
+    setPushPromptState('hidden');
+    setPushPromptMessage(null);
+  }
+
   function handleBackToHome() {
     setStep('home');
     setSession({ step: 'home' });
@@ -432,6 +512,11 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
             teams={teams}
             onLeaveTeam={handleLeaveTeam}
             isLeavingTeam={isLeavingTeam}
+            canShowNotificationPrompt={pushPromptState === 'ready' || pushPromptState === 'subscribing'}
+            notificationPromptMessage={pushPromptMessage}
+            notificationPromptPending={pushPromptState === 'subscribing'}
+            onEnableNotifications={handleEnableNotifications}
+            onDismissNotifications={handleDismissNotifications}
           />
           <CountdownOverlay active={countdownActive} onComplete={handleCountdownComplete} />
         </>
@@ -623,4 +708,31 @@ function getErrorMessage(error: unknown, fallback: string): string {
   }
 
   return fallback;
+}
+function getPushPromptStorageKey(gameId: string, playerId: string) {
+  return `city-game:push-prompt:${gameId}:${playerId}`;
+}
+
+function isPushPromptDismissed(gameId: string, playerId: string) {
+  try {
+    return window.localStorage.getItem(getPushPromptStorageKey(gameId, playerId)) === 'dismissed';
+  } catch {
+    return false;
+  }
+}
+
+function dismissPushPrompt(gameId: string, playerId: string) {
+  try {
+    window.localStorage.setItem(getPushPromptStorageKey(gameId, playerId), 'dismissed');
+  } catch {
+    // Ignore storage failures; push remains optional.
+  }
+}
+
+function clearPushPromptDismissed(gameId: string, playerId: string) {
+  try {
+    window.localStorage.removeItem(getPushPromptStorageKey(gameId, playerId));
+  } catch {
+    // Ignore storage failures; push remains optional.
+  }
 }

@@ -663,6 +663,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   }, []);
 
   const handleMenuPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
     menuSwipeRef.current.pointerId = event.pointerId;
     menuSwipeRef.current.startY = event.clientY;
     menuSwipeRef.current.startTime = Date.now();
@@ -681,13 +682,39 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     }
 
     if (!menuSwipeRef.current.didDrag) {
-      event.currentTarget.setPointerCapture(event.pointerId);
       menuSwipeRef.current.didDrag = true;
     }
 
     event.preventDefault();
     setIsDraggingMenu(true);
     setMenuDragY(deltaY > 0 ? deltaY : Math.round(deltaY * 0.2));
+  }, []);
+
+  const openDeck = useCallback(() => {
+    setIsDraggingDeck(false);
+    setDeckDragY(60);
+    setIsDeckOpen(true);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        setDeckDragY(0);
+      });
+    });
+  }, []);
+
+  const openMenu = useCallback(() => {
+    if (menuCloseTimerRef.current !== null) {
+      window.clearTimeout(menuCloseTimerRef.current);
+      menuCloseTimerRef.current = null;
+    }
+
+    setIsDraggingMenu(false);
+    setMenuDragY(40);
+    setIsMenuOpen(true);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        setMenuDragY(0);
+      });
+    });
   }, []);
 
   const requestMenuClose = useCallback((animated: boolean) => {
@@ -798,7 +825,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
             </div>
             <button
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#c9ae6d]/55 bg-[#f3ecd8]/90 text-sm text-[#24343a] shadow-sm backdrop-blur-sm"
-              onClick={() => setIsMenuOpen(true)}
+              onClick={openMenu}
               type="button"
               aria-label="Menu"
             >
@@ -864,7 +891,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
             <div className="flex justify-end lg:hidden">
               <button
                 className="rounded-full border border-[#c9ae6d]/55 bg-[#f3ecd8]/96 px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#24343a] shadow-[0_8px_24px_rgba(46,58,62,0.18)] backdrop-blur-sm transition hover:bg-[#eee3cb]"
-                onClick={() => startTransition(() => setIsDeckOpen(true))}
+                onClick={openDeck}
                 type="button"
               >
                 ☰ Field Deck
@@ -1002,46 +1029,51 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
       {/* Mobile menu overlay */}
       {isMenuOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-end bg-[#162126]/40 lg:hidden"
-          onClick={() => requestMenuClose(false)}
-        >
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-end lg:hidden">
           <div
-            className="w-full rounded-t-[1.9rem] border-t border-[#c9ae6d]/55 bg-[#f3ecd8] px-6 pb-10 pt-6 [touch-action:none]"
-            onClick={(e) => e.stopPropagation()}
+            className="pointer-events-auto w-full rounded-t-[1.9rem] border-t border-[#c9ae6d]/55 bg-[#f3ecd8] px-4 pb-4 pt-3 shadow-[0_-18px_48px_rgba(24,32,36,0.2)] [touch-action:none]"
             style={{
               transform: `translateY(${menuDragY}px)`,
               transition: isDraggingMenu ? 'none' : 'transform 0.24s ease',
             }}
           >
             <div
-              className="mb-3 flex cursor-grab touch-none justify-center active:cursor-grabbing"
-              onPointerDown={handleMenuPointerDown}
+              className="touch-none cursor-grab active:cursor-grabbing"
+              onPointerDown={(event) => {
+                if (isMenuInteractiveTarget(event.target)) {
+                  return;
+                }
+                handleMenuPointerDown(event);
+              }}
               onPointerMove={handleMenuPointerMove}
               onPointerUp={handleMenuPointerEnd}
               onPointerCancel={handleMenuPointerEnd}
             >
-              <div className="h-1 w-10 rounded-full bg-[#c8b48a]/70" />
+              <div className="mb-1.5 flex justify-center">
+                <div className="h-1 w-10 rounded-full bg-[#c8b48a]/70" />
+              </div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-[10px] uppercase tracking-[0.28em] text-[#936718]">
+                    {snapshot?.game.name ?? 'Game'}
+                  </p>
+                  <p className="mt-0.5 truncate text-xs text-[#44545c]">
+                    {snapshot?.player?.displayName ?? ''}
+                    {team ? ' · ' + team.name : ''}
+                  </p>
+                </div>
+                <button
+                  className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#24343a]"
+                  onClick={() => requestMenuClose(false)}
+                  type="button"
+                >
+                  Close
+                </button>
+              </div>
             </div>
-            <div className="mb-5 flex items-center justify-between">
-              <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">
-                {snapshot?.game.name ?? 'Game'}
-              </p>
+            <div className="space-y-1.5">
               <button
-                className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a]"
-                onClick={() => requestMenuClose(false)}
-                type="button"
-              >
-                ✕
-              </button>
-            </div>
-            <p className="mb-5 text-sm text-[#44545c]">
-              {snapshot?.player?.displayName ?? ''}
-              {team ? ' · ' + team.name : ''}
-            </p>
-            <div className="space-y-3">
-              <button
-                className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-4 text-sm font-semibold text-[#24343a] transition hover:bg-[#f2ead6]"
+                className="w-full rounded-[1.1rem] border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-2.5 text-sm font-semibold text-[#24343a] transition hover:bg-[#f2ead6]"
                 onClick={() => {
                   setActiveOverlay('scoreboard');
                   requestMenuClose(false);
@@ -1051,7 +1083,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 Standings
               </button>
               <button
-                className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#efe5cf] px-4 py-4 text-sm font-semibold text-[#24343a] transition hover:bg-[#e6d8bc]"
+                className="w-full rounded-[1.1rem] border border-[#c8b48a]/55 bg-[#efe5cf] px-3 py-2.5 text-sm font-semibold text-[#24343a] transition hover:bg-[#e6d8bc]"
                 onClick={() => {
                   setActiveOverlay('feed');
                   requestMenuClose(false);
@@ -1061,7 +1093,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 Feed
               </button>
               <button
-                className="w-full rounded-2xl border border-[#29414b] bg-[#24343a] px-4 py-4 text-sm font-semibold text-[#f4ead7] transition hover:bg-[#1d2b30]"
+                className="w-full rounded-[1.1rem] border border-[#29414b] bg-[#24343a] px-3 py-2.5 text-sm font-semibold text-[#f4ead7] transition hover:bg-[#1d2b30]"
                 onClick={onLeaveMap}
                 type="button"
               >
@@ -1524,4 +1556,8 @@ function getMutationErrorMessage(error: unknown): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function isMenuInteractiveTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(target.closest('button, a, input, textarea, select'));
 }
