@@ -65,7 +65,7 @@ In V1 there's one mode and no mode-switching UI. The separation is a code organi
 | Database | PostgreSQL 16 / PostGIS 3.4 / Drizzle ORM | Spatial indexes, polygon containment in µs |
 | Notifications | Web Push (`web-push` npm) | Mobile + desktop, no native app |
 | Auth (V1) | Team join codes + httpOnly session cookies | Simple, secure |
-| Hosting | Proxmox LXC + Caddy | Self-hosted, auto HTTPS, WebSocket |
+| Hosting | Render Web Service + Render Postgres | Managed, auto HTTPS, WebSocket, PostGIS |
 
 ---
 
@@ -1204,13 +1204,15 @@ Max 1 push/player/60s. Players can mute individual categories.
 ## 15. Deployment
 
 ```
-Proxmox LXC (Ubuntu 24.04, 2GB RAM, 2 cores)
-├── Caddy (:443) → auto HTTPS, WebSocket, static files
-├── Fastify + Socket.IO (:3000)
-└── PostgreSQL 16 + PostGIS 3.4 (:5432)
+Render Web Service (Node.js)
+├── Fastify + Socket.IO — API routes + WebSocket
+├── @fastify/static — serves client/dist (Vite build)
+└── SPA fallback — index.html for all unmatched routes
+
+Render Postgres (PostgreSQL 16 + PostGIS)
 ```
 
-Create LXC → install deps → create DB + PostGIS → clone → install → migrate → build frontend → pm2 → Caddy → DNS.
+Create Render Postgres → `CREATE EXTENSION postgis` → create Web Service → set env vars → deploy. Build command runs migrations automatically.
 
 ---
 

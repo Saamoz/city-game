@@ -99,23 +99,21 @@ All frontend phases shipped. Summary of what exists in the client:
 
 ## Phase 39: Deployment
 
-**Goal:** Production on Render + Supabase.
+**Goal:** Production on Render (single Web Service).
 
 ### Stack
 
-- **Database:** Supabase project (Postgres + PostGIS built-in). Run all migrations against the Supabase connection string.
-- **API server:** Render Web Service — Node.js, `pnpm --filter @city-game/server start`. Set all env vars (DATABASE_URL, SESSION_SECRET, VAPID keys, etc.) in Render dashboard.
-- **Client:** Render Static Site — `pnpm --filter @city-game/client build`, publish dir `client/dist`. Set `VITE_API_URL` and `VITE_VAPID_PUBLIC_KEY`.
-- **WebSockets:** Render Web Services support persistent connections; Socket.IO works out of the box.
+- **Database:** Render Postgres (PostgreSQL 16 + PostGIS via `CREATE EXTENSION postgis`). Run migrations as part of the build command.
+- **Server + Client:** Single Render Web Service — Fastify serves the Vite build from `client/dist` via `@fastify/static`, with SPA fallback. One URL, no CORS.
+- **WebSockets:** Socket.IO works on Render Web Services out of the box.
 
 ### Deploy checklist
 
-1. Create Supabase project → enable PostGIS extension → run migrations
+1. Create Render Postgres database → connect to it via PSQL → run `CREATE EXTENSION postgis;`
 2. Create Render Web Service → point to repo → set build/start commands + env vars
-3. Create Render Static Site → set build command + `VITE_API_URL` pointing to the web service URL
-4. Verify HTTPS, WebSocket upgrade, and GPS (requires HTTPS on mobile)
-5. Smoke-test: create game → join → capture zone → scoreboard
-6. Set up Chicago authored map + challenge set for first real game
+3. Verify HTTPS, WebSocket upgrade, and GPS (requires HTTPS on mobile)
+4. Smoke-test: create game → join → capture zone → scoreboard
+5. Set up Chicago authored map + challenge set for first real game
 ---
 
 ## Future Work

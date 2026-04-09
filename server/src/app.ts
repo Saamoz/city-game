@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
 import type { DatabaseClient, DatabasePool } from './db/connection.js';
 import { createDb } from './db/connection.js';
@@ -81,6 +84,15 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.register(async (modeApp) => {
     modeRegistry.registerRoutes(modeApp);
   }, { prefix: '/api/v1' });
+
+  const clientDist = join(process.cwd(), 'client', 'dist');
+  if (existsSync(clientDist)) {
+    app.register(fastifyStatic, { root: clientDist, wildcard: false });
+    // SPA fallback — serve index.html for any unmatched route
+    app.setNotFoundHandler((_req, reply) => {
+      reply.sendFile('index.html');
+    });
+  }
 
   return app;
 }
