@@ -75,6 +75,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const [showMobileCompleted, setShowMobileCompleted] = useState(false);
   const [deckDragY, setDeckDragY] = useState(0);
   const [isDraggingDeck, setIsDraggingDeck] = useState(false);
+  const deckWrapperRef = useRef<HTMLDivElement | null>(null);
+  const deckWrapperHeightRef = useRef(320);
   const deckSwipeRef = useRef({ active: false, startX: 0, startY: 0, startTime: 0, committed: false });
   const menuSwipeRef = useRef({ pointerId: null as number | null, startY: 0, startTime: 0, didDrag: false });
   const [menuDragY, setMenuDragY] = useState(0);
@@ -142,6 +144,14 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     const timer = window.setTimeout(() => setToast(null), 4200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  // Measure deck wrapper height once content is available so peek translateY is accurate.
+  useEffect(() => {
+    if (snapshot && deckWrapperRef.current) {
+      deckWrapperHeightRef.current = deckWrapperRef.current.offsetHeight;
+    }
+  }, [snapshot?.game.stateVersion]);
+
 
 
   useEffect(() => {
@@ -618,9 +628,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       }
       return;
     }
-    // Prevent browser from scrolling the page/viewport during a committed vertical swipe
     e.preventDefault();
-    // Resist upward drag
+    // open mode only: free downward (toward close), resist upward
     setDeckDragY(deltaY > 0 ? deltaY : Math.round(deltaY * 0.25));
   }, []);
 
@@ -634,26 +643,21 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     const deltaY = e.clientY - ref.startY;
     const velocity = deltaY / Math.max(Date.now() - ref.startTime, 1);
 
+    // open mode: swipe down to close, swipe up to reveal completed tray
     if (deltaY > 80 || (deltaY > 30 && velocity > 0.5)) {
       if (currentShowCompleted) {
         setShowMobileCompleted(false);
-        setDeckDragY(0);
       } else {
-        setDeckDragY(500);
-        window.setTimeout(() => {
-          startTransition(() => setIsDeckOpen(false));
-          setShowMobileCompleted(false);
-          setDeckDragY(0);
-        }, 400);
+        setIsDeckOpen(false);
+        setShowMobileCompleted(false);
+        setSelectedChallengeId(null);
       }
     } else if (deltaY < -50 || (deltaY < -20 && velocity < -0.4)) {
       if (!currentShowCompleted && hasCompleted) {
         setShowMobileCompleted(true);
       }
-      setDeckDragY(0);
-    } else {
-      setDeckDragY(0);
     }
+    setDeckDragY(0);
   }, []);
 
   const handleDeckPointerCancel = useCallback(() => {
@@ -688,17 +692,6 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     event.preventDefault();
     setIsDraggingMenu(true);
     setMenuDragY(deltaY > 0 ? deltaY : Math.round(deltaY * 0.2));
-  }, []);
-
-  const openDeck = useCallback(() => {
-    setIsDraggingDeck(false);
-    setDeckDragY(60);
-    setIsDeckOpen(true);
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        setDeckDragY(0);
-      });
-    });
   }, []);
 
   const openMenu = useCallback(() => {
@@ -886,91 +879,6 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
             />
           ) : null}
 
-          {/* Mobile: pill toggle button when deck is closed */}
-          {snapshot && !isDeckOpen ? (
-            <div className="flex justify-end lg:hidden">
-              <button
-                className="rounded-full border border-[#c9ae6d]/55 bg-[#f3ecd8]/96 px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#24343a] shadow-[0_8px_24px_rgba(46,58,62,0.18)] backdrop-blur-sm transition hover:bg-[#eee3cb]"
-                onClick={openDeck}
-                type="button"
-              >
-                ☰ Field Deck
-              </button>
-            </div>
-          ) : null}
-
-          {/* Mobile: open deck — swipeable, bare cards only */}
-          {snapshot && isDeckOpen ? (
-            <div
-              className="lg:hidden [touch-action:none]"
-              style={{
-                transform: `translateY(${deckDragY}px)`,
-                transition: isDraggingDeck ? 'none' : 'transform 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
-              }}
-              onPointerDown={handleDeckPointerDown}
-              onPointerMove={handleDeckPointerMove}
-              onPointerUp={(e) => handleDeckPointerUp(e, showMobileCompleted, completedCards.length > 0)}
-              onPointerCancel={handleDeckPointerCancel}
-            >
-              {/* Drag handle */}
-              <div className="flex justify-center pb-3 pt-1">
-                <div className="h-1 w-10 rounded-full bg-[#c8b48a]/70" />
-              </div>
-
-              <ChallengeDeck
-                animatedChallengeIds={animatedChallengeIds}
-                challenges={snapshot.challenges}
-                completedCards={completedCards}
-                currentZoneName={currentZone?.name ?? null}
-                isActionPending={isPending}
-                progressLabel={challengeProgressLabel}
-                locationMessage={locationErrorMessage}
-                locationStatus={locationStatus}
-                onCaptureChallenge={handleCaptureChallenge}
-                onFocusCompletedCard={handleFocusCompletedCard}
-                onSelectChallenge={setSelectedChallengeId}
-                selectedChallengeId={selectedChallengeId}
-              />
-
-              {/* Completed row — expands upward from below after swipe-up */}
-              {completedCards.length > 0 ? (
-                <div
-                  className="overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
-                  style={showMobileCompleted ? { maxHeight: '14rem', opacity: 1 } : { maxHeight: 0, opacity: 0 }}
-                >
-                  <div className="mt-3 -mx-1 overflow-x-auto [scrollbar-width:none] [touch-action:pan-x] [&::-webkit-scrollbar]:hidden">
-                    <div className="flex w-max gap-3 px-1 pb-1 pr-5">
-                      {completedCards.map(({ challenge, teamName, teamColor }) => (
-                        <button
-                          key={challenge.id}
-                          className="min-w-[12rem] max-w-[12rem] flex-none rounded-[1.2rem] border border-[#c8b48a]/45 bg-[#f7efdc] p-4 text-left text-[#24343a] shadow-[0_10px_24px_rgba(24,32,36,0.08)] transition hover:bg-[#fbf3e2]"
-                          onClick={() => handleFocusCompletedCard(challenge.id)}
-                          type="button"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="h-3 w-3 shrink-0 rounded-full border border-[#f8f1df]"
-                              style={{ backgroundColor: teamColor ?? '#a28f67' }}
-                            />
-                            <p className="truncate text-[10px] uppercase tracking-[0.18em] text-[#7a6a48]">
-                              {teamName ?? 'Unknown team'}
-                            </p>
-                          </div>
-                          <h3 className="mt-1.5 line-clamp-2 font-[Georgia,Times_New_Roman,serif] text-base font-semibold text-[#24343a]">
-                            {challenge.title}
-                          </h3>
-                          <p className="mt-1.5 line-clamp-3 text-xs leading-5 text-[#55646b]">
-                            {(challenge.config?.['short_description'] as string | undefined) ?? challenge.description}
-                          </p>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
           {/* Desktop: full section with chrome */}
           {snapshot ? (
             <section className="hidden rounded-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8]/96 p-4 shadow-[0_22px_60px_rgba(46,58,62,0.18)] backdrop-blur-sm lg:block lg:p-5">
@@ -1013,12 +921,14 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                   completedCards={completedCards}
                   currentZoneName={currentZone?.name ?? null}
                   isActionPending={isPending}
-                  progressLabel={challengeProgressLabel}
+                  isPeeking={false}
                   locationMessage={locationErrorMessage}
                   locationStatus={locationStatus}
                   onCaptureChallenge={handleCaptureChallenge}
                   onFocusCompletedCard={handleFocusCompletedCard}
+                  onOpen={() => {}}
                   onSelectChallenge={setSelectedChallengeId}
+                  progressLabel={challengeProgressLabel}
                   selectedChallengeId={selectedChallengeId}
                 />
               </div>
@@ -1026,6 +936,81 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           ) : null}
         </div>
       </div>
+
+      {/* Mobile: card fan peek → swipe up to open deck */}
+      {snapshot ? (
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 lg:hidden">
+          <div
+            ref={deckWrapperRef}
+            className={isDeckOpen ? 'pointer-events-auto px-4 pb-4 [touch-action:none]' : 'pointer-events-none flex justify-center'}
+            style={{
+              transform: isDeckOpen
+                ? `translateY(${deckDragY}px)`
+                : `translateY(${Math.max(0, deckWrapperHeightRef.current - 72)}px)`,
+              transition: isDraggingDeck ? 'none' : 'transform 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+            onPointerDown={isDeckOpen ? handleDeckPointerDown : undefined}
+            onPointerMove={isDeckOpen ? handleDeckPointerMove : undefined}
+            onPointerUp={isDeckOpen ? (e) => handleDeckPointerUp(e, showMobileCompleted, completedCards.length > 0) : undefined}
+            onPointerCancel={isDeckOpen ? handleDeckPointerCancel : undefined}
+          >
+
+            <ChallengeDeck
+              animatedChallengeIds={animatedChallengeIds}
+              challenges={snapshot.challenges}
+              completedCards={completedCards}
+              currentZoneName={currentZone?.name ?? null}
+              isActionPending={isPending}
+              isPeeking={!isDeckOpen}
+              locationMessage={locationErrorMessage}
+              locationStatus={locationStatus}
+              onCaptureChallenge={handleCaptureChallenge}
+              onFocusCompletedCard={handleFocusCompletedCard}
+              onOpen={() => setIsDeckOpen(true)}
+              onSelectChallenge={setSelectedChallengeId}
+              progressLabel={challengeProgressLabel}
+              selectedChallengeId={selectedChallengeId}
+            />
+
+            {/* Completed row — only in open mode, expands on swipe-up */}
+            {isDeckOpen && completedCards.length > 0 ? (
+              <div
+                className="overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                style={showMobileCompleted ? { maxHeight: '14rem', opacity: 1 } : { maxHeight: 0, opacity: 0 }}
+              >
+                <div className="mt-3 -mx-1 overflow-x-auto [scrollbar-width:none] [touch-action:pan-x] [&::-webkit-scrollbar]:hidden">
+                  <div className="flex w-max gap-3 px-1 pb-1 pr-5">
+                    {completedCards.map(({ challenge, teamName, teamColor }) => (
+                      <button
+                        key={challenge.id}
+                        className="min-w-[12rem] max-w-[12rem] flex-none rounded-[1.2rem] border border-[#c8b48a]/45 bg-[#f7efdc] p-4 text-left text-[#24343a] shadow-[0_10px_24px_rgba(24,32,36,0.08)] transition hover:bg-[#fbf3e2]"
+                        onClick={() => handleFocusCompletedCard(challenge.id)}
+                        type="button"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-3 w-3 shrink-0 rounded-full border border-[#f8f1df]"
+                            style={{ backgroundColor: teamColor ?? '#a28f67' }}
+                          />
+                          <p className="truncate text-[10px] uppercase tracking-[0.18em] text-[#7a6a48]">
+                            {teamName ?? 'Unknown team'}
+                          </p>
+                        </div>
+                        <h3 className="mt-1.5 line-clamp-2 font-[Georgia,Times_New_Roman,serif] text-base font-semibold text-[#24343a]">
+                          {challenge.title}
+                        </h3>
+                        <p className="mt-1.5 line-clamp-3 text-xs leading-5 text-[#55646b]">
+                          {(challenge.config?.['short_description'] as string | undefined) ?? challenge.description}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {/* Mobile menu overlay */}
       {isMenuOpen ? (

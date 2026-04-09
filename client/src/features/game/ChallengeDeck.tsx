@@ -1,4 +1,4 @@
-import { useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Challenge } from '@city-game/shared';
 import type { GeolocationStatus } from './useGeolocation';
 
@@ -21,6 +21,8 @@ interface ChallengeDeckProps {
   onCaptureChallenge(challengeId: string): void;
   onFocusCompletedCard(challengeId: string): void;
   isActionPending(actionKey: string): boolean;
+  isPeeking: boolean;
+  onOpen(): void;
 }
 
 interface DragStateRefs {
@@ -45,6 +47,8 @@ export function ChallengeDeck({
   onCaptureChallenge,
   onFocusCompletedCard,
   isActionPending,
+  isPeeking,
+  onOpen,
 }: ChallengeDeckProps) {
   const availableChallenges = [...challenges]
     .filter((challenge) => challenge.status === 'available')
@@ -52,6 +56,7 @@ export function ChallengeDeck({
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRefs = useDragRefs();
+  const peekPointerRef = useRef({ active: false, startY: 0, startTime: 0, moved: false });
   const [detailChallengeId, setDetailChallengeId] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
   const [confirmChallengeId, setConfirmChallengeId] = useState<string | null>(null);
@@ -106,13 +111,29 @@ export function ChallengeDeck({
       {availableChallenges.length ? (
         <div
           ref={scrollRef}
-          className="-mx-3 cursor-grab overflow-x-auto px-3 py-4 select-none [scrollbar-width:none] [touch-action:pan-x] active:cursor-grabbing [&::-webkit-scrollbar]:hidden"
-          onPointerCancel={(event) => handlePointerEnd(event, scrollRef.current, dragRefs)}
-          onPointerDown={(event) => handlePointerDown(event, scrollRef.current, dragRefs)}
-          onPointerMove={(event) => handlePointerMove(event, scrollRef.current, dragRefs)}
-          onPointerUp={(event) => handlePointerEnd(event, scrollRef.current, dragRefs)}
+          className={isPeeking
+            ? 'pointer-events-auto w-fit overflow-visible [touch-action:none]'
+            : '-mx-3 cursor-grab overflow-x-auto px-3 py-4 select-none [scrollbar-width:none] [touch-action:pan-x] active:cursor-grabbing [&::-webkit-scrollbar]:hidden'}
+          onPointerCancel={isPeeking
+            ? () => { peekPointerRef.current.active = false; }
+            : (event) => handlePointerEnd(event, scrollRef.current, dragRefs)}
+          onPointerDown={isPeeking
+            ? (e) => { peekPointerRef.current = { active: true, startY: e.clientY, startTime: Date.now(), moved: false }; }
+            : (event) => handlePointerDown(event, scrollRef.current, dragRefs)}
+          onPointerMove={isPeeking
+            ? (e) => { if (peekPointerRef.current.active && Math.abs(e.clientY - peekPointerRef.current.startY) > 8) peekPointerRef.current.moved = true; }
+            : (event) => handlePointerMove(event, scrollRef.current, dragRefs)}
+          onPointerUp={isPeeking
+            ? (e) => {
+                if (!peekPointerRef.current.active) return;
+                peekPointerRef.current.active = false;
+                const dy = e.clientY - peekPointerRef.current.startY;
+                const vel = dy / Math.max(Date.now() - peekPointerRef.current.startTime, 1);
+                if (!peekPointerRef.current.moved || dy < -20 || (dy < -8 && vel < -0.25)) onOpen();
+              }
+            : (event) => handlePointerEnd(event, scrollRef.current, dragRefs)}
         >
-          <div className="flex w-max gap-4 pr-6">
+          <div className="flex w-max pr-6">
             {availableChallenges.map((challenge, index) => {
               const isSelected = challenge.id === selectedChallengeId;
               const isConfirming = confirmChallengeId === challenge.id;
@@ -122,13 +143,15 @@ export function ChallengeDeck({
               return (
                 <div
                   key={challenge.id}
-                  className={animatedChallengeIds.includes(challenge.id) ? 'animate-[deck-card-in_350ms_cubic-bezier(0.22,1,0.36,1)]' : ''}
+                  className={!isPeeking && animatedChallengeIds.includes(challenge.id) ? 'animate-[deck-card-in_350ms_cubic-bezier(0.22,1,0.36,1)]' : ''}
+                  style={getCardWrapperStyle(index, isPeeking)}
+                  onClick={isPeeking ? () => onOpen() : undefined}
                 >
                 <article
                   className={[
-                    'relative snap-start min-w-[13rem] max-w-[13rem] lg:min-w-[17rem] lg:max-w-[17rem] flex-none rounded-[1.8rem] border p-4 lg:p-5 text-[#1f2a2f] shadow-[0_18px_40px_rgba(24,32,36,0.14)] transition duration-150',
+                    'relative snap-start min-w-[13rem] max-w-[13rem] lg:min-w-[17rem] lg:max-w-[17rem] flex-none rounded-[1.8rem] border p-4 lg:p-5 text-[#1f2a2f] shadow-[0_16px_80px_rgba(24,32,36,0.10)] transition duration-150',
                     isSelected
-                      ? 'z-10 border-[#24343a] bg-[#fff8eb] shadow-[0_22px_48px_rgba(24,32,36,0.22)]'
+                      ? 'z-10 border-[#24343a] bg-[#fff8eb] shadow-[0_20px_80px_rgba(24,32,36,0.16)]'
                       : 'z-0 border-[#c8b48a]/55 bg-[#f8f1df] hover:-translate-y-0.5 hover:bg-[#fbf4e4]',
                   ].join(' ')}
                   onClick={(event) => {
@@ -143,20 +166,33 @@ export function ChallengeDeck({
                     setConfirmChallengeId(null);
                     onSelectChallenge(challenge.id);
                   }}
-                  style={{ transform: `rotate(${(index % 2 === 0 ? -1 : 1) * Math.min(index, 2) * 0.35}deg)` }}
+                  style={{
+                    transform: `rotate(${(index % 2 === 0 ? -1 : 1) * Math.min(index, 2) * 0.35}deg)`,
+                    pointerEvents: isPeeking ? 'none' : undefined,
+                  }}
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <h3
-                      className="font-[Georgia,Times_New_Roman,serif] text-lg lg:text-xl font-semibold text-[#1f2a2f]"
-                      title={challenge.title}
-                    >
-                      {getDisplayTitle(challenge.title)}
-                    </h3>
-                  </div>
+                  {isPeeking && index === 0 ? (
+                    <div className="flex w-full items-center justify-center">
+                      <h3 className="font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#1f2a2f]">
+                        Challenge Deck
+                      </h3>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-start justify-between gap-4">
+                        <h3
+                          className="font-[Georgia,Times_New_Roman,serif] text-lg lg:text-xl font-semibold text-[#1f2a2f]"
+                          title={challenge.title}
+                        >
+                          {getDisplayTitle(challenge.title)}
+                        </h3>
+                      </div>
 
-                  <p className="mt-3 lg:mt-4 overflow-hidden text-sm leading-6 text-[#4f6168] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] lg:[-webkit-line-clamp:4]">
-                    {shortDescription}
-                  </p>
+                      <p className="mt-3 lg:mt-4 overflow-hidden text-sm leading-6 text-[#4f6168] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] lg:[-webkit-line-clamp:4]">
+                        {shortDescription}
+                      </p>
+                    </>
+                  )}
 
 
                   <div className="mt-3 lg:mt-5 border-t border-[#d8c8a3]/55 pt-3 lg:pt-4">
@@ -175,44 +211,45 @@ export function ChallengeDeck({
                       </button>
                     </div>
 
-                    {isSelected ? (
-                      <div className="mt-4 space-y-2">
-                        {isConfirming ? (
-                          <>
-                            <button
-                              className="w-full rounded-2xl border border-[#8d2727] bg-[#b83a31] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#fff6ef] transition hover:bg-[#9e3028] disabled:cursor-not-allowed disabled:opacity-60"
-                              data-deck-interactive="true"
-                              disabled={capturePending || locationStatus === 'unsupported' || locationStatus === 'requesting'}
-                              onClick={() => {
-                                onCaptureChallenge(challenge.id);
-                                setConfirmChallengeId(null);
-                              }}
-                              type="button"
-                            >
-                              {capturePending ? 'Claiming…' : 'Confirm Claim'}
-                            </button>
-                            <button
-                              className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#efe5cf] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#5d4d33] transition hover:bg-[#e6d8bc]"
-                              data-deck-interactive="true"
-                              onClick={() => setConfirmChallengeId(null)}
-                              type="button"
-                            >
-                              Cancel
-                            </button>
-                          </>
-                        ) : (
+                    <div className="mt-4 space-y-2">
+                      {isConfirming ? (
+                        <>
                           <button
-                            className="w-full rounded-2xl border border-[#29414b] bg-[#24343a] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#f4ead7] transition hover:bg-[#1d2b30] disabled:cursor-not-allowed disabled:border-[#8aa1a8] disabled:bg-[#8ea2a7] disabled:text-[#eef4f5]"
+                            className="w-full rounded-2xl border border-[#8d2727] bg-[#b83a31] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#fff6ef] transition hover:bg-[#9e3028] disabled:cursor-not-allowed disabled:opacity-60"
                             data-deck-interactive="true"
                             disabled={capturePending || locationStatus === 'unsupported' || locationStatus === 'requesting'}
-                            onClick={() => setConfirmChallengeId(challenge.id)}
+                            onClick={() => {
+                              onCaptureChallenge(challenge.id);
+                              setConfirmChallengeId(null);
+                            }}
                             type="button"
                           >
-                            Claim
+                            {capturePending ? 'Claiming…' : 'Confirm Claim'}
                           </button>
-                        )}
-                      </div>
-                    ) : null}
+                          <button
+                            className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#efe5cf] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#5d4d33] transition hover:bg-[#e6d8bc]"
+                            data-deck-interactive="true"
+                            onClick={() => setConfirmChallengeId(null)}
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className={[
+                            'w-full rounded-2xl border border-[#29414b] bg-[#24343a] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#f4ead7] transition hover:bg-[#1d2b30] disabled:cursor-not-allowed disabled:border-[#8aa1a8] disabled:bg-[#8ea2a7] disabled:text-[#eef4f5]',
+                            isSelected ? '' : 'invisible pointer-events-none',
+                          ].join(' ')}
+                          data-deck-interactive="true"
+                          disabled={capturePending || locationStatus === 'unsupported' || locationStatus === 'requesting'}
+                          onClick={() => setConfirmChallengeId(challenge.id)}
+                          type="button"
+                        >
+                          Claim
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </article>
                 </div>
@@ -472,4 +509,38 @@ function getConfigString(challenge: Challenge, key: string): string | null {
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[data-deck-interactive="true"]') !== null;
+}
+
+// Card width in px (13rem @ 16px base) and normal open-deck gap (gap-4 = 16px).
+const CARD_WIDTH_PX = 208;
+const CARD_GAP_PX = 16;
+
+function getCardWrapperStyle(index: number, isPeeking: boolean): CSSProperties {
+  const TRANSITION = 'transform 0.44s cubic-bezier(0.22,1,0.36,1), margin-left 0.44s cubic-bezier(0.22,1,0.36,1), opacity 0.28s ease';
+
+  const FAN = [
+    { rotate:  4, ty: 0, z: 3 },
+    { rotate: -1, ty: 3, z: 2 },
+    { rotate: -6, ty: 7, z: 1 },
+  ];
+
+  if (isPeeking) {
+    const f = FAN[Math.min(index, 2)];
+    return {
+      flexShrink: 0,
+      marginLeft: index === 0 ? 0 : -CARD_WIDTH_PX,
+      zIndex: f.z,
+      transform: `rotate(${f.rotate}deg) translateY(${f.ty}px)`,
+      opacity: index < 3 ? 1 : 0,
+      transition: TRANSITION,
+    };
+  }
+
+  return {
+    flexShrink: 0,
+    marginLeft: index === 0 ? 0 : CARD_GAP_PX,
+    zIndex: 'auto',
+    opacity: 1,
+    transition: TRANSITION,
+  };
 }
