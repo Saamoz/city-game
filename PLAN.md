@@ -97,95 +97,25 @@ All frontend phases shipped. Summary of what exists in the client:
 
 ---
 
-## Phase 39: Rate Limiting
+## Phase 39: Deployment
 
-**Goal:** Prevent abuse.
+**Goal:** Production on Render + Supabase.
 
-### Work
+### Stack
 
-- `@fastify/rate-limit` with per-endpoint limits. 429 with Retry-After
+- **Database:** Supabase project (Postgres + PostGIS built-in). Run all migrations against the Supabase connection string.
+- **API server:** Render Web Service — Node.js, `pnpm --filter @city-game/server start`. Set all env vars (DATABASE_URL, SESSION_SECRET, VAPID keys, etc.) in Render dashboard.
+- **Client:** Render Static Site — `pnpm --filter @city-game/client build`, publish dir `client/dist`. Set `VITE_API_URL` and `VITE_VAPID_PUBLIC_KEY`.
+- **WebSockets:** Render Web Services support persistent connections; Socket.IO works out of the box.
 
-### Validation
+### Deploy checklist
 
-- Vitest: limits enforced, different IPs unaffected
-
----
-
-## Phase 40: End-to-End Integration Test
-
-**Goal:** Full game scenario automated.
-
-### Work
-
-- Script: create game (with map + challenge set) → start → teams join → complete challenges → zone captures → admin override → scoreboard → end
-- Socket.IO broadcast verification, idempotency replay, delta sync, receipt atomicity
-
-### Validation
-
-- All assertions pass. Zones cloned from authored map. Challenges cloned from challenge set. Events and ownership correct.
-
----
-
-## Phase 41: Mobile Testing & Polish
-
-**Goal:** Works on real phones.
-
-### Work
-
-- iOS Safari + Android Chrome testing. Touch fixes. GPS on mobile. Poor network. Performance. Accessibility
-
-### Validation
-
-- All flows work on mobile. Lighthouse ≥ 80
-
----
-
-## Phase 42: Deployment
-
-**Goal:** Production on Proxmox.
-
-### Work
-
-- LXC, PostgreSQL + PostGIS, Node.js, Caddy, pm2, env vars, DNS
-- Integration test against production
-
-### Validation
-
-- HTTPS works. WebSocket works. GPS works. Integration test passes
-
----
-
-## Phase 43: Playtest Prep
-
-**Goal:** Game configured for real play.
-
-### Work
-
-- Chicago zones in authored map, challenge set with 20-30 challenges, GPS tuning, 4 teams, mobile flow test, join instructions
-
-### Validation
-
-- Full flow works on mobile. Instructions clear
-
----
-
-## Phase 44: Playtest & Post-Mortem
-
-**Goal:** Real game, real data, real learning.
-
-### Work
-
-- 4 teams × 3-5 players, 2-3 hours. Location tracking enabled
-- Post-game: events, samples, receipts, overrides, player survey
-- Document issues, priorities for next iteration
-
-### Validation
-
-- Game ran. Players could play. Issues documented. Post-mortem completed
-
----
-
-*Ship V1 by completing all phases. Each phase is independently testable.*
+1. Create Supabase project → enable PostGIS extension → run migrations
+2. Create Render Web Service → point to repo → set build/start commands + env vars
+3. Create Render Static Site → set build command + `VITE_API_URL` pointing to the web service URL
+4. Verify HTTPS, WebSocket upgrade, and GPS (requires HTTPS on mobile)
+5. Smoke-test: create game → join → capture zone → scoreboard
+6. Set up Chicago authored map + challenge set for first real game
 ---
 
 ## Future Work
