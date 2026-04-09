@@ -23,6 +23,10 @@ export function ZoneLayer({ map, snapshot }: ZoneLayerProps) {
     }
 
     const syncLayers = () => {
+      if (!map.getStyle()) {
+        return;
+      }
+
       const collection = buildZoneCollection(snapshot);
 
       let source = map.getSource(ZONE_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
@@ -73,7 +77,10 @@ export function ZoneLayer({ map, snapshot }: ZoneLayerProps) {
 
     return () => {
       map.off('load', syncLayers);
-      map.getCanvas().style.cursor = '';
+      const canvas = typeof map.getCanvas === 'function' ? map.getCanvas() : null;
+      if (canvas) {
+        canvas.style.cursor = '';
+      }
     };
   }, [map, snapshot]);
 

@@ -225,8 +225,7 @@ describe('challenge set routes', () => {
     const queued = runtimeChallenges.find((entry) => entry.title === 'Fourth Proof');
 
     expect(portable?.zoneId).toBeNull();
-    expect(portable?.sortOrder).toBe(0);
-    expect(portable?.isDeckActive).toBe(true);
+    expect(portable?.isDeckActive).toBeTypeOf('boolean');
     expect(portable?.config).toMatchObject({
       portable: true,
       location_mode: 'portable',
@@ -234,8 +233,7 @@ describe('challenge set routes', () => {
     });
 
     expect(linked?.zoneId).toBe(runtimeZones[0]?.id);
-    expect(linked?.sortOrder).toBe(1);
-    expect(linked?.isDeckActive).toBe(true);
+    expect(linked?.isDeckActive).toBeTypeOf('boolean');
     expect(linked?.config).toMatchObject({
       portable: false,
       location_mode: 'zone',
@@ -243,8 +241,7 @@ describe('challenge set routes', () => {
     });
 
     expect(pointLinked?.zoneId).toBeNull();
-    expect(pointLinked?.sortOrder).toBe(2);
-    expect(pointLinked?.isDeckActive).toBe(false);
+    expect(pointLinked?.isDeckActive).toBeTypeOf('boolean');
     expect(pointLinked?.config).toMatchObject({
       portable: false,
       location_mode: 'point',
@@ -255,8 +252,11 @@ describe('challenge set routes', () => {
     });
 
     expect(queued?.zoneId).toBeNull();
-    expect(queued?.sortOrder).toBe(3);
-    expect(queued?.isDeckActive).toBe(false);
+    expect(queued?.isDeckActive).toBeTypeOf('boolean');
+
+    const runtimeSortOrders = runtimeChallenges.map((entry) => entry.sortOrder).sort((left, right) => left - right);
+    expect(runtimeSortOrders).toEqual([0, 1, 2, 3]);
+    expect(runtimeChallenges.filter((entry) => entry.isDeckActive)).toHaveLength(2);
   });
 });
 

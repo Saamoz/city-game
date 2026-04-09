@@ -58,7 +58,6 @@ interface GameFormState {
   winConditionType: WinConditionKind;
   zoneMajorityThreshold: string;
   timeLimitMinutes: string;
-  claimTimeoutMinutes: string;
   activeChallengeCount: string;
   requireGpsAccuracy: boolean;
 }
@@ -77,7 +76,6 @@ const INITIAL_GAME_FORM: GameFormState = {
   winConditionType: 'all_zones',
   zoneMajorityThreshold: '60',
   timeLimitMinutes: '60',
-  claimTimeoutMinutes: '20',
   activeChallengeCount: '3',
   requireGpsAccuracy: false,
 };
@@ -682,16 +680,6 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                     ))}
                   </select>
                 </Field>
-                <Field label="Claim Timeout (minutes)">
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={gameForm.claimTimeoutMinutes}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, claimTimeoutMinutes: event.target.value })); }}
-                    className={inputClassName}
-                  />
-                </Field>
                 <Field label="Active Deck Size">
                   <input
                     type="number"
@@ -1040,7 +1028,6 @@ function buildGameForm(game: Game): GameFormState {
     winConditionType: winCondition.type,
     zoneMajorityThreshold: winCondition.type === 'zone_majority' ? String(winCondition.threshold) : '60',
     timeLimitMinutes: winCondition.type === 'time_limit' ? String(winCondition.duration_minutes) : '60',
-    claimTimeoutMinutes: String(settings.claim_timeout_minutes ?? 20),
     activeChallengeCount: String(settings.active_challenge_count ?? 3),
     requireGpsAccuracy: Boolean(settings.require_gps_accuracy),
   };
@@ -1073,7 +1060,7 @@ function buildWinCondition(form: GameFormState): WinCondition[] {
 
 function buildSettings(form: GameFormState, existing: JsonObject): JsonObject {
   const next: JsonObject = { ...existing };
-  next.claim_timeout_minutes = Math.max(1, Number(form.claimTimeoutMinutes) || 1);
+  delete next.claim_timeout_minutes;
   next.active_challenge_count = Math.max(1, Number(form.activeChallengeCount) || 1);
   next.require_gps_accuracy = form.requireGpsAccuracy;
   return next;

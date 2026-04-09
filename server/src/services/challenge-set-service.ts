@@ -220,6 +220,8 @@ export async function cloneChallengeSetToGame(
     return 0;
   }
 
+  const shuffledItems = shuffleChallengeSetItems(items);
+
   const runtimeZoneRows = await db.select({ id: zones.id, metadata: zones.metadata }).from(zones).where(eq(zones.gameId, gameId));
   const runtimeZoneIdByMapZoneId = new Map<string, string>();
   for (const row of runtimeZoneRows) {
@@ -233,7 +235,7 @@ export async function cloneChallengeSetToGame(
 
   const insertedChallengeIds: string[] = [];
 
-  for (const item of items) {
+  for (const [runtimeSortOrder, item] of shuffledItems.entries()) {
     let runtimeZoneId: string | null = null;
     if (item.mapZoneId) {
       runtimeZoneId = runtimeZoneIdByMapZoneId.get(item.mapZoneId) ?? null;
@@ -269,7 +271,7 @@ export async function cloneChallengeSetToGame(
       completionMode: item.completionMode,
       scoring: item.scoring,
       difficulty: item.difficulty,
-      sortOrder: item.sortOrder,
+      sortOrder: runtimeSortOrder,
       isDeckActive: false,
       status: 'available',
     }).returning({ id: challenges.id });
@@ -286,6 +288,19 @@ export async function cloneChallengeSetToGame(
   }
 
   return items.length;
+}
+
+function shuffleChallengeSetItems(items: ChallengeSetItem[]): ChallengeSetItem[] {
+  const shuffled = [...items];
+
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const current = shuffled[index];
+    shuffled[index] = shuffled[swapIndex]!;
+    shuffled[swapIndex] = current!;
+  }
+
+  return shuffled;
 }
 
 function getLocationMode(item: { mapZoneId: string | null; mapPoint: GeoJsonPoint | null }): 'portable' | 'zone' | 'point' {

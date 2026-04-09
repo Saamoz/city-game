@@ -101,6 +101,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const previewCollectionRef = useRef<GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject> | null>(null);
   const modeRef = useRef<EditorMode>('select');
   const splitZoneIdRef = useRef<string | null>(null);
+  const suppressZoneSelectionUntilRef = useRef(0);
   const mergeTargetIdRef = useRef<string | null>(null);
   const mergePickModeRef = useRef(false);
   const editSessionRef = useRef<{ editingZoneId: string | null; draftActive: boolean }>({ editingZoneId: null, draftActive: false });
@@ -166,6 +167,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     setEditingGeometryZoneId(null);
     setMode('select');
     splitZoneIdRef.current = null;
+    suppressZoneSelectionUntilRef.current = 0;
   }, []);
 
   const syncMapSources = useCallback(() => {
@@ -299,6 +301,10 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     snapMarkerRef.current = snapMarker;
 
     const handleMapClick = (event: mapboxgl.MapMouseEvent) => {
+      if (modeRef.current === 'split' || Date.now() < suppressZoneSelectionUntilRef.current) {
+        return;
+      }
+
       if (editSessionRef.current.draftActive || editSessionRef.current.editingZoneId || !map.isStyleLoaded()) return;
 
       const feature = map.queryRenderedFeatures(event.point, {
@@ -332,6 +338,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
         const zoneId = splitZoneIdRef.current;
         if (!zoneId) { drawRef.current?.deleteAll(); setMode('select'); return; }
         drawRef.current?.deleteAll();
+        suppressZoneSelectionUntilRef.current = Date.now() + 450;
         setMode('select');
         splitZoneIdRef.current = null;
         setIsSplitting(true);
@@ -540,6 +547,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const handleStartSplit = () => {
     if (!selectedZone || !drawRef.current) return;
     splitZoneIdRef.current = selectedZone.id;
+    suppressZoneSelectionUntilRef.current = Number.POSITIVE_INFINITY;
     setMode('split');
     setMergeTargetId(null);
     setIsMergePickMode(false);

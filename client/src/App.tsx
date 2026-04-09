@@ -102,6 +102,7 @@ export function App() {
 
   return (
     <JoinFlow
+      key={`join:${route.gameId ?? 'active'}:${suppressAutoEnter ? 'suppressed' : 'auto'}`}
       initialGameId={route.gameId}
       onEnterGame={handleEnterGame}
       suppressAutoEnter={suppressAutoEnter}
