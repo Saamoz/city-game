@@ -807,7 +807,7 @@ Utilitarian. The admin panel prioritizes speed and clarity over visual personali
 /admin                 Admin panel — game lifecycle + teams + overrides (Phase 35)
 ```
 
-### Main Game View — Current Structure (Phase 31)
+### Main Game View — Current Structure
 
 ```
 <GameView>
@@ -815,27 +815,34 @@ Utilitarian. The admin panel prioritizes speed and clarity over visual personali
 │   ├── <ZoneLayer>             Colored polygons, owner-team fills
 │   └── <PlayerLocationMarker>  Pulsing blue dot (live GPS)
 │
-├── Mobile HUD (sm:hidden)
-│   ├── Top bar                 Zone pill (current zone name) + ☰ menu button
-│   └── Pill button             "Field Deck ▲" floating bottom-right (when deck closed)
+├── Mobile HUD (lg:hidden)
+│   ├── Top bar                 Team pill + zone count + zone name + ☰ menu button
+│   └── Card fan peek           3 cards fanned at screen bottom (72px visible)
+│                               Tap or swipe up → springs open to full deck
+│                               Front card shows "Challenge Deck" when closed
 │
-├── Desktop HUD (hidden sm:flex, left column)
+├── Desktop HUD (hidden lg:flex, left column)
 │   ├── Field Brief card        Game name, team name/color, zone context
-│   ├── GPS status pill         live / requesting / error
+│   ├── MiniScoreboardCard      Top-3 standings, Feed + Standings buttons
+│   ├── StatusCard trio         Controlled / Deck / Version counts
 │   ├── <ChallengeDeck>         Horizontal card tray with Prev/Next + counts
-│   ├── Completed cards section Archived card shapes with team attribution
 │   └── Back to Lobby button
 │
-├── Mobile Deck overlay (sm:hidden, slides up from bottom)
-│   ├── Drag handle             h-1 w-10 amber pill — swipe target
-│   ├── <ChallengeDeck>         Bare card tray, no chrome, pan-x scroll
-│   └── Completed tray          Expands below deck on swipe-up (max-h 14rem)
+├── Mobile Deck (lg:hidden, fixed bottom, always mounted)
+│   ├── Peek state              Cards fanned, translateY to show 72px tops
+│   │                           pointer-events only on the w-fit card stack
+│   ├── Open state              Cards spread side-by-side, panel chrome visible
+│   │   ├── Drag handle         h-1 w-10 amber pill
+│   │   ├── <ChallengeDeck>     pan-x scroll tray
+│   │   └── Completed tray      Expands below deck on swipe-up (max-h 14rem)
+│   └── Swipe down → collapses back to fan, deselects card
 │
-├── Mobile Menu overlay (fixed inset-0, z-50)
-│   ├── Backdrop                semi-opaque, tap to close
-│   └── Bottom sheet            Game name, player name, team, Back to Lobby
+├── Mobile Menu (pointer-events-none wrapper, bottom sheet)
+│   └── Game name, player name, team · Standings / Feed / Back to Lobby
 │
-└── <NotificationToast>         Error/success toasts (bottom center)
+├── ScoreboardOverlay / FeedOverlay   pointer-events-none backdrop, sheet only
+│
+└── <Toast>                     Error/success toasts (bottom center, 4.2s)
 ```
 
 ### Challenge Card (Mobile)
@@ -860,17 +867,17 @@ Cards are `13rem` wide (`17rem` desktop), `rounded-[1.4rem]`, warm cream backgro
 
 ### Swipe Gestures (Mobile Deck)
 
-The deck wrapper has `touch-action: none` to prevent viewport pan during swipe:
+Card fan uses `touch-action: none`. Map remains fully interactive behind the closed fan — only the `w-fit` card stack catches pointer events.
 
-| Gesture | Threshold | Result |
-|---|---|---|
-| Swipe down | >80px, or >30px + velocity >0.5 | Close deck (spring animation) |
-| Swipe up | >50px, or >20px + velocity <-0.4 | Show completed tray |
-| Swipe up (tray visible) | same | No-op (tray already visible) |
-| Swipe down (tray visible) | >30px | Dismiss tray first, then next swipe closes |
-| Release mid-swipe | below threshold | Snap back |
+| Gesture | State | Threshold | Result |
+|---|---|---|---|
+| Tap or swipe up | Peeking | dy < −20px or no move | Open: cards spring apart + panel rises |
+| Swipe down | Open | >80px, or >30px + velocity >0.5 | Close to fan, deselect card |
+| Swipe up | Open | >50px, or >20px + velocity <−0.4 | Show completed tray |
+| Swipe down | Open, tray visible | >80px | Dismiss tray first |
+| Release mid-swipe | Open | below threshold | Snap back |
 
-Resistance: `deltaY * 0.25` on upward overscroll (deck is already at top). Deck close is two-stage: `setDeckDragY(500)` immediately, then `setIsDeckOpen(false)` after 400ms so pill button only appears after animation finishes.
+Open/close animation: wrapper `translateY` and card `marginLeft` transition simultaneously on the same 0.44s spring (`cubic-bezier(0.22,1,0.36,1)`), producing a diagonal spread/collapse motion. Resistance: `deltaY * 0.25` on upward overscroll when open.
 
 ### GPS Flow
 
@@ -1037,12 +1044,13 @@ Desktop-first operational UI. The admin panel intentionally uses utilitarian con
 
 ---
 
-### Phase 36 — PWA
+### Push Notifications (Phase 38)
 
-- `manifest.json`: name "Territory", short_name "Territory", `display: standalone`, theme color amber `#c8b48a`, background color cream `#f5f0e8`, icons at 192px and 512px.
-- Service worker: cache-first for app shell (HTML, JS, CSS), network-first for API calls. Offline shows a cached "You're offline — reconnect to play" screen.
-- Push notifications: `POST /players/me/push-subscribe` stores VAPID subscription. Server triggers push on zone capture by a rival team. Notification body: "Team X captured Zone Y". Tapping opens the game view.
-- Zustand state persisted to `localStorage` (game ID, player ID, team ID) so returning players skip the join flow.
+- Minimal push-only service worker at `client/public/sw.js` — handles `push` and `notificationclick` only. No manifest, no caching, no offline behaviour.
+- App registers the service worker on mount. Lobby shows a soft-ask banner after team join (when push is supported and permission is not yet denied).
+- `Not now` is persisted per `gameId + playerId` in localStorage. `Enable` requests browser permission, subscribes with `VITE_VAPID_PUBLIC_KEY`, posts to `POST /players/me/push-subscribe`.
+- Server triggers push on rival zone capture: title "Territory", body "[Team] captured [Zone]".
+- Join flow state (`home | team_picker | lobby | countdown`) is persisted in Zustand + localStorage so returning players resume at the correct step.
 
 ---
 

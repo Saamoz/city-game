@@ -11,8 +11,8 @@ Running handoff log. Keep short, high-signal notes here: environment quirks, imp
 - Repo: `E:\city game` / WSL: `/mnt/e/city game`
 - Remote: `origin -> https://github.com/Saamoz/city-game.git`
 - Branch: `master`
-- Date: 2026-04-04
-- Stage: **Phases 36–38 complete locally. Join flow + pre-game lobby + countdown live. Active challenge window live. Optional push notifications are wired from the lobby soft-ask through to `/players/me/push-subscribe`. Phase 39 next: Rate Limiting.**
+- Date: 2026-04-08
+- Stage: **Phases 36–38 complete. Overlay UX overhaul + card fan deck complete (see Phase 39 UX Notes below). Phase 39 backend next: Rate Limiting.**
 
 ---
 
@@ -100,7 +100,7 @@ Dev seed join codes: Winnipeg `RED12345`/`BLUE1234`/`GOLD1234`, Chicago `CHIBLUE
 
 See the Phases 28–35 summary block above and the git log for full detail. Key decisions worth keeping:
 
-- **Phase 31:** `useIdempotentAction` deduplicates in-flight calls by key. Swipe thresholds: close deltaY > 80px or deltaY > 30px + velocity > 0.5 px/ms; reveal-completed deltaY < −50px or deltaY < −20px + velocity < −0.4 px/ms. Resistance factor on upward overscroll: 0.25×. Deck close is two-stage (spring eject then pill reappear after 400ms).
+- **Phase 31:** `useIdempotentAction` deduplicates in-flight calls by key. Original deck used a pill button toggle; swipe gestures and thresholds established here (close >80px, reveal-completed <−50px). See Phase 39 UX Notes for the card fan overhaul that superseded the pill button.
 - **Phase 32:** Feed suppresses per-player / per-challenge duplicate narration for captures — shows team control outcome only. Standings/feed/hamburger sheet all support swipe-down-to-close. Completed cards pan map to captured zone on click.
 - **Phase 33:** `sanitizeFeatureCollection()` strips `id`/`crs` fields rejected by Fastify strict schema. Fastify body limit raised to 50 MB. Authored-map routes bypass idempotency middleware (no `game_id` FK on `action_receipts`). Distance tool deferred to Future Work.
 - **Phase 34:** Point-linked authored items store GeoJSON point in `challenge_set_items.config.map_point`. Admin UI no longer exposes `kind` or `completionMode` — backend defaults to `text` / `self_report`. Full server suite has nondeterministic test-DB contamination on reruns (pre-existing, unrelated to Phase 34 code).
@@ -133,4 +133,21 @@ See the Phases 28–35 summary block above and the git log for full detail. Key 
 - App now registers the service worker on mount. Lobby shows a soft-ask banner after team join when push is supported, permission is not denied, and the current player has no stored subscription.
 - `Not now` is persisted per `gameId + playerId` in local storage. `Enable` requests browser permission, subscribes with `VITE_VAPID_PUBLIC_KEY`, and posts the serialized `PushSubscription` to `/players/me/push-subscribe`.
 - If permission is denied or the browser lacks Push/ServiceWorker support, the lobby proceeds silently with no blocking UI.
-- Validation that passed: `pnpm --filter @city-game/client exec tsc -b --pretty false`, `pnpm --filter @city-game/client build`, `pnpm -r typecheck`, `pnpm -r build`.
+
+## Phase 39 UX Notes
+
+Significant mobile game view UX overhaul shipped before backend Phase 39 (rate limiting).
+
+**Overlay fixes (commit c53ff14):**
+- Scoreboard, Feed, and hamburger menu bottom sheets could not be swiped to close. Root cause: `setPointerCapture` was called lazily in `pointermove` instead of `pointerdown`, and `onPointerMoveCapture` on the container was intercepting events in React's capture phase before they reached the drag handle. Fixed both.
+- All three overlays now use `pointer-events-none` on the backdrop wrapper — map stays fully interactive behind open overlays.
+- Removed `onPointerMoveCapture` / `onTouchMoveCapture` stop-propagation calls (never affected Mapbox, which uses native DOM events).
+- Tightened UI density throughout: smaller padding, reduced max-height (88vh → 72vh), smaller type.
+
+**Card fan deck (commit 80266ba):**
+- Replaced the "Field Deck ▲" pill button with a persistent card fan that peeks 72px above the screen bottom.
+- Three cards stack using negative `marginLeft` with fan rotations. Front card shows "Challenge Deck" centered; other cards hidden beneath.
+- Tap or swipe up → cards spread to full open deck. `marginLeft` and wrapper `translateY` animate simultaneously on the same 0.44s spring, producing a diagonal motion.
+- Swipe down when open → collapses to fan, deselects selected card.
+- Outer wrapper `pointer-events-none`; peek container `pointer-events-none`; only the `w-fit` card stack is interactive — map fully usable beside and below the fan.
+- Claim button always rendered (invisible when not selected) to prevent card resize on selection.
