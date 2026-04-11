@@ -1395,6 +1395,10 @@ function buildZoneCollection(
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
 
+function sanitizeGeometry(geometry: GeoJsonGeometry): GeoJsonGeometry {
+  return { type: geometry.type, coordinates: (geometry as { type: string; coordinates: unknown }).coordinates } as GeoJsonGeometry;
+}
+
 function sanitizeFeatureCollection(
   collection: GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject>,
 ): GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject> {
@@ -1402,7 +1406,7 @@ function sanitizeFeatureCollection(
     type: 'FeatureCollection',
     features: collection.features.map((f) => ({
       type: 'Feature' as const,
-      geometry: f.geometry,
+      geometry: sanitizeGeometry(f.geometry),
       properties: f.properties ?? {},
     })),
   };
