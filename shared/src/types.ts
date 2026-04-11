@@ -6,9 +6,9 @@ import {
   GAME_MODE_KEYS,
   GAME_STATUS_VALUES,
   PLAYER_LOCATION_SOURCE_VALUES,
-} from './constants';
-import type { GameEventType } from './events';
-import type { ResourceType } from './resources';
+} from './constants.js';
+import type { GameEventType } from './events.js';
+import type { ResourceType } from './resources.js';
 
 export type Uuid = string;
 export type IsoTimestamp = string;
