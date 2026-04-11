@@ -1,4 +1,4 @@
-import type { ResourceType } from './resources';
+import type { ResourceType } from './resources.ts';
 import type {
   Annotation,
   Challenge,
@@ -12,7 +12,7 @@ import type {
   ResourceLedgerEntry,
   Team,
   Zone,
-} from './types';
+} from './types.ts';
 
 export const engineEventTypes = {
   gameStarted: 'GAME_STARTED',
