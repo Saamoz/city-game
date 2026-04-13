@@ -6,6 +6,7 @@ import type { OsmPreviewProperties } from '../services/osm-import-service.js';
 import {
   createMap,
   createMapZone,
+  deleteMapById,
   deleteMapZoneById,
   getMapByIdOrThrow,
   getMapZoneById,
@@ -304,6 +305,20 @@ export const mapRoutes: FastifyPluginAsync = async (app) => {
 
       const map = await updateMap(app.db, id, body);
       reply.send({ map });
+    },
+  );
+
+  app.delete(
+    '/maps/:id',
+    {
+      schema: {
+        params: mapParamsSchema,
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const deleted = await deleteMapById(app.db, id);
+      reply.send({ deletedMapId: deleted ? id : null });
     },
   );
 

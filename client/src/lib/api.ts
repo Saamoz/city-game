@@ -304,6 +304,12 @@ export async function updateMapDefinition(mapId: string, input: Partial<MapUpser
   return response.map;
 }
 
+export async function deleteMapDefinition(mapId: string): Promise<void> {
+  await apiRequest<null>('/maps/' + mapId, {
+    method: 'DELETE',
+  });
+}
+
 export async function listMapZones(mapId: string, signal?: AbortSignal): Promise<MapZone[]> {
   const response = await apiRequest<MapZonesResponse>('/maps/' + mapId + '/zones', { signal });
   return response.zones;

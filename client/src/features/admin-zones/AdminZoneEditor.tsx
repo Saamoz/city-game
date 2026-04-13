@@ -17,6 +17,7 @@ import {
   ApiError,
   createMapDefinition,
   createMapZoneDefinition,
+  deleteMapDefinition,
   deleteMapZoneDefinition,
   getMap,
   importMapZoneDefinitions,
@@ -119,6 +120,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const [geometryDraft, setGeometryDraft] = useState<GeoJsonGeometry | null>(null);
   const [editingGeometryZoneId, setEditingGeometryZoneId] = useState<string | null>(null);
   const [isSavingMap, setIsSavingMap] = useState(false);
+  const [isDeleteMapArmed, setIsDeleteMapArmed] = useState(false);
   const [isSavingZone, setIsSavingZone] = useState(false);
   const [isDeleteArmed, setIsDeleteArmed] = useState(false);
   const [previewCollection, setPreviewCollection] = useState<GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject> | null>(null);
@@ -150,6 +152,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     if (!currentMap) return;
     setMapForm(buildFormFromMap(currentMap));
     setOsmCity(currentMap.city ?? '');
+    setIsDeleteMapArmed(false);
     if (typeof window !== 'undefined') {
       window.history.replaceState({}, '', '/admin/zones?mapId=' + encodeURIComponent(currentMap.id));
     }
@@ -499,6 +502,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     }
     setCurrentMap(null);
     setZones([]);
+    setIsDeleteMapArmed(false);
     setSelectedZoneId(null);
     setZoneForm(INITIAL_ZONE_FORM);
     setMapForm(INITIAL_MAP_FORM);
@@ -576,6 +580,34 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     setEditingGeometryZoneId(selectedZone.id);
     setGeometryDraft(selectedZone.geometry);
     setNotice({ tone: 'info', message: 'Drag vertices to reshape. Click a vertex then press Delete/Backspace to remove it. Save when done.' });
+  };
+
+  const handleDeleteMap = async () => {
+    if (!currentMap) return;
+    if (hasGeometrySession) {
+      setNotice({ tone: 'info', message: 'Cancel the active geometry session before deleting a map.' });
+      return;
+    }
+    if (!isDeleteMapArmed) {
+      setIsDeleteMapArmed(true);
+      return;
+    }
+
+    setIsSavingMap(true);
+    setNotice(null);
+    try {
+      const deletedMapId = currentMap.id;
+      await deleteMapDefinition(deletedMapId);
+      const remainingMaps = maps.filter((mapItem) => mapItem.id !== deletedMapId);
+      const fallbackMapId = remainingMaps[0]?.id ?? null;
+      setIsDeleteMapArmed(false);
+      await loadMapBundle(fallbackMapId);
+      setNotice({ tone: 'success', message: 'Map deleted.' });
+    } catch (error) {
+      setNotice({ tone: 'error', message: getApiErrorMessage(error) });
+    } finally {
+      setIsSavingMap(false);
+    }
   };
 
   const handleSaveMap = async () => {
@@ -892,11 +924,19 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                     />
                   </Field>
                 ) : null}
-                <ActionButton
-                  onClick={() => void handleSaveMap()}
-                  label={isSavingMap ? 'Saving…' : (currentMap ? 'Save Map' : 'Create Map')}
-                  disabled={isSavingMap}
-                />
+                <div className="grid grid-cols-2 gap-2">
+                  <ActionButton
+                    onClick={() => void handleSaveMap()}
+                    label={isSavingMap ? 'Saving…' : (currentMap ? 'Save Map' : 'Create Map')}
+                    disabled={isSavingMap}
+                  />
+                  <ActionButton
+                    onClick={() => void handleDeleteMap()}
+                    label={isDeleteMapArmed ? 'Confirm Delete' : 'Delete Map'}
+                    disabled={!currentMap || isSavingMap}
+                    tone="danger"
+                  />
+                </div>
               </Panel>
 
               {/* Drawing Tools */}

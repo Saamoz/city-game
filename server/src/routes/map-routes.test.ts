@@ -63,6 +63,60 @@ describe('map routes', () => {
     expect(updateResponse.json().map.name).toBe('Toronto Template Updated');
   });
 
+  it('deletes a reusable map and its authored zones', async () => {
+    app = await createTestApp({ db: testDatabase.db, pool: testDatabase.pool });
+
+    const createMapResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/maps',
+      headers: idempotencyHeaders('create-map-delete-route'),
+      payload: {
+        name: 'Delete Me',
+        city: 'Toronto',
+        centerLat: 43.6532,
+        centerLng: -79.3832,
+        defaultZoom: 11,
+      },
+    });
+
+    const mapId = createMapResponse.json().map.id as string;
+
+    const createZoneResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/maps/${mapId}/zones`,
+      headers: idempotencyHeaders('create-map-zone-delete-route'),
+      payload: {
+        name: 'Zone Delete',
+        geometry: createSquarePolygon(-79.3832, 43.6532, 0.01),
+      },
+    });
+
+    expect(createZoneResponse.statusCode).toBe(201);
+
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/maps/${mapId}`,
+      headers: idempotencyHeaders('delete-map-route'),
+    });
+
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(deleteResponse.json()).toEqual({ deletedMapId: mapId });
+
+    const listMapsResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/maps',
+    });
+
+    expect(listMapsResponse.json().maps.some((map: { id: string }) => map.id === mapId)).toBe(false);
+
+    const listZonesResponse = await app.inject({
+      method: 'GET',
+      url: `/api/v1/maps/${mapId}/zones`,
+    });
+
+    expect(listZonesResponse.statusCode).toBe(404);
+  });
+
   it('imports, splits, and merges authored map zones', async () => {
     app = await createTestApp({ db: testDatabase.db, pool: testDatabase.pool });
 

@@ -2,7 +2,7 @@ import { asc, eq, inArray, sql } from 'drizzle-orm';
 import type { GeoJsonGeometry, GeoJsonPoint, JsonObject, MapDefinition, MapZone } from '@city-game/shared';
 import { errorCodes } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
-import { mapZones, maps, zones } from '../db/schema.js';
+import { games, mapZones, maps, zones } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 
 interface MapRow {
@@ -123,6 +123,22 @@ export async function updateMap(db: DatabaseClient, mapId: string, input: MapUpd
   }).where(eq(maps.id, mapId));
 
   return getMapByIdOrThrow(db, mapId);
+}
+
+export async function deleteMapById(db: DatabaseClient, mapId: string): Promise<boolean> {
+  await getMapByIdOrThrow(db, mapId);
+
+  const linkedGames = await db.select({ id: games.id }).from(games).where(eq(games.mapId, mapId)).limit(1);
+  if (linkedGames.length > 0) {
+    throw new AppError(errorCodes.validationError, {
+      message: 'Map is already assigned to one or more games and cannot be deleted.',
+      details: { mapId },
+    });
+  }
+
+  await db.delete(mapZones).where(eq(mapZones.mapId, mapId));
+  const [deleted] = await db.delete(maps).where(eq(maps.id, mapId)).returning({ id: maps.id });
+  return Boolean(deleted);
 }
 
 export async function listMapZones(db: DatabaseClient, mapId: string): Promise<MapZone[]> {
