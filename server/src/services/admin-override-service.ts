@@ -297,6 +297,10 @@ export async function adminMovePlayerTeam(
     .update(players)
     .set({
       teamId: input.teamId,
+      metadata: {
+        ...(player.metadata as JsonObject),
+        lobby_ready: false,
+      },
     })
     .where(eq(players.id, player.id))
     .returning();

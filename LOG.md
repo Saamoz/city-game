@@ -134,6 +134,12 @@ See the Phases 28–35 summary block above and the git log for full detail. Key 
 - `Not now` is persisted per `gameId + playerId` in local storage. `Enable` requests browser permission, subscribes with `VITE_VAPID_PUBLIC_KEY`, and posts the serialized `PushSubscription` to `/players/me/push-subscribe`.
 - If permission is denied or the browser lacks Push/ServiceWorker support, the lobby proceeds silently with no blocking UI.
 
+## Lobby Start Notes
+
+- Non-admin game start is now available from the pre-game lobby. `POST /players/me/ready` stores readiness in `players.metadata.lobby_ready`; `POST /players/me/start-game` validates that every teamed player is ready, then reuses the existing lifecycle start transition.
+- Team join, leave, and admin-driven team moves all force `lobby_ready` back to `false` so a stale ready flag cannot carry across team changes.
+- Lobby realtime still uses the existing `player_joined` event for roster refresh. Ready toggles broadcast through that same event, which keeps the client changes small and avoids adding another socket event for one lobby-only concern.
+
 ## Phase 39 UX Notes
 
 Significant mobile game view UX overhaul shipped before backend Phase 39 (rate limiting).

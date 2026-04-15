@@ -404,6 +404,21 @@ export async function leaveCurrentTeam(): Promise<Player> {
   return response.player;
 }
 
+export async function setCurrentPlayerReady(ready: boolean): Promise<Player> {
+  const response = await apiRequest<PlayerResponse>('/players/me/ready', {
+    method: 'POST',
+    body: { ready },
+  });
+  return response.player;
+}
+
+export async function startLobbyGame(): Promise<Game> {
+  const response = await apiRequest<GameResponse>('/players/me/start-game', {
+    method: 'POST',
+  });
+  return response.game;
+}
+
 export async function subscribeCurrentPlayerPush(pushSubscription: PushSubscriptionData): Promise<Player> {
   const response = await apiRequest<PlayerResponse>('/players/me/push-subscribe', {
     method: 'POST',

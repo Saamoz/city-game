@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { socketServerEventTypes, type Game, type MapDefinition, type MapZone, type Player, type SocketEventPayloadMap, type Team } from '@city-game/shared';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { socketServerEventTypes, type Game, type MapDefinition, type MapZone, type Player, type SocketEventPayloadMap, type Team, type Zone } from '@city-game/shared';
 import {
   ApiError,
   getActiveGame,
@@ -11,9 +11,13 @@ import {
   leaveCurrentTeam,
   listMapZones,
   listPlayers,
+  listZones,
   registerPlayer,
+  setCurrentPlayerReady,
+  startLobbyGame,
   subscribeCurrentPlayerPush,
 } from '../../lib/api';
+import { buildRenderedZoneGeometry, collectGeometryPositions } from '../game/mapGeometry';
 import {
   getNotificationPermission,
   subscribeToPushNotifications,
@@ -34,6 +38,8 @@ interface JoinFlowProps {
 type LoadStatus = 'loading' | 'ready' | 'empty' | 'error';
 type PushPromptState = 'hidden' | 'ready' | 'subscribing' | 'enabled';
 
+const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env.MAPBOX_ACCESS_TOKEN ?? '').trim();
+
 export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: JoinFlowProps) {
   const persistedStep = useJoinFlowStore((state) => state.step);
   const persistedDisplayName = useJoinFlowStore((state) => state.displayName);
@@ -47,10 +53,13 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
   const [players, setPlayers] = useState<Player[]>([]);
   const [mapDefinition, setMapDefinition] = useState<MapDefinition | null>(null);
   const [mapZones, setMapZones] = useState<MapZone[]>([]);
+  const [spectatorZones, setSpectatorZones] = useState<Zone[]>([]);
   const [name, setName] = useState(persistedDisplayName);
   const [submitting, setSubmitting] = useState<'register' | null>(null);
   const [joiningTeamId, setJoiningTeamId] = useState<string | null>(null);
   const [isLeavingTeam, setIsLeavingTeam] = useState(false);
+  const [readyPending, setReadyPending] = useState(false);
+  const [startPending, setStartPending] = useState(false);
   const [step, setStep] = useState(persistedStep);
   const [countdownActive, setCountdownActive] = useState(false);
   const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
@@ -82,6 +91,16 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
 
     setMapDefinition(nextMap);
     setMapZones(nextZones);
+  }, []);
+
+  const loadSpectatorAssets = useCallback(async (gameId: string, signal?: AbortSignal) => {
+    const [nextTeams, nextZones] = await Promise.all([
+      getTeams(gameId, signal),
+      listZones(gameId, signal),
+    ]);
+
+    setTeams(nextTeams);
+    setSpectatorZones(nextZones);
   }, []);
 
   const hydrate = useCallback(async (signal?: AbortSignal) => {
@@ -129,12 +148,15 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
       }
 
       if (resolvedGame.status !== 'setup') {
+        await loadSpectatorAssets(resolvedGame.id, signal);
         setStatus('ready');
         setStep('home');
         if (resolvedGame.status === 'active' && currentPlayer?.teamId) {
           setMessage('Game in progress. Return to the live map when you are ready.');
+        } else if (resolvedGame.status === 'active') {
+          setMessage('Spectating the live game.');
         } else {
-          setMessage('No game is currently accepting players.');
+          setMessage('Game finished. Spectator map remains available.');
         }
         return;
       }
@@ -184,6 +206,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
         setPlayers([]);
         setMapDefinition(null);
         setMapZones([]);
+        setSpectatorZones([]);
         setStep('home');
         setMessage('No active game is running right now.');
         return;
@@ -192,7 +215,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
       setStatus('error');
       setMessage(getErrorMessage(error, 'Failed to load the current game.'));
     }
-  }, [initialGameId, loadMapAssets, loadRoster, onEnterGame, setSession, suppressAutoEnter]);
+  }, [initialGameId, loadMapAssets, loadRoster, loadSpectatorAssets, onEnterGame, setSession, suppressAutoEnter]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -403,6 +426,47 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
     }
   }
 
+  async function handleSetReady(ready: boolean) {
+    if (!player || readyPending) {
+      return;
+    }
+
+    setReadyPending(true);
+    setMessage(null);
+
+    try {
+      const nextPlayer = await setCurrentPlayerReady(ready);
+      setPlayer(nextPlayer);
+      setPlayers((currentPlayers) => upsertPlayer(currentPlayers, nextPlayer));
+    } catch (error) {
+      setMessage(getErrorMessage(error, ready ? 'Unable to mark ready right now.' : 'Unable to mark not ready right now.'));
+    } finally {
+      setReadyPending(false);
+    }
+  }
+
+  async function handleStartGame() {
+    if (!game || !player || startPending) {
+      return;
+    }
+
+    setStartPending(true);
+    setMessage(null);
+
+    try {
+      const updatedGame = await startLobbyGame();
+      countdownStartedRef.current = true;
+      setGame(updatedGame);
+      setCountdownActive(true);
+      setStep('countdown');
+      setSession({ step: 'countdown' });
+    } catch (error) {
+      setMessage(getErrorMessage(error, 'Unable to start the game right now.'));
+    } finally {
+      setStartPending(false);
+    }
+  }
+
   async function handleEnableNotifications() {
     if (!game || !player || pushPromptState === 'subscribing') {
       return;
@@ -462,6 +526,10 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
 
   const canReturnToGame = Boolean(game && game.status === 'active' && player?.teamId);
   const canJoinCurrentGame = Boolean(game && game.status === 'setup');
+  const teamedPlayers = useMemo(() => players.filter((entry) => entry.teamId), [players]);
+  const readyPlayers = useMemo(() => teamedPlayers.filter((entry) => isLobbyReady(entry.metadata)).length, [teamedPlayers]);
+  const isCurrentPlayerReady = useMemo(() => (player ? isLobbyReady(player.metadata) : false), [player]);
+  const canStartLobbyGame = Boolean(teamedPlayers.length > 0 && readyPlayers === teamedPlayers.length);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#f5f0e8] text-[#223238]">
@@ -477,6 +545,8 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
           canReturnToGame={canReturnToGame}
           game={game}
           message={message}
+          spectatorTeams={teams}
+          spectatorZones={spectatorZones}
           name={name}
           onEnterGame={() => onEnterGame(game.id)}
           onContinue={handleContinueToTeams}
@@ -517,6 +587,14 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
             notificationPromptPending={pushPromptState === 'subscribing'}
             onEnableNotifications={handleEnableNotifications}
             onDismissNotifications={handleDismissNotifications}
+            isCurrentPlayerReady={isCurrentPlayerReady}
+            readyCount={readyPlayers}
+            readyPending={readyPending}
+            startPending={startPending}
+            totalReadyEligiblePlayers={teamedPlayers.length}
+            canStartGame={canStartLobbyGame}
+            onSetReady={handleSetReady}
+            onStartGame={handleStartGame}
           />
           <CountdownOverlay active={countdownActive} onComplete={handleCountdownComplete} />
         </>
@@ -530,6 +608,8 @@ function HomeScreen(props: {
   player: Player | null;
   name: string;
   message: string | null;
+  spectatorTeams: Team[];
+  spectatorZones: Zone[];
   submitting: boolean;
   canJoinCurrentGame: boolean;
   canReturnToGame: boolean;
@@ -540,10 +620,13 @@ function HomeScreen(props: {
 }) {
   const subtitle = props.game.city ? props.game.city : null;
   const hasRegisteredPlayer = Boolean(props.player && props.player.gameId === props.game.id);
+  const showSpectatorView = !props.canJoinCurrentGame;
 
   return (
-    <main className="flex min-h-screen flex-col bg-[#f5f0e8] px-5 py-8 sm:px-8">
-      <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col justify-between">
+    <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#f5f0e8] px-5 py-8 sm:px-8">
+      {showSpectatorView ? <SpectatorMapBackground game={props.game} teams={props.spectatorTeams} zones={props.spectatorZones} /> : null}
+      {showSpectatorView ? <div className="absolute inset-0 bg-[rgba(245,240,232,0.5)]" /> : null}
+      <div className="relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col justify-between">
         <div>
           <p className="text-center font-['IBM_Plex_Mono',monospace] text-[11px] uppercase tracking-[0.38em] text-[#8c7a57]">
             TERRITORY
@@ -595,8 +678,9 @@ function HomeScreen(props: {
               </form>
             )
           ) : (
-            <div className="mt-10 w-full max-w-lg rounded-[1.8rem] border border-[#d7c7a3] bg-[#f0ebe0] px-6 py-6 text-center shadow-[0_20px_48px_rgba(35,52,58,0.12)]">
-              <p className="text-base text-[#5b666a]">No game is currently accepting players.</p>
+            <div className="mt-10 w-full max-w-2xl rounded-[1.8rem] border border-[#d7c7a3] bg-[#f0ebe0]/94 px-6 py-6 text-center shadow-[0_20px_48px_rgba(35,52,58,0.12)] backdrop-blur">
+              <p className="text-[11px] uppercase tracking-[0.3em] text-[#8c7a57]">Spectator View</p>
+              <p className="mt-3 text-base text-[#5b666a]">Map view only. Joining is closed for this game.</p>
               {props.canReturnToGame ? (
                 <button
                   className="mt-5 inline-flex items-center justify-center rounded-[1.2rem] bg-[#c8a86b] px-5 py-3 font-[Georgia,Times_New_Roman,serif] text-lg text-[#1f2a2f] transition hover:bg-[#d3b57c]"
@@ -681,6 +765,10 @@ function upsertTeam(teams: Team[], team: Team) {
   return nextTeams;
 }
 
+function isLobbyReady(metadata: Player['metadata'] | null | undefined) {
+  return metadata?.lobby_ready === true;
+}
+
 function isJoinAckSuccess(response: unknown): response is { ok: true } {
   if (!response || typeof response !== 'object') {
     return false;
@@ -735,4 +823,184 @@ function clearPushPromptDismissed(gameId: string, playerId: string) {
   } catch {
     // Ignore storage failures; push remains optional.
   }
+}
+
+function SpectatorMapBackground({ game, teams, zones }: { game: Game; teams: Team[]; zones: Zone[] }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<any>(null);
+  const fitDoneRef = useRef(false);
+
+  const sourceData = useMemo(() => {
+    const teamColorById = new Map(teams.map((team) => [team.id, team.color]));
+
+    return {
+      type: 'FeatureCollection' as const,
+      features: zones.map((zone) => ({
+        type: 'Feature' as const,
+        id: zone.id,
+        properties: {
+          id: zone.id,
+          name: zone.name,
+          fillColor: zone.ownerTeamId ? blendHex(teamColorById.get(zone.ownerTeamId) ?? '#c8a86b', '#c9c0af', 0.62) : '#b8b9b3',
+          lineColor: zone.ownerTeamId ? blendHex(teamColorById.get(zone.ownerTeamId) ?? '#756e61', '#596166', 0.48) : '#7d817b',
+          fillOpacity: zone.ownerTeamId ? 0.24 : 0.14,
+          lineOpacity: zone.ownerTeamId ? 0.82 : 0.58,
+        },
+        geometry: buildRenderedZoneGeometry(zone),
+      })),
+    };
+  }, [teams, zones]);
+
+  useEffect(() => {
+    if (!containerRef.current || !mapboxToken || mapRef.current) {
+      return;
+    }
+
+    let disposed = false;
+
+    void import('mapbox-gl').then((mapboxglModule) => {
+      if (disposed || !containerRef.current || mapRef.current) {
+        return;
+      }
+
+      const mapboxgl = mapboxglModule.default;
+      mapboxgl.accessToken = mapboxToken;
+
+      const map = new mapboxgl.Map({
+        container: containerRef.current,
+        style: 'mapbox://styles/saamoz/cmng3j80c004001s831aw5e3b',
+        center: [game.centerLng, game.centerLat],
+        zoom: game.defaultZoom,
+        attributionControl: false,
+        interactive: false,
+        pitchWithRotate: false,
+        performanceMetricsCollection: false,
+      });
+
+      mapRef.current = map;
+
+      map.on('load', () => {
+        if (disposed) {
+          return;
+        }
+
+        if (!map.getSource('spectator-zones')) {
+          map.addSource('spectator-zones', {
+            type: 'geojson',
+            data: sourceData as any,
+          });
+        }
+
+        if (!map.getLayer('spectator-zones-fill')) {
+          map.addLayer({
+            id: 'spectator-zones-fill',
+            type: 'fill',
+            source: 'spectator-zones',
+            filter: ['==', '$type', 'Polygon'],
+            paint: {
+              'fill-color': ['coalesce', ['get', 'fillColor'], '#b8b9b3'],
+              'fill-opacity': ['coalesce', ['get', 'fillOpacity'], 0.18],
+            },
+          });
+        }
+
+        if (!map.getLayer('spectator-zones-line')) {
+          map.addLayer({
+            id: 'spectator-zones-line',
+            type: 'line',
+            source: 'spectator-zones',
+            paint: {
+              'line-color': ['coalesce', ['get', 'lineColor'], '#7d817b'],
+              'line-width': 2,
+              'line-opacity': ['coalesce', ['get', 'lineOpacity'], 0.72],
+            },
+          });
+        }
+      });
+    });
+
+    return () => {
+      disposed = true;
+      fitDoneRef.current = false;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, [game.centerLat, game.centerLng, game.defaultZoom, sourceData]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const source = map.getSource('spectator-zones');
+    if (source && 'setData' in source) {
+      source.setData(sourceData);
+    }
+  }, [sourceData]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || fitDoneRef.current || !zones.length) {
+      return;
+    }
+
+    const positions = zones.flatMap((zone) => collectGeometryPositions(buildRenderedZoneGeometry(zone)));
+    if (!positions.length) {
+      return;
+    }
+
+    const [firstLng, firstLat] = positions[0];
+    let minLng = firstLng;
+    let maxLng = firstLng;
+    let minLat = firstLat;
+    let maxLat = firstLat;
+
+    for (const [lng, lat] of positions) {
+      minLng = Math.min(minLng, lng);
+      maxLng = Math.max(maxLng, lng);
+      minLat = Math.min(minLat, lat);
+      maxLat = Math.max(maxLat, lat);
+    }
+
+    map.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
+      padding: 72,
+      duration: 0,
+    });
+    fitDoneRef.current = true;
+  }, [zones]);
+
+  return <div ref={containerRef} className="absolute inset-0" />;
+}
+
+function blendHex(sourceColor: string, targetColor: string, targetWeight: number): string {
+  const source = parseHexColor(sourceColor);
+  const target = parseHexColor(targetColor);
+
+  if (!source || !target) {
+    return sourceColor;
+  }
+
+  const weight = Math.min(Math.max(targetWeight, 0), 1);
+  const mix = source.map((value, index) => Math.round((value * (1 - weight)) + (target[index] * weight)));
+  return '#' + mix.map((value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+function parseHexColor(color: string): [number, number, number] | null {
+  const normalized = color.trim().replace('#', '');
+  const expanded = normalized.length === 3
+    ? normalized.split('').map((part) => part + part).join('')
+    : normalized;
+
+  if (!/^[0-9a-fA-F]{6}$/.test(expanded)) {
+    return null;
+  }
+
+  return [
+    Number.parseInt(expanded.slice(0, 2), 16),
+    Number.parseInt(expanded.slice(2, 4), 16),
+    Number.parseInt(expanded.slice(4, 6), 16),
+  ];
 }

@@ -296,6 +296,172 @@ describe('player routes', () => {
     });
   });
 
+  it('marks the current player ready and broadcasts the updated roster row', async () => {
+    await seedGame({ status: 'setup' });
+    await seedTeam();
+    await seedPlayer({ teamId: TEAM_ID, sessionToken: 'ready-player-token' });
+    app = await createPlayerTestApp();
+
+    const broadcasts: unknown[] = [];
+    app.broadcaster.send = async (input) => {
+      broadcasts.push(input);
+      return 1;
+    };
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/ready',
+      headers: idempotencyHeaders('player-ready-true'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'ready-player-token',
+      },
+      payload: {
+        ready: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      player: {
+        id: PLAYER_ID,
+        metadata: {
+          lobby_ready: true,
+        },
+      },
+    });
+    expect(broadcasts).toHaveLength(1);
+    expect(broadcasts[0]).toMatchObject({
+      eventType: 'player_joined',
+      payload: {
+        player: {
+          id: PLAYER_ID,
+          metadata: {
+            lobby_ready: true,
+          },
+        },
+        team: {
+          id: TEAM_ID,
+        },
+      },
+    });
+  });
+
+  it('rejects ready updates for players without a team', async () => {
+    await seedGame({ status: 'setup' });
+    await seedPlayer({ teamId: null, sessionToken: 'ready-no-team-token' });
+    app = await createPlayerTestApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/ready',
+      headers: idempotencyHeaders('player-ready-no-team'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'ready-no-team-token',
+      },
+      payload: {
+        ready: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Join a team before marking ready.',
+      },
+    });
+  });
+
+  it('starts the game from the lobby once all teamed players are ready', async () => {
+    await seedGame({ status: 'setup' });
+    await seedTeam();
+    await seedPlayer({
+      teamId: TEAM_ID,
+      sessionToken: 'start-game-player-one',
+      metadata: { lobby_ready: true },
+    });
+    await seedPlayer({
+      id: '44444444-3333-4333-8333-333333333333',
+      displayName: 'Player Two',
+      sessionToken: 'start-game-player-two',
+      teamId: TEAM_ID,
+      metadata: { lobby_ready: true },
+    });
+    app = await createPlayerTestApp();
+
+    const broadcasts: unknown[] = [];
+    app.broadcaster.send = async (input) => {
+      broadcasts.push(input);
+      return 1;
+    };
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/start-game',
+      headers: idempotencyHeaders('player-start-game'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'start-game-player-one',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      game: {
+        id: GAME_ID,
+        status: 'active',
+      },
+    });
+    expect(broadcasts).toHaveLength(1);
+    expect(broadcasts[0]).toMatchObject({
+      gameId: GAME_ID,
+      eventType: 'game_started',
+      payload: {
+        game: {
+          id: GAME_ID,
+          status: 'active',
+        },
+      },
+    });
+
+    const [storedGame] = await testDatabase.db.select().from(games).where(eq(games.id, GAME_ID)).limit(1);
+    expect(storedGame?.status).toBe('active');
+  });
+
+  it('blocks player-started game launch until every teamed player is ready', async () => {
+    await seedGame({ status: 'setup' });
+    await seedTeam();
+    await seedPlayer({
+      teamId: TEAM_ID,
+      sessionToken: 'start-game-blocked-one',
+      metadata: { lobby_ready: true },
+    });
+    await seedPlayer({
+      id: '55555555-3333-4333-8333-333333333333',
+      displayName: 'Player Two',
+      sessionToken: 'start-game-blocked-two',
+      teamId: TEAM_ID,
+      metadata: { lobby_ready: false },
+    });
+    app = await createPlayerTestApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/start-game',
+      headers: idempotencyHeaders('player-start-game-blocked'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'start-game-blocked-one',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'All teamed players must be ready before the game can start.',
+      },
+    });
+  });
+
   it('rejects leave-team after the game has started', async () => {
     await seedGame({ status: 'active' });
     await seedTeam();

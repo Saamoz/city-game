@@ -26,6 +26,8 @@ interface TransitionResult {
 
 interface TransitionOptions {
   actorType?: EventActorType;
+  actorId?: string | null;
+  actorTeamId?: string | null;
   eventMeta?: JsonObject;
   timestamp?: Date;
 }
@@ -79,16 +81,21 @@ export async function transitionGameLifecycle(
   registry: ModeRegistry,
   gameId: string,
   transition: LifecycleTransition,
+  options: TransitionOptions = {},
 ): Promise<TransitionResult> {
   return db.transaction(async (tx) => {
     const transactionalDb = tx as unknown as DatabaseClient;
     const currentGame = await lockGameById(transactionalDb, gameId);
 
     return applyLifecycleTransition(transactionalDb, registry, currentGame, transition, {
-      actorType: 'admin',
+      actorType: options.actorType ?? 'admin',
+      actorId: options.actorId ?? null,
+      actorTeamId: options.actorTeamId ?? null,
       eventMeta: {
         transition,
+        ...(options.eventMeta ?? {}),
       },
+      timestamp: options.timestamp,
     });
   });
 }
@@ -206,8 +213,8 @@ async function applyLifecycleTransition(
     entityType: 'game',
     entityId: currentGame.id,
     actorType: options.actorType ?? 'admin',
-    actorId: null,
-    actorTeamId: null,
+    actorId: options.actorId ?? null,
+    actorTeamId: options.actorTeamId ?? null,
     beforeState: serializeLifecycleState(currentGame),
     afterState: serializeLifecycleState(gameForEvent),
     meta: {

@@ -1,12 +1,13 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { and, eq } from 'drizzle-orm';
-import { errorCodes, socketServerEventTypes } from '@city-game/shared';
+import { STATE_VERSION_HEADER, errorCodes, socketServerEventTypes, type JsonObject } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { games, players, teams } from '../db/schema.js';
 import { generateSessionToken, getSerializedSessionCookie } from '../lib/auth.js';
 import { AppError } from '../lib/errors.js';
 import { gpsPayloadSchema } from '../middleware/gps-validation.js';
 import { executeIdempotentMutation } from '../services/idempotency-service.js';
+import { serializeGameRecord, transitionGameLifecycle } from '../services/game-service.js';
 import { updatePlayerLocation } from '../services/player-location-service.js';
 
 const paramsWithGameIdSchema = {
@@ -51,6 +52,15 @@ const pushSubscribeBodySchema = {
         auth: { type: 'string', minLength: 1 },
       },
     },
+  },
+} as const;
+
+const playerReadyBodySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['ready'],
+  properties: {
+    ready: { type: 'boolean' },
   },
 } as const;
 
@@ -128,7 +138,10 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
 
         const [player] = await db
           .update(players)
-          .set({ teamId: team.id })
+          .set({
+            teamId: team.id,
+            metadata: withLobbyReady(request.player.metadata as JsonObject, false),
+          })
           .where(eq(players.id, request.player.id))
           .returning();
 
@@ -189,7 +202,10 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
 
         const [updatedPlayer] = await db
           .update(players)
-          .set({ teamId: null })
+          .set({
+            teamId: null,
+            metadata: withLobbyReady(player.metadata as JsonObject, false),
+          })
           .where(eq(players.id, player.id))
           .returning();
 
@@ -253,6 +269,177 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       reply.send({ player: serializePlayer(request.player!) });
+    },
+  );
+
+  app.post(
+    '/players/me/ready',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        body: playerReadyBodySchema,
+      },
+    },
+    async (request, reply) => {
+      let broadcastPayload: {
+        gameId: string;
+        modeKey: string;
+        stateVersion: number;
+        player: ReturnType<typeof serializePlayer>;
+        team: ReturnType<typeof serializeTeam>;
+      } | null = null;
+
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const player = request.player!;
+        const game = await getGameById(db, player.gameId);
+
+        if (game.status !== 'setup') {
+          throw new AppError(errorCodes.validationError, {
+            message: 'Readiness can only be changed before the game starts.',
+          });
+        }
+
+        if (!player.teamId) {
+          throw new AppError(errorCodes.validationError, {
+            message: 'Join a team before marking ready.',
+          });
+        }
+
+        const [team] = await db.select().from(teams).where(eq(teams.id, player.teamId)).limit(1);
+        if (!team) {
+          throw new AppError(errorCodes.teamNotFound);
+        }
+
+        const body = request.body as { ready: boolean };
+        const [updatedPlayer] = await db
+          .update(players)
+          .set({
+            metadata: withLobbyReady(player.metadata as JsonObject, body.ready),
+          })
+          .where(eq(players.id, player.id))
+          .returning();
+
+        request.player = updatedPlayer;
+        broadcastPayload = {
+          gameId: updatedPlayer.gameId,
+          modeKey: game.modeKey,
+          stateVersion: game.stateVersion,
+          player: serializePlayer(updatedPlayer),
+          team: serializeTeam(team),
+        };
+
+        return {
+          gameId: updatedPlayer.gameId,
+          playerId: updatedPlayer.id,
+          statusCode: 200,
+          body: { player: serializePlayer(updatedPlayer) },
+        };
+      }, async () => {
+        if (!broadcastPayload) {
+          return;
+        }
+
+        await app.broadcaster.send({
+          gameId: broadcastPayload.gameId,
+          modeKey: broadcastPayload.modeKey,
+          eventType: socketServerEventTypes.playerJoined,
+          stateVersion: broadcastPayload.stateVersion,
+          payload: {
+            player: broadcastPayload.player,
+            team: broadcastPayload.team,
+          },
+        });
+      });
+    },
+  );
+
+  app.post(
+    '/players/me/start-game',
+    {
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      let broadcastPayload:
+        | {
+            gameId: string;
+            modeKey: string;
+            stateVersion: number;
+            game: ReturnType<typeof serializeGameRecord>;
+          }
+        | null = null;
+
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const player = request.player!;
+        const game = await getGameById(db, player.gameId);
+
+        if (game.status !== 'setup') {
+          throw new AppError(errorCodes.validationError, {
+            message: 'Game has already started.',
+          });
+        }
+
+        if (!player.teamId) {
+          throw new AppError(errorCodes.validationError, {
+            message: 'Join a team before starting the game.',
+          });
+        }
+
+        const gamePlayers = await db.select().from(players).where(eq(players.gameId, player.gameId));
+        const teamedPlayers = gamePlayers.filter((entry) => entry.teamId !== null);
+
+        if (!teamedPlayers.length) {
+          throw new AppError(errorCodes.validationError, {
+            message: 'At least one teamed player is required to start the game.',
+          });
+        }
+
+        if (!teamedPlayers.every((entry) => isLobbyReady(entry.metadata as JsonObject))) {
+          throw new AppError(errorCodes.validationError, {
+            message: 'All teamed players must be ready before the game can start.',
+          });
+        }
+
+        const result = await transitionGameLifecycle(db, app.modeRegistry, player.gameId, 'start', {
+          actorType: 'player',
+          actorId: player.id,
+          actorTeamId: player.teamId,
+          eventMeta: {
+            trigger: 'lobby_ready',
+          },
+        });
+        const serializedGame = serializeGameRecord(result.game);
+
+        broadcastPayload = {
+          gameId: player.gameId,
+          modeKey: serializedGame.modeKey,
+          stateVersion: result.stateVersion,
+          game: serializedGame,
+        };
+
+        return {
+          gameId: player.gameId,
+          playerId: player.id,
+          statusCode: 200,
+          body: { game: serializedGame },
+          responseHeaders: {
+            [STATE_VERSION_HEADER]: String(result.stateVersion),
+          },
+        };
+      }, async () => {
+        if (!broadcastPayload) {
+          return;
+        }
+
+        await app.broadcaster.send({
+          gameId: broadcastPayload.gameId,
+          modeKey: broadcastPayload.modeKey,
+          eventType: socketServerEventTypes.gameStarted,
+          stateVersion: broadcastPayload.stateVersion,
+          payload: {
+            game: broadcastPayload.game,
+          },
+        });
+      });
     },
   );
 
@@ -352,4 +539,15 @@ function serializePlayer(player: typeof players.$inferSelect) {
 
 function serializeTeam(team: typeof teams.$inferSelect) {
   return team;
+}
+
+function isLobbyReady(metadata: JsonObject | null | undefined) {
+  return metadata?.lobby_ready === true;
+}
+
+function withLobbyReady(metadata: JsonObject | null | undefined, ready: boolean): JsonObject {
+  return {
+    ...(metadata ?? {}),
+    lobby_ready: ready,
+  };
 }

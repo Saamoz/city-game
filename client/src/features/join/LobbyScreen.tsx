@@ -15,8 +15,16 @@ interface LobbyScreenProps {
   canShowNotificationPrompt: boolean;
   notificationPromptMessage: string | null;
   notificationPromptPending: boolean;
+  isCurrentPlayerReady: boolean;
+  readyCount: number;
+  readyPending: boolean;
+  startPending: boolean;
+  totalReadyEligiblePlayers: number;
+  canStartGame: boolean;
   onEnableNotifications(): void;
   onDismissNotifications(): void;
+  onSetReady(ready: boolean): void;
+  onStartGame(): void;
 }
 
 const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env.MAPBOX_ACCESS_TOKEN ?? '').trim();
@@ -34,8 +42,16 @@ export function LobbyScreen({
   canShowNotificationPrompt,
   notificationPromptMessage,
   notificationPromptPending,
+  isCurrentPlayerReady,
+  readyCount,
+  readyPending,
+  startPending,
+  totalReadyEligiblePlayers,
+  canStartGame,
   onEnableNotifications,
   onDismissNotifications,
+  onSetReady,
+  onStartGame,
 }: LobbyScreenProps) {
   const playersByTeamId = useMemo(() => {
     const roster = new Map<string, Player[]>();
@@ -80,6 +96,27 @@ export function LobbyScreen({
             <div className="mt-4 inline-flex items-center gap-3 rounded-full border border-[#d8c6a0]/70 bg-[#fbf6ea] px-4 py-2 text-sm text-[#4d5c61]">
               <span className="h-2.5 w-2.5 rounded-full bg-[#c8a86b] animate-pulse" />
               <span className="font-[Georgia,Times_New_Roman,serif]">Waiting for the game to start…</span>
+            </div>
+            <div className="mt-4 flex flex-col items-center justify-center gap-3 sm:flex-row">
+              <div className="inline-flex items-center gap-3 rounded-full border border-[#d8c6a0]/70 bg-[#fbf6ea] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#6f6045]">
+                <span>{readyCount}/{totalReadyEligiblePlayers} Ready</span>
+              </div>
+              <button
+                className="rounded-full border border-[#b7a47d]/70 bg-[#efe5cf] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#2f403f] transition hover:bg-[#e5d8bc] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={readyPending}
+                onClick={() => onSetReady(!isCurrentPlayerReady)}
+                type="button"
+              >
+                {readyPending ? 'Saving…' : isCurrentPlayerReady ? 'Not Ready' : 'Ready'}
+              </button>
+              <button
+                className="rounded-full border border-[#aab3b5]/70 bg-[#324148] px-5 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#f4ead7] transition hover:bg-[#28353a] disabled:cursor-not-allowed disabled:border-[#c5cbc8] disabled:bg-[#d8ddd9] disabled:text-[#7d857f]"
+                disabled={!canStartGame || startPending}
+                onClick={onStartGame}
+                type="button"
+              >
+                {startPending ? 'Starting…' : 'Start Game'}
+              </button>
             </div>
             {connectionMessage ? (
               <p className="mt-3 text-xs uppercase tracking-[0.2em] text-[#7e7258]">{connectionMessage}</p>
@@ -132,16 +169,29 @@ export function LobbyScreen({
                   <div className="mt-4 space-y-2.5 text-sm text-[#405159]">
                     {roster.length ? roster.map((entry) => {
                       const isCurrentPlayer = entry.id === player.id;
+                      const isReady = entry.metadata?.lobby_ready === true;
                       return (
                         <div key={entry.id} className="flex items-center justify-between gap-3 rounded-full bg-[#f3ecd8] px-3 py-2">
                           <span className={isCurrentPlayer ? 'font-semibold' : ''} style={isCurrentPlayer ? { color: team.color } : undefined}>
                             {entry.displayName}
                           </span>
-                          {isCurrentPlayer ? (
-                            <span className="rounded-full border border-[#d3c099] bg-[#fff9ee] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[#6f6045]">
-                              You
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={[
+                                'rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.18em]',
+                                isReady
+                                  ? 'border-[#b8c7ac] bg-[#e4edd9] text-[#41543b]'
+                                  : 'border-[#d3c099] bg-[#fff9ee] text-[#6f6045]',
+                              ].join(' ')}
+                            >
+                              {isReady ? 'Ready' : 'Waiting'}
                             </span>
-                          ) : null}
+                            {isCurrentPlayer ? (
+                              <span className="rounded-full border border-[#d3c099] bg-[#fff9ee] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[#6f6045]">
+                                You
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       );
                     }) : (
