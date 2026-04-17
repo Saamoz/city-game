@@ -529,6 +529,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const challengeProgressLabel = useMemo(() => buildChallengeProgressLabel(challengeCounts), [challengeCounts]);
   const completedCards = useMemo(() => buildCompletedCards(snapshot), [snapshot]);
   const controlledZoneCount = useMemo(() => buildControlledZoneCount(snapshot, team?.id ?? null), [snapshot, team?.id]);
+  const mobileBottomInsetStyle = { paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1rem)' } as const;
+  const mobileBottomShelfStyle = { height: 'calc(env(safe-area-inset-bottom, 0px) + 4.5rem)' } as const;
   const scoreboardEntries = useMemo(() => buildZoneScoreboard(snapshot), [snapshot]);
   const feedEntries = useMemo(() => buildFeedEntries(recentEvents, snapshot), [recentEvents, snapshot]);
   const currentPoint = gpsPayload ? [gpsPayload.lng, gpsPayload.lat] as [number, number] : null;
@@ -1003,9 +1005,14 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       {snapshot ? (
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 lg:hidden">
           <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#f3e2d8]/92 via-[#f3e2d8]/72 to-transparent"
+            style={mobileBottomShelfStyle}
+          />
+          <div
             ref={deckWrapperRef}
-            className={isDeckOpen ? 'pointer-events-auto px-4 pb-4 [touch-action:none]' : 'pointer-events-none flex justify-center'}
+            className={isDeckOpen ? 'pointer-events-auto px-4 [touch-action:none]' : 'pointer-events-none flex justify-center'}
             style={{
+              ...mobileBottomInsetStyle,
               transform: isDeckOpen
                 ? `translateY(${deckDragY}px)`
                 : `translateY(${Math.max(0, deckWrapperHeightRef.current - 72)}px)`,
@@ -1078,8 +1085,9 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       {isMenuOpen ? (
         <div className="pointer-events-none fixed inset-0 z-50 flex items-end lg:hidden">
           <div
-            className="pointer-events-auto w-full rounded-t-[1.9rem] border-t border-[#c9ae6d]/55 bg-[#f3ecd8] px-4 pb-4 pt-3 shadow-[0_-18px_48px_rgba(24,32,36,0.2)] [touch-action:none]"
+            className="pointer-events-auto w-full rounded-t-[1.9rem] border-t border-[#c9ae6d]/55 bg-[#f3ecd8] px-4 pt-3 shadow-[0_-18px_48px_rgba(24,32,36,0.2)] [touch-action:none]"
             style={{
+              ...mobileBottomInsetStyle,
               transform: `translateY(${menuDragY}px)`,
               transition: isDraggingMenu ? 'none' : 'transform 0.24s ease',
             }}
