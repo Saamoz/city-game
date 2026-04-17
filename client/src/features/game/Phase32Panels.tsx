@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import type { GameEventRecord, GameStateSnapshot, ScoreboardEntry } from '@city-game/shared';
+import type { GameEventRecord, GameStateSnapshot, Team } from '@city-game/shared';
 
 export interface FeedEntry {
   id: string;
@@ -10,15 +10,22 @@ export interface FeedEntry {
   zoneId?: string;
 }
 
+export interface ZoneScoreboardEntry {
+  team: Team;
+  zoneCount: number;
+  rank: number;
+  playerNames: string[];
+}
+
 interface MiniScoreboardCardProps {
-  entries: ScoreboardEntry[];
+  entries: ZoneScoreboardEntry[];
   teamId: string | null;
   onOpenScoreboard(): void;
   onOpenFeed(): void;
 }
 
 interface ScoreboardOverlayProps {
-  entries: ScoreboardEntry[];
+  entries: ZoneScoreboardEntry[];
   onClose(): void;
 }
 
@@ -30,12 +37,23 @@ interface FeedOverlayProps {
   onFocusZone(zoneId: string): void;
 }
 
-export function buildZoneScoreboard(snapshot: GameStateSnapshot | null): ScoreboardEntry[] {
+export function buildZoneScoreboard(snapshot: GameStateSnapshot | null): ZoneScoreboardEntry[] {
   if (!snapshot) {
     return [];
   }
 
   const zoneCounts = new Map<string, number>();
+  const playerNamesByTeamId = new Map<string, string[]>();
+
+  for (const player of snapshot.players) {
+    if (!player.teamId) {
+      continue;
+    }
+
+    const currentNames = playerNamesByTeamId.get(player.teamId) ?? [];
+    currentNames.push(player.displayName);
+    playerNamesByTeamId.set(player.teamId, currentNames);
+  }
   for (const zone of snapshot.zones) {
     if (!zone.ownerTeamId) {
       continue;
@@ -48,8 +66,8 @@ export function buildZoneScoreboard(snapshot: GameStateSnapshot | null): Scorebo
     .map((team) => ({
       team,
       zoneCount: zoneCounts.get(team.id) ?? 0,
-      resources: snapshot.teamResources[team.id] ?? {},
       rank: 0,
+      playerNames: playerNamesByTeamId.get(team.id) ?? [],
     }))
     .sort((left, right) => {
       const zoneDelta = right.zoneCount - left.zoneCount;
@@ -139,7 +157,7 @@ export function ScoreboardOverlay({ entries, onClose }: ScoreboardOverlayProps) 
         {entries.map((entry) => (
           <article
             key={entry.team.id}
-            className="flex items-center justify-between gap-3 rounded-[1.1rem] border border-[#d6c59d]/55 bg-[#f7efdc] px-3 py-2"
+            className="flex items-start justify-between gap-3 rounded-[1.1rem] border border-[#d6c59d]/55 bg-[#f7efdc] px-3 py-2"
           >
             <div className="flex min-w-0 items-center gap-2.5">
               <p className="w-5 text-center text-sm font-semibold text-[#7a5e2d]">{entry.rank}</p>
@@ -147,9 +165,16 @@ export function ScoreboardOverlay({ entries, onClose }: ScoreboardOverlayProps) 
                 className="h-3 w-3 shrink-0 rounded-full border border-[#f8f1df] shadow-sm"
                 style={{ backgroundColor: entry.team.color }}
               />
-              <h3 className="truncate font-[Georgia,Times_New_Roman,serif] text-base font-semibold text-[#24343a]">
-                {entry.team.name}
-              </h3>
+              <div className="min-w-0">
+                <h3 className="truncate font-[Georgia,Times_New_Roman,serif] text-base font-semibold text-[#24343a]">
+                  {entry.team.name}
+                </h3>
+                {entry.playerNames.length ? (
+                  <p className="mt-0.5 truncate text-[11px] leading-4 text-[#5a686f]">
+                    {entry.playerNames.join(', ')}
+                  </p>
+                ) : null}
+              </div>
             </div>
             <p className="shrink-0 text-xs font-semibold uppercase tracking-[0.12em] text-[#24343a]">
               {entry.zoneCount} zones

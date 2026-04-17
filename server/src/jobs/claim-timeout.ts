@@ -186,12 +186,18 @@ export function startClaimTimeoutJob(
     return inFlight;
   };
 
+  const runSafely = () => {
+    void runNow().catch((error) => {
+      app.log.error({ err: error }, 'claim-timeout sweep failed');
+    });
+  };
+
   const timer = setInterval(() => {
-    void runNow();
+    runSafely();
   }, intervalMs);
   timer.unref?.();
 
-  void runNow();
+  runSafely();
 
   const stop = () => {
     if (closed) {

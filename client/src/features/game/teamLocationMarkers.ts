@@ -7,15 +7,14 @@ export function syncTeamLocationMarkers(
   teams: Team[],
   teamLocations: TeamLocation[],
 ): void {
-  const teamById = new Map(teams.map((team) => [team.id, team]));
   const activeTeamIds = new Set(teamLocations.map((entry) => entry.teamId));
+  const teamById = new Map(teams.map((team) => [team.id, team]));
 
   for (const location of teamLocations) {
     const team = teamById.get(location.teamId);
     if (!team) {
       continue;
     }
-
     const existingMarker = markers.get(location.teamId);
     if (existingMarker) {
       existingMarker.setLngLat([location.lng, location.lat]);
@@ -23,7 +22,7 @@ export function syncTeamLocationMarkers(
     }
 
     const marker = new mapboxgl.Marker({
-      element: createTeamLocationMarkerElement(team),
+      element: createTeamLocationMarkerElement(team.color),
       anchor: 'bottom',
     })
       .setLngLat([location.lng, location.lat])
@@ -49,34 +48,20 @@ export function clearTeamLocationMarkers(markers: Map<string, mapboxgl.Marker>):
   markers.clear();
 }
 
-function createTeamLocationMarkerElement(team: Team): HTMLDivElement {
+function createTeamLocationMarkerElement(teamColor: string): HTMLDivElement {
   const root = document.createElement('div');
   root.style.display = 'flex';
   root.style.flexDirection = 'column';
   root.style.alignItems = 'center';
-  root.style.gap = '6px';
   root.style.pointerEvents = 'none';
-
-  const label = document.createElement('div');
-  label.textContent = team.name;
-  label.style.padding = '5px 10px';
-  label.style.borderRadius = '9999px';
-  label.style.border = '1px solid rgba(244, 234, 215, 0.75)';
-  label.style.background = 'rgba(243, 236, 216, 0.94)';
-  label.style.color = '#24343a';
-  label.style.fontSize = '11px';
-  label.style.fontWeight = '700';
-  label.style.letterSpacing = '0.08em';
-  label.style.textTransform = 'uppercase';
-  label.style.boxShadow = '0 10px 22px rgba(18, 28, 32, 0.16)';
 
   const pin = document.createElement('div');
   pin.style.width = '18px';
   pin.style.height = '18px';
   pin.style.borderRadius = '9999px';
   pin.style.border = '3px solid #f3ecd8';
-  pin.style.background = team.color;
-  pin.style.boxShadow = '0 0 0 6px ' + withAlpha(team.color, 0.22) + ', 0 10px 22px rgba(14, 24, 29, 0.2)';
+  pin.style.background = teamColor;
+  pin.style.boxShadow = '0 0 0 6px ' + withAlpha(teamColor, 0.22) + ', 0 10px 22px rgba(14, 24, 29, 0.2)';
 
   const stem = document.createElement('div');
   stem.style.width = '2px';
@@ -85,7 +70,18 @@ function createTeamLocationMarkerElement(team: Team): HTMLDivElement {
   stem.style.background = 'rgba(36, 52, 58, 0.55)';
   stem.style.marginTop = '-4px';
 
-  root.append(label, pin, stem);
+  const colorDot = document.createElement('div');
+  colorDot.style.position = 'absolute';
+  colorDot.style.width = '8px';
+  colorDot.style.height = '8px';
+  colorDot.style.borderRadius = '9999px';
+  colorDot.style.border = '1px solid #f3ecd8';
+  colorDot.style.background = teamColor;
+  colorDot.style.transform = 'translate(7px, -2px)';
+  colorDot.style.boxShadow = '0 4px 10px rgba(14, 24, 29, 0.18)';
+
+  root.style.position = 'relative';
+  root.append(pin, stem, colorDot);
   return root;
 }
 

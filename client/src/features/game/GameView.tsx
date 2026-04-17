@@ -344,7 +344,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
             setToast({
               tone: 'info',
               title: `${rivalTeam?.name ?? 'Rival team'} captured ${zonePayload.zone.name}`,
-              body: 'Standings updated.',
+              body: undefined,
               accentColor: rivalTeam?.color,
             });
           }
@@ -561,7 +561,12 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       return;
     }
 
-    syncTeamLocationMarkers(map, teamLocationMarkersRef.current, snapshot.teams, snapshot.teamLocations);
+    syncTeamLocationMarkers(
+      map,
+      teamLocationMarkersRef.current,
+      snapshot.teams,
+      snapshot.teamLocations.filter((entry) => entry.teamId !== snapshot.team?.id),
+    );
   }, [broadcastTeamLocations, snapshot]);
 
   useEffect(() => {

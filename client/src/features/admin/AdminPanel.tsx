@@ -551,9 +551,6 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
             </button>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-[#d5dde2] bg-[#f5f7f8] px-3 py-2 text-xs text-[#57636a]">
-            Local admin auth is disabled in this build. Reintroduce it when the deployment boundary matters.
-          </div>
 
           <div className="mt-4 rounded-2xl border border-[#d9e1e6] bg-[#f8fafb] p-3">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">Library Tools</p>
