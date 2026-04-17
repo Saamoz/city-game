@@ -16,6 +16,7 @@ import type { ModeRegistry } from '../modes/index.js';
 import { getAllBalances } from './resource-service.js';
 import { getGameById, serializeGameRecord } from './game-service.js';
 import { listZonesByGame } from './spatial-service.js';
+import { listTeamLocationsByGame, shouldBroadcastTeamLocations } from './team-location-service.js';
 
 interface ViewerContextInput {
   gameId: string;
@@ -28,7 +29,8 @@ export async function buildGameStateSnapshot(
   input: ViewerContextInput,
 ): Promise<GameStateSnapshot> {
   const game = await getGameById(db, input.gameId);
-  const [teamRows, playerRows, zoneRows, challengeRows, claimRows, annotationRows, teamResources] = await Promise.all([
+  const teamLocationsEnabled = shouldBroadcastTeamLocations(game.settings);
+  const [teamRows, playerRows, zoneRows, challengeRows, claimRows, annotationRows, teamResources, teamLocations] = await Promise.all([
     db.select().from(teams).where(eq(teams.gameId, input.gameId)).orderBy(asc(teams.createdAt)),
     db.select().from(players).where(eq(players.gameId, input.gameId)).orderBy(asc(players.createdAt)),
     listZonesByGame(db, input.gameId),
@@ -39,6 +41,7 @@ export async function buildGameStateSnapshot(
     db.select().from(challengeClaims).where(eq(challengeClaims.gameId, input.gameId)).orderBy(asc(challengeClaims.createdAt)),
     db.select().from(annotations).where(eq(annotations.gameId, input.gameId)).orderBy(asc(annotations.createdAt)),
     getAllBalances(db, input.gameId),
+    teamLocationsEnabled ? listTeamLocationsByGame(db, input.gameId) : Promise.resolve([]),
   ]);
 
   const viewerPlayerRow = playerRows.find((player) => player.id == input.playerId);
@@ -63,6 +66,7 @@ export async function buildGameStateSnapshot(
     team: viewerTeam,
     teams: serializedTeams,
     players: serializedPlayers,
+    teamLocations,
     zones: zoneRows,
     challenges: challengeRows.map((challenge) => serializeChallengeRow(challenge)),
     claims: claimRows.map((claim) => serializeClaimRow(claim)),
@@ -116,10 +120,10 @@ function serializePlayerRow(row: typeof players.$inferSelect): Player {
     teamId: row.teamId,
     displayName: row.displayName,
     pushSubscription: row.pushSubscription as Player['pushSubscription'],
-    lastLat: row.lastLat === null ? null : Number(row.lastLat),
-    lastLng: row.lastLng === null ? null : Number(row.lastLng),
-    lastGpsError: row.lastGpsError,
-    lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
+    lastLat: null,
+    lastLng: null,
+    lastGpsError: null,
+    lastSeenAt: null,
     metadata: row.metadata as Player['metadata'],
     createdAt: row.createdAt.toISOString(),
   } as Player;

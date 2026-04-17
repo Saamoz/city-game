@@ -14,6 +14,7 @@ export const directRealtimeEventTypes = [
   socketServerEventTypes.gameResumed,
   socketServerEventTypes.gameEnded,
   socketServerEventTypes.playerJoined,
+  socketServerEventTypes.teamLocationsUpdated,
   socketServerEventTypes.annotationAdded,
   socketServerEventTypes.annotationRemoved,
   socketServerEventTypes.resourceChanged,
@@ -65,6 +66,12 @@ export function buildRealtimePayloadKey(
     case socketServerEventTypes.playerJoined: {
       const joinedPayload = payload as SocketEventPayloadMap['player_joined'];
       return `player:${joinedPayload.player.id}`;
+    }
+    case socketServerEventTypes.teamLocationsUpdated: {
+      const teamLocationsPayload = payload as SocketEventPayloadMap['team_locations_updated'];
+      return 'team-locations:' + teamLocationsPayload.teamLocations
+        .map((entry) => entry.teamId + ':' + entry.updatedAt)
+        .join('|');
     }
     case socketServerEventTypes.annotationAdded: {
       const annotationPayload = payload as SocketEventPayloadMap['annotation_added'];

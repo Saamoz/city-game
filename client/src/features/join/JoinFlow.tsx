@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { socketServerEventTypes, type Game, type MapDefinition, type MapZone, type Player, type SocketEventPayloadMap, type Team, type Zone } from '@city-game/shared';
+import { socketServerEventTypes, type Game, type MapDefinition, type MapZone, type Player, type SocketEventPayloadMap, type Team, type TeamLocation, type Zone } from '@city-game/shared';
 import {
   ApiError,
   getActiveGame,
   getCurrentPlayer,
   getGame,
   getMap,
+  getTeamLocations,
   getTeams,
   joinTeam,
   leaveCurrentTeam,
@@ -18,6 +19,7 @@ import {
   subscribeCurrentPlayerPush,
 } from '../../lib/api';
 import { buildRenderedZoneGeometry, collectGeometryPositions } from '../game/mapGeometry';
+import { clearTeamLocationMarkers, syncTeamLocationMarkers } from '../game/teamLocationMarkers';
 import {
   getNotificationPermission,
   subscribeToPushNotifications,
@@ -54,6 +56,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
   const [mapDefinition, setMapDefinition] = useState<MapDefinition | null>(null);
   const [mapZones, setMapZones] = useState<MapZone[]>([]);
   const [spectatorZones, setSpectatorZones] = useState<Zone[]>([]);
+  const [spectatorTeamLocations, setSpectatorTeamLocations] = useState<TeamLocation[]>([]);
   const [name, setName] = useState(persistedDisplayName);
   const [submitting, setSubmitting] = useState<'register' | null>(null);
   const [joiningTeamId, setJoiningTeamId] = useState<string | null>(null);
@@ -94,13 +97,15 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
   }, []);
 
   const loadSpectatorAssets = useCallback(async (gameId: string, signal?: AbortSignal) => {
-    const [nextTeams, nextZones] = await Promise.all([
+    const [nextTeams, nextZones, nextTeamLocations] = await Promise.all([
       getTeams(gameId, signal),
       listZones(gameId, signal),
+      getTeamLocations(gameId, signal),
     ]);
 
     setTeams(nextTeams);
     setSpectatorZones(nextZones);
+    setSpectatorTeamLocations(nextTeamLocations);
   }, []);
 
   const hydrate = useCallback(async (signal?: AbortSignal) => {
@@ -207,6 +212,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
         setMapDefinition(null);
         setMapZones([]);
         setSpectatorZones([]);
+        setSpectatorTeamLocations([]);
         setStep('home');
         setMessage('No active game is running right now.');
         return;
@@ -546,6 +552,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
           game={game}
           message={message}
           spectatorTeams={teams}
+          spectatorTeamLocations={spectatorTeamLocations}
           spectatorZones={spectatorZones}
           name={name}
           onEnterGame={() => onEnterGame(game.id)}
@@ -609,6 +616,7 @@ function HomeScreen(props: {
   name: string;
   message: string | null;
   spectatorTeams: Team[];
+  spectatorTeamLocations: TeamLocation[];
   spectatorZones: Zone[];
   submitting: boolean;
   canJoinCurrentGame: boolean;
@@ -624,25 +632,49 @@ function HomeScreen(props: {
 
   return (
     <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#f5f0e8] px-5 py-8 sm:px-8">
-      {showSpectatorView ? <SpectatorMapBackground game={props.game} teams={props.spectatorTeams} zones={props.spectatorZones} /> : null}
-      {showSpectatorView ? <div className="absolute inset-0 bg-[rgba(245,240,232,0.5)]" /> : null}
-      <div className="relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col justify-between">
-        <div>
-          <p className="text-center font-['IBM_Plex_Mono',monospace] text-[11px] uppercase tracking-[0.38em] text-[#8c7a57]">
-            TERRITORY
-          </p>
-        </div>
+      {showSpectatorView ? <SpectatorMapBackground game={props.game} teams={props.spectatorTeams} teamLocations={props.spectatorTeamLocations} zones={props.spectatorZones} /> : null}
+      {showSpectatorView ? <div className="pointer-events-none absolute inset-0 bg-[rgba(245,240,232,0.18)]" /> : null}
+      <div className={[
+        'relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] w-full flex-col justify-between',
+        showSpectatorView ? 'pointer-events-none max-w-none' : 'max-w-3xl',
+      ].join(' ')}>
+        {showSpectatorView ? (
+          <div className="pointer-events-none flex min-h-[calc(100vh-4rem)] flex-col justify-between">
+            <div className="flex items-start justify-between gap-3">
+              <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#d8c6a0]/75 bg-[#f7efdc]/94 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#5d4d33] shadow-[0_12px_28px_rgba(24,32,36,0.12)] backdrop-blur">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#c8a86b]" />
+                Spectator View
+              </div>
+              {props.canReturnToGame ? (
+                <button
+                  className="pointer-events-auto inline-flex items-center justify-center rounded-full bg-[#24343a] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#f4ead7] shadow-[0_12px_28px_rgba(24,32,36,0.18)] transition hover:bg-[#1d2b30]"
+                  onClick={props.onEnterGame}
+                  type="button"
+                >
+                  Return to Game
+                </button>
+              ) : null}
+            </div>
+            <div />
+          </div>
+        ) : (
+          <>
+            <div>
+              <p className="text-center font-['IBM_Plex_Mono',monospace] text-[11px] uppercase tracking-[0.38em] text-[#8c7a57]">
+                TERRITORY
+              </p>
+            </div>
 
-        <section className="flex flex-1 flex-col items-center justify-center text-center">
-          <h1 className="font-[Georgia,Times_New_Roman,serif] text-5xl font-semibold text-[#223238] sm:text-6xl">
-            {props.game.name}
-          </h1>
-          {subtitle ? (
-            <p className="mt-4 font-[Georgia,Times_New_Roman,serif] text-lg text-[#6d6758] sm:text-xl">{subtitle}</p>
-          ) : null}
+            <section className="flex flex-1 flex-col items-center justify-center text-center">
+              <h1 className="font-[Georgia,Times_New_Roman,serif] text-5xl font-semibold text-[#223238] sm:text-6xl">
+                {props.game.name}
+              </h1>
+              {subtitle ? (
+                <p className="mt-4 font-[Georgia,Times_New_Roman,serif] text-lg text-[#6d6758] sm:text-xl">{subtitle}</p>
+              ) : null}
 
-          {props.canJoinCurrentGame ? (
-            hasRegisteredPlayer ? (
+              {props.canJoinCurrentGame ? (
+                hasRegisteredPlayer ? (
               <div className="mt-10 w-full max-w-sm rounded-[1.8rem] border border-[#d5c59f] bg-[#f0ebe0] px-6 py-6 shadow-[0_20px_48px_rgba(35,52,58,0.12)]">
                 <p className="text-[11px] uppercase tracking-[0.3em] text-[#8c7a57]">Session Ready</p>
                 <p className="mt-4 font-[Georgia,Times_New_Roman,serif] text-3xl font-semibold text-[#223238]">
@@ -676,25 +708,13 @@ function HomeScreen(props: {
                   {props.submitting ? 'Joining…' : 'Join Game →'}
                 </button>
               </form>
-            )
-          ) : (
-            <div className="mt-10 w-full max-w-2xl rounded-[1.8rem] border border-[#d7c7a3] bg-[#f0ebe0]/94 px-6 py-6 text-center shadow-[0_20px_48px_rgba(35,52,58,0.12)] backdrop-blur">
-              <p className="text-[11px] uppercase tracking-[0.3em] text-[#8c7a57]">Spectator View</p>
-              <p className="mt-3 text-base text-[#5b666a]">Map view only. Joining is closed for this game.</p>
-              {props.canReturnToGame ? (
-                <button
-                  className="mt-5 inline-flex items-center justify-center rounded-[1.2rem] bg-[#c8a86b] px-5 py-3 font-[Georgia,Times_New_Roman,serif] text-lg text-[#1f2a2f] transition hover:bg-[#d3b57c]"
-                  onClick={props.onEnterGame}
-                  type="button"
-                >
-                  Return to Game
-                </button>
+                )
               ) : null}
-            </div>
-          )}
 
-          {props.message ? <p className="mt-5 max-w-lg text-sm leading-6 text-[#6d6758]">{props.message}</p> : null}
-        </section>
+              {props.message ? <p className="mt-5 max-w-lg text-sm leading-6 text-[#6d6758]">{props.message}</p> : null}
+            </section>
+          </>
+        )}
       </div>
     </main>
   );
@@ -825,10 +845,11 @@ function clearPushPromptDismissed(gameId: string, playerId: string) {
   }
 }
 
-function SpectatorMapBackground({ game, teams, zones }: { game: Game; teams: Team[]; zones: Zone[] }) {
+function SpectatorMapBackground({ game, teams, teamLocations, zones }: { game: Game; teams: Team[]; teamLocations: TeamLocation[]; zones: Zone[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const fitDoneRef = useRef(false);
+  const teamMarkersRef = useRef<Map<string, any>>(new Map());
 
   const sourceData = useMemo(() => {
     const teamColorById = new Map(teams.map((team) => [team.id, team.color]));
@@ -872,7 +893,7 @@ function SpectatorMapBackground({ game, teams, zones }: { game: Game; teams: Tea
         center: [game.centerLng, game.centerLat],
         zoom: game.defaultZoom,
         attributionControl: false,
-        interactive: false,
+        interactive: true,
         pitchWithRotate: false,
         performanceMetricsCollection: false,
       });
@@ -916,6 +937,8 @@ function SpectatorMapBackground({ game, teams, zones }: { game: Game; teams: Tea
             },
           });
         }
+
+        syncTeamLocationMarkers(map, teamMarkersRef.current, teams, teamLocations);
       });
     });
 
@@ -923,6 +946,7 @@ function SpectatorMapBackground({ game, teams, zones }: { game: Game; teams: Tea
       disposed = true;
       fitDoneRef.current = false;
       if (mapRef.current) {
+        clearTeamLocationMarkers(teamMarkersRef.current);
         mapRef.current.remove();
         mapRef.current = null;
       }
@@ -971,6 +995,15 @@ function SpectatorMapBackground({ game, teams, zones }: { game: Game; teams: Tea
     });
     fitDoneRef.current = true;
   }, [zones]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    syncTeamLocationMarkers(map, teamMarkersRef.current, teams, teamLocations);
+  }, [teamLocations, teams]);
 
   return <div ref={containerRef} className="absolute inset-0" />;
 }

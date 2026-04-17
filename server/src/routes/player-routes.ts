@@ -9,6 +9,7 @@ import { gpsPayloadSchema } from '../middleware/gps-validation.js';
 import { executeIdempotentMutation } from '../services/idempotency-service.js';
 import { serializeGameRecord, transitionGameLifecycle } from '../services/game-service.js';
 import { updatePlayerLocation } from '../services/player-location-service.js';
+import { listTeamLocationsByGame, shouldBroadcastTeamLocations } from '../services/team-location-service.js';
 
 const paramsWithGameIdSchema = {
   type: 'object',
@@ -115,7 +116,7 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      let broadcastPayload: { gameId: string; modeKey: string; stateVersion: number; player: ReturnType<typeof serializePlayer>; team: ReturnType<typeof serializeTeam> } | null = null;
+      let broadcastPayload: { gameId: string; modeKey: string; stateVersion: number; player: ReturnType<typeof serializePublicPlayer>; team: ReturnType<typeof serializeTeam> } | null = null;
 
       await executeIdempotentMutation(app, request, reply, async (db) => {
         const { id } = request.params as { id: string };
@@ -150,7 +151,7 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
           gameId: id,
           modeKey: game.modeKey,
           stateVersion: game.stateVersion,
-          player: serializePlayer(player),
+          player: serializePublicPlayer(player),
           team: serializeTeam(team),
         };
 
@@ -188,7 +189,7 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
       preHandler: [app.authenticate],
     },
     async (request, reply) => {
-      let broadcastPayload: { gameId: string; modeKey: string; stateVersion: number; player: ReturnType<typeof serializePlayer> } | null = null;
+      let broadcastPayload: { gameId: string; modeKey: string; stateVersion: number; player: ReturnType<typeof serializePublicPlayer> } | null = null;
 
       await executeIdempotentMutation(app, request, reply, async (db) => {
         const player = request.player!;
@@ -214,7 +215,7 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
           gameId: updatedPlayer.gameId,
           modeKey: game.modeKey,
           stateVersion: game.stateVersion,
-          player: serializePlayer(updatedPlayer),
+          player: serializePublicPlayer(updatedPlayer),
         };
 
         return {
@@ -258,7 +259,7 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
         .from(players)
         .where(eq(players.gameId, id));
 
-      reply.send({ players: rows.map(serializePlayer) });
+      reply.send({ players: rows.map(serializePublicPlayer) });
     },
   );
 
@@ -285,7 +286,7 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
         gameId: string;
         modeKey: string;
         stateVersion: number;
-        player: ReturnType<typeof serializePlayer>;
+        player: ReturnType<typeof serializePublicPlayer>;
         team: ReturnType<typeof serializeTeam>;
       } | null = null;
 
@@ -324,7 +325,7 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
           gameId: updatedPlayer.gameId,
           modeKey: game.modeKey,
           stateVersion: game.stateVersion,
-          player: serializePlayer(updatedPlayer),
+          player: serializePublicPlayer(updatedPlayer),
           team: serializeTeam(team),
         };
 
@@ -494,6 +495,15 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
+      let broadcastPayload:
+        | {
+            gameId: string;
+            modeKey: string;
+            stateVersion: number;
+            teamLocations: Awaited<ReturnType<typeof listTeamLocationsByGame>>;
+          }
+        | null = null;
+
       await executeIdempotentMutation(app, request, reply, async (db) => {
         const gpsPayload = request.gpsPayload!;
         const result = await updatePlayerLocation(db, {
@@ -502,6 +512,17 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
         });
 
         request.player = result.player;
+
+        const game = await getGameById(db, result.player.gameId);
+        if (game.status === 'active' && result.player.teamId && shouldBroadcastTeamLocations(game.settings)) {
+          const teamLocations = await listTeamLocationsByGame(db, result.player.gameId);
+          broadcastPayload = {
+            gameId: result.player.gameId,
+            modeKey: game.modeKey,
+            stateVersion: game.stateVersion,
+            teamLocations: teamLocations.filter((entry) => entry.teamId === result.player.teamId),
+          };
+        }
 
         return {
           gameId: result.player.gameId,
@@ -517,6 +538,20 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
             },
           },
         };
+      }, async () => {
+        if (!broadcastPayload || broadcastPayload.teamLocations.length === 0) {
+          return;
+        }
+
+        await app.broadcaster.send({
+          gameId: broadcastPayload.gameId,
+          modeKey: broadcastPayload.modeKey,
+          eventType: socketServerEventTypes.teamLocationsUpdated,
+          stateVersion: broadcastPayload.stateVersion,
+          payload: {
+            teamLocations: broadcastPayload.teamLocations,
+          },
+        });
       });
     },
   );
@@ -535,6 +570,16 @@ async function getGameById(db: DatabaseClient, gameId: string) {
 function serializePlayer(player: typeof players.$inferSelect) {
   const { sessionToken: _sessionToken, ...safePlayer } = player;
   return safePlayer;
+}
+
+function serializePublicPlayer(player: typeof players.$inferSelect) {
+  return {
+    ...serializePlayer(player),
+    lastLat: null,
+    lastLng: null,
+    lastGpsError: null,
+    lastSeenAt: null,
+  };
 }
 
 function serializeTeam(team: typeof teams.$inferSelect) {

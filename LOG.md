@@ -157,3 +157,14 @@ Significant mobile game view UX overhaul shipped before backend Phase 39 (rate l
 - Swipe down when open → collapses to fan, deselects selected card.
 - Outer wrapper `pointer-events-none`; peek container `pointer-events-none`; only the `w-fit` card stack is interactive — map fully usable beside and below the fan.
 - Claim button always rendered (invisible when not selected) to prevent card resize on selection.
+
+
+## Spectator + Team Location Notes (2026-04-16)
+
+- Spectator home view no longer uses the large centered copy block once a game is closed to joining. It now leaves the map interactive and only overlays a small `Spectator View` badge plus `Return to Game` when the same browser session is on a team.
+- Spectator map now remains pannable / zoomable; the overlay shell uses `pointer-events-none` so the map takes drag and wheel input directly.
+- Added aggregated `teamLocations` to shared state. Runtime players never receive raw per-player coordinates in `/map-state` or public roster responses; the client only renders per-team latest positions.
+- Player location uploads are now used as a lightweight heartbeat during active games. The client keeps sending the latest GPS sample on an 8s best-effort loop instead of posting every geolocation watcher update.
+- Admin game setup now includes `broadcast_team_locations`. When enabled, active players receive live team markers; spectator view still fetches team locations from the public spectator route by design.
+- Validation completed: server TypeScript, client TypeScript, and client production build all passed.
+- DB-backed realtime test remains environment-gated in WSL until Postgres is reachable on `127.0.0.1:5432`.

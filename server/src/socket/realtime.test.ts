@@ -302,6 +302,7 @@ describe('realtime socket server', () => {
       team: null,
       teams: [],
       players: [],
+      teamLocations: [],
       zones: [],
       challenges: [],
       claims: [],

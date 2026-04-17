@@ -115,6 +115,7 @@ export type GameSettings = JsonObject & {
   require_gps_accuracy?: boolean;  // default false. When true, enforces global and per-zone
                                    // GPS error radius checks on claim. Spatial containment
                                    // (ST_Covers) always applies regardless of this setting.
+  broadcast_team_locations?: boolean;
 };
 
 export type WinCondition =
@@ -226,6 +227,14 @@ export interface Player {
   lastSeenAt: IsoTimestamp | null;
   metadata: JsonObject;
   createdAt: IsoTimestamp;
+}
+
+export interface TeamLocation {
+  teamId: Uuid;
+  lat: number;
+  lng: number;
+  gpsErrorMeters: number | null;
+  updatedAt: IsoTimestamp;
 }
 
 export interface Zone {
@@ -369,6 +378,7 @@ export interface GameStateSnapshot {
   team: Team | null;
   teams: Team[];
   players: Player[];
+  teamLocations: TeamLocation[];
   zones: Zone[];
   challenges: Challenge[];
   claims: ChallengeClaim[];

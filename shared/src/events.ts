@@ -11,6 +11,7 @@ import type {
   ResourceAwardMap,
   ResourceLedgerEntry,
   Team,
+  TeamLocation,
   Zone,
 } from './types.js';
 
@@ -54,6 +55,7 @@ export const socketServerEventTypes = {
   gameResumed: 'game_resumed',
   gameEnded: 'game_ended',
   playerJoined: 'player_joined',
+  teamLocationsUpdated: 'team_locations_updated',
   annotationAdded: 'annotation_added',
   annotationRemoved: 'annotation_removed',
   resourceChanged: 'resource_changed',
@@ -106,6 +108,10 @@ export interface GameLifecyclePayload extends BroadcastEnvelopeBase {
 export interface PlayerJoinedPayload extends BroadcastEnvelopeBase {
   player: Player;
   team: Team | null;
+}
+
+export interface TeamLocationsUpdatedPayload extends BroadcastEnvelopeBase {
+  teamLocations: TeamLocation[];
 }
 
 export interface AnnotationAddedPayload extends BroadcastEnvelopeBase {
@@ -190,6 +196,7 @@ export interface SocketEventPayloadMap {
   game_resumed: GameLifecyclePayload;
   game_ended: GameLifecyclePayload;
   player_joined: PlayerJoinedPayload;
+  team_locations_updated: TeamLocationsUpdatedPayload;
   annotation_added: AnnotationAddedPayload;
   annotation_removed: AnnotationRemovedPayload;
   resource_changed: ResourceChangedPayload;

@@ -23,6 +23,7 @@ import {
   type ResourceAwardMap,
   type ScoreboardEntry,
   type Team,
+  type TeamLocation,
   type Zone,
 } from '@city-game/shared';
 
@@ -62,6 +63,7 @@ interface JoinTeamResponse { player: Player; team: Team }
 interface TeamResponse { team: Team }
 interface TeamsResponse { teams: Team[] }
 interface PlayersResponse { players: Player[] }
+interface TeamLocationsResponse { teamLocations: TeamLocation[] }
 interface ChallengesResponse { challenges: Challenge[] }
 interface MapStateResponse { snapshot: GameStateSnapshot }
 interface ScoreboardResponse { scoreboard: ScoreboardEntry[] }
@@ -456,6 +458,11 @@ export async function updateTeamDefinition(teamId: string, input: { name?: strin
 export async function listPlayers(gameId: string, signal?: AbortSignal): Promise<Player[]> {
   const response = await apiRequest<PlayersResponse>('/game/' + gameId + '/players', { signal });
   return response.players;
+}
+
+export async function getTeamLocations(gameId: string, signal?: AbortSignal): Promise<TeamLocation[]> {
+  const response = await apiRequest<TeamLocationsResponse>('/game/' + gameId + '/team-locations', { signal });
+  return response.teamLocations;
 }
 
 export async function listGameChallenges(gameId: string, signal?: AbortSignal): Promise<Challenge[]> {

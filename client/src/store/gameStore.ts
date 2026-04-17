@@ -11,6 +11,7 @@ import {
   type SocketEventPayloadMap,
   type SocketServerEventType,
   type Team,
+  type TeamLocation,
   type TeamResourceBalances,
   type TeamResourcesByTeam,
   type Zone,
@@ -317,6 +318,17 @@ function applyDirectRealtimePayload(
       };
       return snapshot;
     }
+    case socketServerEventTypes.teamLocationsUpdated: {
+      const teamLocationsPayload = payload as SocketEventPayloadMap['team_locations_updated'];
+      snapshot.teamLocations = upsertTeamLocations(snapshot.teamLocations, teamLocationsPayload.teamLocations);
+      return {
+        ...snapshot,
+        game: {
+          ...snapshot.game,
+          stateVersion: teamLocationsPayload.stateVersion,
+        },
+      };
+    }
     case socketServerEventTypes.annotationAdded: {
       const annotationPayload = payload as SocketEventPayloadMap['annotation_added'];
       snapshot.annotations = upsertById(snapshot.annotations, annotationPayload.annotation);
@@ -418,6 +430,7 @@ function cloneSnapshot(snapshot: GameStateSnapshot): GameStateSnapshot {
     team: snapshot.team ? { ...snapshot.team } : null,
     teams: [...snapshot.teams],
     players: [...snapshot.players],
+    teamLocations: [...snapshot.teamLocations],
     zones: [...snapshot.zones],
     challenges: [...snapshot.challenges],
     claims: [...snapshot.claims],
@@ -464,6 +477,19 @@ function removeById<TItem extends { id: string }>(items: TItem[], itemId: string
   return items.filter((entry) => entry.id !== itemId);
 }
 
+function upsertTeamLocations(existing: TeamLocation[], nextItems: TeamLocation[]): TeamLocation[] {
+  if (nextItems.length === 0) {
+    return existing;
+  }
+
+  const nextByTeamId = new Map(existing.map((entry) => [entry.teamId, entry]));
+  for (const item of nextItems) {
+    nextByTeamId.set(item.teamId, item);
+  }
+
+  return [...nextByTeamId.values()];
+}
+
 function asString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
@@ -478,6 +504,14 @@ function asTeam(value: unknown): Team | null {
 
 function asPlayer(value: unknown): Player | null {
   return isObjectWithId(value) ? (value as Player) : null;
+}
+
+function asTeamLocation(value: unknown): TeamLocation | null {
+  if (typeof value !== 'object' || value === null || !('teamId' in value) || typeof (value as { teamId: unknown }).teamId !== 'string') {
+    return null;
+  }
+
+  return value as TeamLocation;
 }
 
 function asZone(value: unknown): Zone | null {

@@ -6,6 +6,7 @@ import {
   type ChallengeClaim,
   type GameEventRecord,
   type GameStateSnapshot,
+  type GpsPayload,
   type SocketEventPayloadMap,
   type SocketServerEventType,
 } from '@city-game/shared';
@@ -14,6 +15,7 @@ import {
   completeChallenge,
   getMapState,
   getRecentEvents,
+  updatePlayerLocation,
   type CompleteChallengeResponse,
 } from '../../lib/api';
 import {
@@ -34,6 +36,7 @@ import {
 } from './Phase32Panels';
 import { ZoneLayer } from './ZoneLayer';
 import { collectGeometryPositions, findContainingZone } from './mapGeometry';
+import { clearTeamLocationMarkers, syncTeamLocationMarkers } from './teamLocationMarkers';
 import { useGeolocation } from './useGeolocation';
 import { useIdempotentAction } from './useIdempotentAction';
 
@@ -66,6 +69,9 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const appliedRealtimeKeysRef = useRef<Map<number, Set<string>>>(new Map());
   const hasConnectedRef = useRef(false);
   const locationMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const teamLocationMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
+  const lastUploadedLocationRef = useRef<string | null>(null);
+  const latestGpsPayloadRef = useRef<GpsPayload | null>(null);
   const seenChallengeIdsRef = useRef<Set<string>>(new Set());
   const clearAnimatedChallengesTimerRef = useRef<number | null>(null);
   const [mapForLayer, setMapForLayer] = useState<mapboxgl.Map | null>(null);
@@ -447,6 +453,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       didFitBoundsRef.current = false;
       locationMarkerRef.current?.remove();
       locationMarkerRef.current = null;
+      clearTeamLocationMarkers(teamLocationMarkersRef.current);
       setMapForLayer(null);
       mapRef.current = null;
       map.remove();
@@ -526,6 +533,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const feedEntries = useMemo(() => buildFeedEntries(recentEvents, snapshot), [recentEvents, snapshot]);
   const currentPoint = gpsPayload ? [gpsPayload.lng, gpsPayload.lat] as [number, number] : null;
   const currentZone = useMemo(() => snapshot ? findContainingZone(snapshot.zones, currentPoint) : null, [currentPoint, snapshot]);
+  const broadcastTeamLocations = Boolean(snapshot?.game.settings?.broadcast_team_locations);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -545,6 +553,55 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
     locationMarkerRef.current.setLngLat(currentPoint);
   }, [currentPoint]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !snapshot || !broadcastTeamLocations) {
+      clearTeamLocationMarkers(teamLocationMarkersRef.current);
+      return;
+    }
+
+    syncTeamLocationMarkers(map, teamLocationMarkersRef.current, snapshot.teams, snapshot.teamLocations);
+  }, [broadcastTeamLocations, snapshot]);
+
+  useEffect(() => {
+    latestGpsPayloadRef.current = gpsPayload ?? null;
+  }, [gpsPayload]);
+
+  useEffect(() => {
+    if (!snapshot?.player?.teamId || snapshot.game.status !== 'active') {
+      lastUploadedLocationRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+
+    const uploadLatestLocation = async () => {
+      const latestGpsPayload = latestGpsPayloadRef.current;
+      if (!latestGpsPayload || lastUploadedLocationRef.current === latestGpsPayload.capturedAt) {
+        return;
+      }
+
+      try {
+        await updatePlayerLocation(latestGpsPayload);
+        if (!cancelled) {
+          lastUploadedLocationRef.current = latestGpsPayload.capturedAt;
+        }
+      } catch {
+        // Team location sharing is best-effort; keep the main game loop responsive.
+      }
+    };
+
+    void uploadLatestLocation();
+    const interval = window.setInterval(() => {
+      void uploadLatestLocation();
+    }, 8000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [gameId, snapshot?.game.status, snapshot?.player?.teamId]);
 
   const handleCaptureChallenge = (challengeId: string) => {
     void runAction(`capture:${challengeId}`, async (idempotencyKey) => {
