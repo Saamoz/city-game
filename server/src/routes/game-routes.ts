@@ -466,6 +466,14 @@ function registerLifecycleRoute(app: FastifyInstance, transition: LifecycleTrans
 
 function normalizeGameSettings(input: JsonObject | undefined, existing: JsonObject = {}): JsonObject {
   const next: JsonObject = { ...existing, ...(input ?? {}) };
+
+  if (next.allow_midgame_join === undefined || next.allow_midgame_join === null) {
+    next.allow_midgame_join = true;
+  }
+  if (next.broadcast_team_locations === undefined || next.broadcast_team_locations === null) {
+    next.broadcast_team_locations = true;
+  }
+
   const activeChallengeCount = next.active_challenge_count;
 
   if (activeChallengeCount === undefined || activeChallengeCount === null) {

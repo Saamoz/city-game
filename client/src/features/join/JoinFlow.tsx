@@ -97,15 +97,17 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
   }, []);
 
   const loadSpectatorAssets = useCallback(async (gameId: string, signal?: AbortSignal) => {
-    const [nextTeams, nextZones, nextTeamLocations] = await Promise.all([
+    const [nextTeams, nextZones, nextTeamLocations, nextPlayers] = await Promise.all([
       getTeams(gameId, signal),
       listZones(gameId, signal),
       getTeamLocations(gameId, signal),
+      listPlayers(gameId, signal),
     ]);
 
     setTeams(nextTeams);
     setSpectatorZones(nextZones);
     setSpectatorTeamLocations(nextTeamLocations);
+    setPlayers(nextPlayers);
   }, []);
 
   const hydrate = useCallback(async (signal?: AbortSignal) => {
@@ -405,6 +407,48 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
     }
   }
 
+  async function handleJoinMidGame(team: Team) {
+    if (!game) {
+      return;
+    }
+    if (!player && name.trim().length < 2) {
+      setMessage('Enter your name before joining a team.');
+      return;
+    }
+
+    setJoiningTeamId(team.id);
+    setSubmitting(player ? null : 'register');
+    setMessage(null);
+
+    try {
+      const registeredPlayer = player ?? await registerPlayer(game.id, name.trim());
+      const result = await joinTeam(game.id, team.joinCode);
+      const nextPlayer = result.player;
+
+      setPlayer(nextPlayer);
+      setPlayers((currentPlayers) => upsertPlayer(upsertPlayer(currentPlayers, registeredPlayer), nextPlayer));
+      setTeams((currentTeams) => upsertTeam(currentTeams, result.team));
+      setSession({
+        step: 'home',
+        gameId: game.id,
+        playerId: nextPlayer.id,
+        teamId: nextPlayer.teamId,
+        displayName: nextPlayer.displayName,
+      });
+
+      if (game.status === 'active') {
+        onEnterGame(game.id);
+      } else {
+        setMessage('Joined ' + result.team.name + '. The game is paused right now.');
+      }
+    } catch (error) {
+      setMessage(getErrorMessage(error, 'Unable to join that team.'));
+    } finally {
+      setJoiningTeamId(null);
+      setSubmitting(null);
+    }
+  }
+
   async function handleLeaveTeam() {
     if (!game || !player || isLeavingTeam) {
       return;
@@ -532,6 +576,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
 
   const canReturnToGame = Boolean(game && game.status === 'active' && player?.teamId);
   const canJoinCurrentGame = Boolean(game && game.status === 'setup');
+  const canJoinMidGame = Boolean(game && (game.status === 'active' || game.status === 'paused') && !player?.teamId && isMidgameJoinAllowed(game.settings));
   const teamedPlayers = useMemo(() => players.filter((entry) => entry.teamId), [players]);
   const readyPlayers = useMemo(() => teamedPlayers.filter((entry) => isLobbyReady(entry.metadata)).length, [teamedPlayers]);
   const isCurrentPlayerReady = useMemo(() => (player ? isLobbyReady(player.metadata) : false), [player]);
@@ -548,15 +593,19 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
       {status === 'ready' && game && step === 'home' ? (
         <HomeScreen
           canJoinCurrentGame={canJoinCurrentGame}
+          canJoinMidGame={canJoinMidGame}
           canReturnToGame={canReturnToGame}
           game={game}
           message={message}
+          spectatorPlayers={players}
           spectatorTeams={teams}
           spectatorTeamLocations={spectatorTeamLocations}
           spectatorZones={spectatorZones}
           name={name}
+          joiningTeamId={joiningTeamId}
           onEnterGame={() => onEnterGame(game.id)}
           onContinue={handleContinueToTeams}
+          onJoinMidGame={handleJoinMidGame}
           onNameChange={setName}
           onRegister={handleRegister}
           player={player}
@@ -615,13 +664,17 @@ function HomeScreen(props: {
   player: Player | null;
   name: string;
   message: string | null;
+  spectatorPlayers: Player[];
   spectatorTeams: Team[];
   spectatorTeamLocations: TeamLocation[];
   spectatorZones: Zone[];
   submitting: boolean;
+  joiningTeamId: string | null;
   canJoinCurrentGame: boolean;
+  canJoinMidGame: boolean;
   canReturnToGame: boolean;
   onContinue(): void;
+  onJoinMidGame(team: Team): void;
   onNameChange(value: string): void;
   onRegister(event: FormEvent<HTMLFormElement>): void;
   onEnterGame(): void;
@@ -639,7 +692,7 @@ function HomeScreen(props: {
         showSpectatorView ? 'pointer-events-none max-w-none' : 'max-w-3xl',
       ].join(' ')}>
         {showSpectatorView ? (
-          <div className="pointer-events-none flex min-h-[calc(100vh-4rem)] flex-col justify-between">
+          <div className="pointer-events-none flex min-h-[calc(100vh-4rem)] flex-col justify-between gap-4">
             <div className="flex items-start justify-between gap-3">
               <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#d8c6a0]/75 bg-[#f7efdc]/94 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#5d4d33] shadow-[0_12px_28px_rgba(24,32,36,0.12)] backdrop-blur">
                 <span className="h-2.5 w-2.5 rounded-full bg-[#c8a86b]" />
@@ -655,7 +708,18 @@ function HomeScreen(props: {
                 </button>
               ) : null}
             </div>
-            <div />
+            <SpectatorTeamPanel
+              canJoin={props.canJoinMidGame}
+              joiningTeamId={props.joiningTeamId}
+              message={props.message}
+              name={props.name}
+              onJoin={props.onJoinMidGame}
+              onNameChange={props.onNameChange}
+              player={props.player}
+              players={props.spectatorPlayers}
+              submitting={props.submitting}
+              teams={props.spectatorTeams}
+            />
           </div>
         ) : (
           <>
@@ -717,6 +781,109 @@ function HomeScreen(props: {
         )}
       </div>
     </main>
+  );
+}
+
+
+function SpectatorTeamPanel(props: {
+  canJoin: boolean;
+  joiningTeamId: string | null;
+  message: string | null;
+  name: string;
+  player: Player | null;
+  players: Player[];
+  submitting: boolean;
+  teams: Team[];
+  onJoin(team: Team): void;
+  onNameChange(value: string): void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const playersByTeamId = useMemo(() => {
+    const grouped = new Map<string, Player[]>();
+    for (const team of props.teams) {
+      grouped.set(team.id, []);
+    }
+    for (const player of props.players) {
+      if (!player.teamId) {
+        continue;
+      }
+      const teamPlayers = grouped.get(player.teamId);
+      if (teamPlayers) {
+        teamPlayers.push(player);
+      }
+    }
+    return grouped;
+  }, [props.players, props.teams]);
+
+  const visibleTeams = expanded ? props.teams : props.teams.slice(0, 3);
+
+  return (
+    <section className="pointer-events-auto mb-1 w-full max-w-md self-start rounded-[1.4rem] border border-[#d8c6a0]/80 bg-[#f7efdc]/94 p-3 shadow-[0_18px_42px_rgba(24,32,36,0.16)] backdrop-blur sm:mb-0 sm:p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8c7a57]">Teams</p>
+          <p className="mt-1 font-[Georgia,Times_New_Roman,serif] text-xl font-semibold text-[#223238]">{props.teams.length} teams live</p>
+        </div>
+        <button
+          className="rounded-full border border-[#b7a47d]/75 bg-[#fffaf0] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#3d4b50] transition hover:bg-[#f1e6cc]"
+          onClick={() => setExpanded((current) => !current)}
+          type="button"
+        >
+          {expanded ? 'Collapse' : 'Expand'}
+        </button>
+      </div>
+
+      {props.message ? <p className="mt-3 rounded-2xl border border-[#d8c6a0]/80 bg-[#fffaf0]/90 px-3 py-2 text-sm text-[#5f4f36]">{props.message}</p> : null}
+
+      {props.canJoin && !props.player ? (
+        <input
+          className="mt-3 w-full rounded-2xl border border-[#d5c59f] bg-[#fffaf0] px-4 py-3 text-sm text-[#223238] outline-none transition placeholder:text-[#8a8476] focus:border-[#c8a86b] focus:bg-[#fffdf8]"
+          maxLength={100}
+          onChange={(event) => props.onNameChange(event.target.value)}
+          placeholder="Your name"
+          value={props.name}
+        />
+      ) : null}
+
+      <div className={["mt-3 space-y-2 overflow-y-auto pr-1", expanded ? 'max-h-[52vh]' : 'max-h-56'].join(' ')}>
+        {visibleTeams.map((team) => {
+          const teamPlayers = playersByTeamId.get(team.id) ?? [];
+          const isJoining = props.joiningTeamId === team.id;
+          return (
+            <div key={team.id} className="rounded-2xl border border-[#d6c6a2]/80 bg-[#fffaf0]/92 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: team.color }} />
+                    <p className="truncate text-sm font-semibold text-[#223238]">{team.name}</p>
+                  </div>
+                  <p className="mt-1 text-xs text-[#66757a]">{teamPlayers.length} player{teamPlayers.length === 1 ? '' : 's'}</p>
+                </div>
+                {props.canJoin ? (
+                  <button
+                    className="shrink-0 rounded-full bg-[#24343a] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#f4ead7] transition hover:bg-[#1d2b30] disabled:cursor-not-allowed disabled:bg-[#9aa5a7]"
+                    disabled={isJoining || props.submitting || (!props.player && props.name.trim().length < 2)}
+                    onClick={() => props.onJoin(team)}
+                    type="button"
+                  >
+                    {isJoining ? 'Joining' : 'Join'}
+                  </button>
+                ) : null}
+              </div>
+              {expanded ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {teamPlayers.length ? teamPlayers.map((player) => (
+                    <span key={player.id} className="rounded-full border border-[#dfd1af] bg-[#f4ead7] px-2.5 py-1 text-xs text-[#4f5d62]">
+                      {player.displayName}
+                    </span>
+                  )) : <span className="text-xs text-[#7b8588]">No players yet</span>}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -783,6 +950,10 @@ function upsertTeam(teams: Team[], team: Team) {
   const nextTeams = teams.slice();
   nextTeams[existingIndex] = team;
   return nextTeams;
+}
+
+function isMidgameJoinAllowed(settings: Game['settings'] | null | undefined) {
+  return settings?.allow_midgame_join !== false;
 }
 
 function isLobbyReady(metadata: Player['metadata'] | null | undefined) {

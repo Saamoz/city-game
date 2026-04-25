@@ -192,6 +192,55 @@ describe('player routes', () => {
     expect(storedPlayer?.teamId).toBe(TEAM_ID);
   });
 
+  it('allows joining an active game when mid-game joins are enabled by default', async () => {
+    await seedGame({ status: 'active' });
+    await seedTeam();
+    await seedPlayer({ teamId: null, sessionToken: 'join-active-session-token' });
+    app = await createPlayerTestApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/game/${GAME_ID}/teams/join`,
+      headers: idempotencyHeaders('join-team-active-default'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'join-active-session-token',
+      },
+      payload: {
+        join_code: 'TEAM1234',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().player.teamId).toBe(TEAM_ID);
+  });
+
+  it('rejects joining an active game when mid-game joins are disabled', async () => {
+    await seedGame({ status: 'active', settings: { allow_midgame_join: false } });
+    await seedTeam();
+    await seedPlayer({ teamId: null, sessionToken: 'join-active-disabled-token' });
+    app = await createPlayerTestApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/game/${GAME_ID}/teams/join`,
+      headers: idempotencyHeaders('join-team-active-disabled'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'join-active-disabled-token',
+      },
+      payload: {
+        join_code: 'TEAM1234',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Mid-game joining is disabled for this game.',
+      },
+    });
+  });
+
   it('broadcasts player_joined after a player joins a team', async () => {
     await seedGame();
     await seedTeam();

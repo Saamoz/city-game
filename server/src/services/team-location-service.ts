@@ -61,7 +61,7 @@ export async function listTeamLocationsByGame(
 
 export function shouldBroadcastTeamLocations(settings: unknown): boolean {
   const gameSettings = normalizeGameSettings(settings);
-  return gameSettings.broadcast_team_locations === true;
+  return gameSettings.broadcast_team_locations !== false;
 }
 
 function normalizeGameSettings(settings: unknown): GameSettings {

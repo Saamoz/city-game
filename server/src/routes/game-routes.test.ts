@@ -57,6 +57,12 @@ describe("game and team routes", () => {
         modeKey: "territory",
         status: "setup",
         winCondition: [{ type: "all_zones" }],
+        settings: {
+          location_tracking_enabled: true,
+          active_challenge_count: 3,
+          allow_midgame_join: true,
+          broadcast_team_locations: true,
+        },
       },
     });
   });

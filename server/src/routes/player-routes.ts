@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { and, eq } from 'drizzle-orm';
-import { STATE_VERSION_HEADER, errorCodes, socketServerEventTypes, type JsonObject } from '@city-game/shared';
+import { STATE_VERSION_HEADER, errorCodes, socketServerEventTypes, type GameSettings, type JsonObject } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { games, players, teams } from '../db/schema.js';
 import { generateSessionToken, getSerializedSessionCookie } from '../lib/auth.js';
@@ -124,6 +124,12 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
 
         if (request.player?.gameId !== id) {
           throw new AppError(errorCodes.teamNotFound);
+        }
+
+        if (game.status === 'completed' || (game.status !== 'setup' && !isMidgameJoinAllowed(game.settings))) {
+          throw new AppError(errorCodes.validationError, {
+            message: 'Mid-game joining is disabled for this game.',
+          });
         }
 
         const body = request.body as { join_code: string };
@@ -584,6 +590,14 @@ function serializePublicPlayer(player: typeof players.$inferSelect) {
 
 function serializeTeam(team: typeof teams.$inferSelect) {
   return team;
+}
+
+function isMidgameJoinAllowed(settings: unknown) {
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    return true;
+  }
+
+  return (settings as GameSettings).allow_midgame_join !== false;
 }
 
 function isLobbyReady(metadata: JsonObject | null | undefined) {

@@ -61,6 +61,7 @@ interface GameFormState {
   activeChallengeCount: string;
   requireGpsAccuracy: boolean;
   broadcastTeamLocations: boolean;
+  allowMidgameJoin: boolean;
 }
 
 interface TeamDraftState {
@@ -79,7 +80,8 @@ const INITIAL_GAME_FORM: GameFormState = {
   timeLimitMinutes: '60',
   activeChallengeCount: '3',
   requireGpsAccuracy: false,
-  broadcastTeamLocations: false,
+  broadcastTeamLocations: true,
+  allowMidgameJoin: true,
 };
 
 const INITIAL_TEAM_DRAFT: TeamDraftState = {
@@ -746,6 +748,15 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                   />
                   Broadcast team locations
                 </label>
+                <label className="flex items-center gap-3 text-sm font-medium text-[#21313a]">
+                  <input
+                    type="checkbox"
+                    checked={gameForm.allowMidgameJoin}
+                    onChange={(event) => { setGameForm((current) => ({ ...current, allowMidgameJoin: event.target.checked })); }}
+                    className="h-4 w-4 rounded border-[#9aabb5]"
+                  />
+                  Allow mid-game joins
+                </label>
                 {selectedMap ? <MetaPill label={'Map center ' + selectedMap.centerLat.toFixed(3) + ', ' + selectedMap.centerLng.toFixed(3)} /> : null}
                 {selectedChallengeSet ? <MetaPill label={selectedChallengeSet.name} /> : null}
                 {currentGame ? <StatusBadge status={currentGame.status} /> : null}
@@ -1038,7 +1049,8 @@ function buildGameForm(game: Game): GameFormState {
     timeLimitMinutes: winCondition.type === 'time_limit' ? String(winCondition.duration_minutes) : '60',
     activeChallengeCount: String(settings.active_challenge_count ?? 3),
     requireGpsAccuracy: Boolean(settings.require_gps_accuracy),
-    broadcastTeamLocations: Boolean(settings.broadcast_team_locations),
+    broadcastTeamLocations: settings.broadcast_team_locations !== false,
+    allowMidgameJoin: settings.allow_midgame_join !== false,
   };
 }
 
@@ -1073,6 +1085,7 @@ function buildSettings(form: GameFormState, existing: JsonObject): JsonObject {
   next.active_challenge_count = Math.max(1, Number(form.activeChallengeCount) || 1);
   next.require_gps_accuracy = form.requireGpsAccuracy;
   next.broadcast_team_locations = form.broadcastTeamLocations;
+  next.allow_midgame_join = form.allowMidgameJoin;
   return next;
 }
 

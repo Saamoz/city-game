@@ -116,6 +116,7 @@ export type GameSettings = JsonObject & {
                                    // GPS error radius checks on claim. Spatial containment
                                    // (ST_Covers) always applies regardless of this setting.
   broadcast_team_locations?: boolean;
+  allow_midgame_join?: boolean;
 };
 
 export type WinCondition =
