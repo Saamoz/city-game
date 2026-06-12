@@ -29,6 +29,7 @@ const completeChallengeBodySchema = {
   properties: {
     submission: {},
     gps: gpsPayloadSchema,
+    targetZoneId: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
   },
 } as const;
 

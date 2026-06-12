@@ -37,6 +37,7 @@ export interface CompleteChallengeInput {
   teamId: string;
   submission?: JsonValue | null;
   gpsPayload?: GpsPayload | null;
+  targetZoneId?: string | null;
 }
 
 export interface CompleteChallengeSuccessResult {
@@ -97,6 +98,7 @@ export async function completeChallenge(
       teamId: input.teamId,
       submission: input.submission ?? null,
       gpsPayload: input.gpsPayload,
+      targetZoneId: input.targetZoneId ?? null,
       now,
       settings: game.settings as GameSettings,
     });
@@ -175,6 +177,7 @@ async function completePortableChallengeDirectly(
     teamId: string;
     submission: JsonValue | null;
     gpsPayload: GpsPayload;
+    targetZoneId: string | null;
     now: Date;
     settings: GameSettings;
   },
@@ -183,6 +186,7 @@ async function completePortableChallengeDirectly(
     gameId: input.gameId,
     challenge: input.challenge,
     gpsPayload: input.gpsPayload,
+    targetZoneId: input.targetZoneId,
   });
 
   if (zone.isDisabled) {
@@ -193,17 +197,19 @@ async function completePortableChallengeDirectly(
     });
   }
 
-  if (input.settings.require_gps_accuracy) {
-    assertGpsAccuracy(zone.maxGpsErrorMeters, input.gpsPayload.gpsErrorMeters);
-  }
+  if (!input.targetZoneId) {
+    if (input.settings.require_gps_accuracy) {
+      assertGpsAccuracy(zone.maxGpsErrorMeters, input.gpsPayload.gpsErrorMeters);
+    }
 
-  await assertPlayerInsideZone(
-    db,
-    zone.id,
-    input.gpsPayload.lat,
-    input.gpsPayload.lng,
-    zone.claimRadiusMeters,
-  );
+    await assertPlayerInsideZone(
+      db,
+      zone.id,
+      input.gpsPayload.lat,
+      input.gpsPayload.lng,
+      zone.claimRadiusMeters,
+    );
+  }
 
   const zoneBefore = await lockZone(db, zone.id);
   const locationAtClaim = sql`ST_SetSRID(ST_MakePoint(${input.gpsPayload.lng}, ${input.gpsPayload.lat}), 4326)`;
@@ -523,8 +529,19 @@ async function resolvePortableZone(
     gameId: string;
     challenge: typeof challenges.$inferSelect;
     gpsPayload: GpsPayload;
+    targetZoneId: string | null;
   },
 ): Promise<Zone> {
+  if (input.targetZoneId) {
+    const zone = await getZoneByIdOrThrow(db, input.targetZoneId);
+    if (zone.gameId !== input.gameId) {
+      throw new AppError(errorCodes.validationError, {
+        message: 'Zone not found for the active player game.',
+      });
+    }
+    return zone;
+  }
+
   const [zone] = await findContainingZones(db, {
     gameId: input.gameId,
     lat: input.gpsPayload.lat,

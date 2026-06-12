@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
-import type { Challenge } from '@city-game/shared';
+import type { Challenge, Zone } from '@city-game/shared';
 import {
   CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH,
   CHALLENGE_CARD_TITLE_MAX_LENGTH,
@@ -17,13 +17,15 @@ interface ChallengeDeckProps {
   challenges: Challenge[];
   completedCards: CompletedChallengeCard[];
   animatedChallengeIds: string[];
+  currentZoneId: string | null;
   currentZoneName: string | null;
   progressLabel: string;
+  zones: Zone[];
   locationStatus: GeolocationStatus;
   locationMessage: string | null;
   selectedChallengeId: string | null;
   onSelectChallenge(challengeId: string): void;
-  onCaptureChallenge(challengeId: string): void;
+  onCaptureChallenge(challengeId: string, targetZoneId: string | null): void;
   onFocusCompletedCard(challengeId: string): void;
   isActionPending(actionKey: string): boolean;
   isPeeking: boolean;
@@ -43,9 +45,11 @@ export function ChallengeDeck({
   challenges,
   completedCards,
   animatedChallengeIds,
+  currentZoneId,
   currentZoneName,
   locationStatus,
   progressLabel,
+  zones,
   locationMessage,
   selectedChallengeId,
   onSelectChallenge,
@@ -65,7 +69,9 @@ export function ChallengeDeck({
   const [detailChallengeId, setDetailChallengeId] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
   const [confirmChallengeId, setConfirmChallengeId] = useState<string | null>(null);
+  const [targetZoneIdByChallengeId, setTargetZoneIdByChallengeId] = useState<Record<string, string>>({});
 
+  const selectableZones = zones.filter((zone) => !zone.isDisabled).sort((left, right) => left.name.localeCompare(right.name));
   const detailChallenge = challenges.find((challenge) => challenge.id === detailChallengeId) ?? null;
 
   return (
@@ -144,6 +150,7 @@ export function ChallengeDeck({
               const isConfirming = confirmChallengeId === challenge.id;
               const capturePending = isActionPending(`capture:${challenge.id}`);
               const shortDescription = getShortDescription(challenge);
+              const selectedTargetZoneId = targetZoneIdByChallengeId[challenge.id] ?? currentZoneId ?? selectableZones[0]?.id ?? '';
 
               return (
                 <div
@@ -219,18 +226,36 @@ export function ChallengeDeck({
                     <div className="mt-3 space-y-2">
                       {isConfirming ? (
                         <>
-                          <button
-                            className="w-full rounded-2xl border border-[#8d2727] bg-[#b83a31] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#fff6ef] transition hover:bg-[#9e3028] disabled:cursor-not-allowed disabled:opacity-60"
-                            data-deck-interactive="true"
-                            disabled={capturePending || locationStatus === 'unsupported' || locationStatus === 'requesting'}
-                            onClick={() => {
-                              onCaptureChallenge(challenge.id);
-                              setConfirmChallengeId(null);
-                            }}
-                            type="button"
-                          >
-                            {capturePending ? 'Claiming…' : 'Confirm Claim'}
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              className="min-w-0 flex-1 rounded-2xl border border-[#8d2727] bg-[#b83a31] px-3 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#fff6ef] transition hover:bg-[#9e3028] disabled:cursor-not-allowed disabled:opacity-60"
+                              data-deck-interactive="true"
+                              disabled={capturePending || locationStatus === 'unsupported' || locationStatus === 'requesting' || !selectedTargetZoneId}
+                              onClick={() => {
+                                onCaptureChallenge(challenge.id, selectedTargetZoneId || null);
+                                setConfirmChallengeId(null);
+                              }}
+                              type="button"
+                            >
+                              {capturePending ? 'Claiming…' : 'Confirm'}
+                            </button>
+                            <select
+                              aria-label="Zone to claim"
+                              className="min-w-[4.75rem] max-w-[5.5rem] rounded-2xl border border-[#c8b48a]/70 bg-[#fff8eb] px-2 py-2 text-[11px] font-semibold text-[#24343a] outline-none"
+                              data-deck-interactive="true"
+                              disabled={capturePending || selectableZones.length === 0}
+                              onChange={(event) => {
+                                const nextZoneId = event.target.value;
+                                setTargetZoneIdByChallengeId((current) => ({ ...current, [challenge.id]: nextZoneId }));
+                              }}
+                              title={selectableZones.find((zone) => zone.id === selectedTargetZoneId)?.name ?? 'Choose zone'}
+                              value={selectedTargetZoneId}
+                            >
+                              {selectableZones.map((zone) => (
+                                <option key={zone.id} value={zone.id}>{zone.name}</option>
+                              ))}
+                            </select>
+                          </div>
                           <button
                             className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#efe5cf] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#5d4d33] transition hover:bg-[#e6d8bc]"
                             data-deck-interactive="true"
@@ -248,7 +273,10 @@ export function ChallengeDeck({
                           ].join(' ')}
                           data-deck-interactive="true"
                           disabled={capturePending || locationStatus === 'unsupported' || locationStatus === 'requesting'}
-                          onClick={() => setConfirmChallengeId(challenge.id)}
+                          onClick={() => {
+                            setTargetZoneIdByChallengeId((current) => ({ ...current, [challenge.id]: current[challenge.id] ?? currentZoneId ?? selectableZones[0]?.id ?? '' }));
+                            setConfirmChallengeId(challenge.id);
+                          }}
                           type="button"
                         >
                           Claim

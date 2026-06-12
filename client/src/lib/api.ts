@@ -501,7 +501,7 @@ export async function claimChallenge(challengeId: string, gps: GpsPayload, idemp
 
 export async function completeChallenge(
   challengeId: string,
-  input?: { submission?: JsonValue | null; gps?: GpsPayload | null },
+  input?: { submission?: JsonValue | null; gps?: GpsPayload | null; targetZoneId?: string | null },
   idempotencyKey?: string,
 ): Promise<CompleteChallengeResponse> {
   return apiRequest<CompleteChallengeResponse>('/challenges/' + challengeId + '/complete', {
@@ -509,6 +509,7 @@ export async function completeChallenge(
     body: {
       submission: input?.submission ?? null,
       gps: input?.gps ?? null,
+      targetZoneId: input?.targetZoneId ?? null,
     },
     idempotencyKey,
   });

@@ -40,6 +40,17 @@ const ZONE_GEOMETRY = {
   ]],
 } as unknown as import('@city-game/shared').GeoJsonPolygon;
 
+const TARGET_ZONE_GEOMETRY = {
+  type: 'Polygon',
+  coordinates: [[
+    [-97.1505, 49.9044],
+    [-97.1463, 49.9044],
+    [-97.1463, 49.9062],
+    [-97.1505, 49.9062],
+    [-97.1505, 49.9044],
+  ]],
+} as unknown as import('@city-game/shared').GeoJsonPolygon;
+
 describe('territory complete route', () => {
   let app: FastifyInstance;
   let testDatabase: Awaited<ReturnType<typeof getTestDatabase>>;
@@ -288,6 +299,48 @@ describe('territory complete route', () => {
       eventTypes.challengeCompleted,
       eventTypes.zoneCaptured,
     ].sort());
+  });
+
+  it('completes a portable card for a selected zone even when current GPS is in another zone', async () => {
+    await seedGame();
+    await seedTeam();
+    await seedPlayer({ sessionToken: 'portable-target-zone-session' });
+    const currentZone = await seedZone();
+    const targetZone = await createZone(testDatabase.db, {
+      gameId: GAME_ID,
+      name: 'Started Zone',
+      geometry: TARGET_ZONE_GEOMETRY,
+      pointValue: 1,
+    });
+    await seedChallenge({ zoneId: null, config: { portable: true }, scoring: { points: 7 } });
+    app = await createTestApp({ db: testDatabase.db });
+
+    const response = await completeRequest({
+      sessionToken: 'portable-target-zone-session',
+      actionId: 'portable-target-zone',
+      payload: {
+        gps: validGpsPayload(),
+        targetZoneId: targetZone.id,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      challenge: {
+        id: CHALLENGE_ID,
+        status: 'completed',
+        zoneId: targetZone.id,
+      },
+      zone: {
+        id: targetZone.id,
+        ownerTeamId: TEAM_ONE_ID,
+      },
+    });
+
+    const [storedCurrentZone] = await testDatabase.db.select().from(zones).where(eq(zones.id, currentZone.id)).limit(1);
+    const [storedTargetZone] = await testDatabase.db.select().from(zones).where(eq(zones.id, targetZone.id)).limit(1);
+    expect(storedCurrentZone?.ownerTeamId).toBeNull();
+    expect(storedTargetZone?.ownerTeamId).toBe(TEAM_ONE_ID);
   });
 
   it('commits expired-claim cleanup and returns claim expired', async () => {

@@ -610,10 +610,11 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     };
   }, [gameId, snapshot?.game.status, snapshot?.player?.teamId]);
 
-  const handleCaptureChallenge = (challengeId: string) => {
+  const handleCaptureChallenge = (challengeId: string, targetZoneId: string | null) => {
     void runAction(`capture:${challengeId}`, async (idempotencyKey) => {
       const challenge = snapshot?.challenges.find((entry) => entry.id === challengeId) ?? null;
-      const zoneLabel = currentZone?.name ?? 'this zone';
+      const targetZone = targetZoneId ? snapshot?.zones.find((entry) => entry.id === targetZoneId) ?? null : null;
+      const zoneLabel = targetZone?.name ?? currentZone?.name ?? 'this zone';
 
       if (!challenge) {
         return null;
@@ -625,6 +626,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           challengeId,
           {
             gps: gpsCapturedAtOverride ? { ...gps, capturedAt: gpsCapturedAtOverride } : gps,
+            targetZoneId,
           },
           idempotencyKey,
         );
@@ -983,6 +985,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                   animatedChallengeIds={animatedChallengeIds}
                   challenges={snapshot.challenges}
                   completedCards={completedCards}
+                  currentZoneId={currentZone?.id ?? null}
                   currentZoneName={currentZone?.name ?? null}
                   isActionPending={isPending}
                   isPeeking={false}
@@ -994,6 +997,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                   onSelectChallenge={setSelectedChallengeId}
                   progressLabel={challengeProgressLabel}
                   selectedChallengeId={selectedChallengeId}
+                  zones={snapshot.zones}
                 />
               </div>
             </section>
@@ -1028,6 +1032,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               animatedChallengeIds={animatedChallengeIds}
               challenges={snapshot.challenges}
               completedCards={completedCards}
+              currentZoneId={currentZone?.id ?? null}
               currentZoneName={currentZone?.name ?? null}
               isActionPending={isPending}
               isPeeking={!isDeckOpen}
@@ -1039,6 +1044,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               onSelectChallenge={setSelectedChallengeId}
               progressLabel={challengeProgressLabel}
               selectedChallengeId={selectedChallengeId}
+              zones={snapshot.zones}
             />
 
             {/* Completed row — only in open mode, expands on swipe-up */}
