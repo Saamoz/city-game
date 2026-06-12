@@ -22,6 +22,11 @@ import {
   updateChallengeSetDefinition,
   updateChallengeSetItemDefinition,
 } from '../../lib/api';
+import {
+  CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH,
+  CHALLENGE_CARD_TITLE_MAX_LENGTH,
+  normalizeChallengeCardText,
+} from '../../lib/challenge-card-limits';
 import { ChallengePointPicker } from './ChallengePointPicker';
 
 interface AdminChallengesProps {
@@ -300,17 +305,27 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
       return;
     }
 
-    const title = itemForm.title.trim();
+    const title = normalizeChallengeCardText(itemForm.title);
     if (!title) {
       setNotice({ tone: 'error', message: 'Item title is required.' });
       return;
     }
+    if (title.length > CHALLENGE_CARD_TITLE_MAX_LENGTH) {
+      setNotice({ tone: 'error', message: 'Title must be ' + CHALLENGE_CARD_TITLE_MAX_LENGTH + ' characters or fewer.' });
+      return;
+    }
 
-    const shortDescription = itemForm.shortDescription.trim();
+    const shortDescription = normalizeChallengeCardText(itemForm.shortDescription);
     const longDescription = itemForm.longDescription.trim();
     const description = longDescription || shortDescription;
     if (!description) {
       setNotice({ tone: 'error', message: 'Provide a short or long description.' });
+      return;
+    }
+
+    const cardDescription = shortDescription || normalizeChallengeCardText(description);
+    if (cardDescription.length > CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH) {
+      setNotice({ tone: 'error', message: 'Short description must be ' + CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH + ' characters or fewer.' });
       return;
     }
 
@@ -471,12 +486,21 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
 
       const createdItems: ChallengeSetItem[] = [];
       for (const [index, item] of importedItems.entries()) {
+        const title = normalizeChallengeCardText(item.title);
+        const shortDescription = getCardShortDescription(item);
+        if (title.length > CHALLENGE_CARD_TITLE_MAX_LENGTH) {
+          throw new Error('Imported item "' + title + '" has a title over ' + CHALLENGE_CARD_TITLE_MAX_LENGTH + ' characters.');
+        }
+        if (shortDescription.length > CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH) {
+          throw new Error('Imported item "' + title + '" has a short description over ' + CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH + ' characters.');
+        }
+
         const created = await createChallengeSetItemDefinition(targetSet.id, {
           mapZoneId: item.mapZoneId,
           mapPoint: item.mapPoint,
-          title: item.title,
+          title,
           description: item.description,
-          config: item.config,
+          config: normalizeImportedItemConfig(item.config),
           scoring: normalizeScoring(item.scoring),
           difficulty: item.difficulty,
           sortOrder: item.sortOrder ?? index,
@@ -650,10 +674,12 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
 
           <div className="mt-4 space-y-3 overflow-y-auto lg:max-h-[calc(100vh-10rem)]">
             <Field label="Title">
-              <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={itemForm.title} onChange={(event) => setItemForm((current) => ({ ...current, title: event.target.value }))} />
+              <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" maxLength={CHALLENGE_CARD_TITLE_MAX_LENGTH} value={itemForm.title} onChange={(event) => setItemForm((current) => ({ ...current, title: event.target.value }))} />
+              <CharacterLimit value={itemForm.title} max={CHALLENGE_CARD_TITLE_MAX_LENGTH} />
             </Field>
             <Field label="Short Description">
-              <textarea className="h-24 w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={itemForm.shortDescription} onChange={(event) => setItemForm((current) => ({ ...current, shortDescription: event.target.value }))} />
+              <textarea className="h-24 w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" maxLength={CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH} value={itemForm.shortDescription} onChange={(event) => setItemForm((current) => ({ ...current, shortDescription: event.target.value }))} />
+              <CharacterLimit value={itemForm.shortDescription} max={CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH} />
             </Field>
             <Field label="Long Description">
               <textarea className="h-36 w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={itemForm.longDescription} onChange={(event) => setItemForm((current) => ({ ...current, longDescription: event.target.value }))} />
@@ -712,6 +738,24 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
       </div>
     </Shell>
   );
+}
+
+
+function getCardShortDescription(item: Pick<ChallengeSetItem, 'config' | 'description'>): string {
+  const configured = item.config?.short_description;
+  if (typeof configured === 'string' && configured.trim()) {
+    return normalizeChallengeCardText(configured);
+  }
+
+  return normalizeChallengeCardText(item.description);
+}
+
+function normalizeImportedItemConfig(config: ChallengeSetItem['config']): JsonObject {
+  const next = { ...config } as JsonObject;
+  if (typeof config?.short_description === 'string') {
+    next.short_description = normalizeChallengeCardText(config.short_description);
+  }
+  return next;
 }
 
 function buildSetForm(challengeSet: ChallengeSet): SetFormState {
@@ -845,6 +889,18 @@ function Notice({ message, tone }: NoticeState) {
     ].join(' ')}>
       {message}
     </div>
+  );
+}
+
+
+function CharacterLimit({ value, max }: { value: string; max: number }) {
+  const length = normalizeChallengeCardText(value).length;
+  const isAtLimit = length >= max;
+
+  return (
+    <p className={['mt-1 text-right text-[11px]', isAtLimit ? 'text-[#9f3f31]' : 'text-[#7a6a48]'].join(' ')}>
+      {length}/{max}
+    </p>
   );
 }
 

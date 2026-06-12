@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Challenge } from '@city-game/shared';
+import {
+  CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH,
+  CHALLENGE_CARD_TITLE_MAX_LENGTH,
+  clampChallengeCardText,
+} from '../../lib/challenge-card-limits';
 import type { GeolocationStatus } from './useGeolocation';
 
 interface CompletedChallengeCard {
@@ -149,7 +154,7 @@ export function ChallengeDeck({
                 >
                 <article
                   className={[
-                    'relative snap-start min-w-[13rem] max-w-[13rem] lg:min-w-[17rem] lg:max-w-[17rem] flex-none rounded-[1.8rem] border p-4 lg:p-5 text-[#1f2a2f] shadow-[0_16px_80px_rgba(24,32,36,0.10)] transition duration-150',
+                    'relative snap-start min-w-[13.5rem] max-w-[13.5rem] lg:min-w-[17rem] lg:max-w-[17rem] flex-none rounded-[1.65rem] border p-3.5 lg:p-4 text-[#1f2a2f] shadow-[0_16px_80px_rgba(24,32,36,0.10)] transition duration-150',
                     isSelected
                       ? 'z-10 border-[#24343a] bg-[#fff8eb] shadow-[0_20px_80px_rgba(24,32,36,0.16)]'
                       : 'z-0 border-[#c8b48a]/55 bg-[#f8f1df] hover:-translate-y-0.5 hover:bg-[#fbf4e4]',
@@ -181,21 +186,21 @@ export function ChallengeDeck({
                     <>
                       <div className="flex items-start justify-between gap-4">
                         <h3
-                          className="font-[Georgia,Times_New_Roman,serif] text-lg lg:text-xl font-semibold text-[#1f2a2f]"
+                          className="font-[Georgia,Times_New_Roman,serif] text-base lg:text-lg font-semibold leading-snug text-[#1f2a2f]"
                           title={challenge.title}
                         >
                           {getDisplayTitle(challenge.title)}
                         </h3>
                       </div>
 
-                      <p className="mt-3 lg:mt-4 overflow-hidden text-sm leading-6 text-[#4f6168] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] lg:[-webkit-line-clamp:4]">
+                      <p className="mt-2 overflow-hidden text-xs leading-5 text-[#4f6168] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:4]">
                         {shortDescription}
                       </p>
                     </>
                   )}
 
 
-                  <div className="mt-3 lg:mt-5 border-t border-[#d8c8a3]/55 pt-3 lg:pt-4">
+                  <div className="mt-3 border-t border-[#d8c8a3]/55 pt-3">
                     <p className="hidden lg:block text-[11px] uppercase tracking-[0.18em] text-[#7d6f55]">
                       {currentZoneName ?? 'No zone'}
                     </p>
@@ -211,7 +216,7 @@ export function ChallengeDeck({
                       </button>
                     </div>
 
-                    <div className="mt-4 space-y-2">
+                    <div className="mt-3 space-y-2">
                       {isConfirming ? (
                         <>
                           <button
@@ -473,12 +478,7 @@ function compareChallengesForDeck(left: Challenge, right: Challenge): number {
 }
 
 function getDisplayTitle(title: string): string {
-  const normalizedTitle = title.trim();
-  if (normalizedTitle.length <= 38) {
-    return normalizedTitle;
-  }
-
-  return normalizedTitle.slice(0, 37).trimEnd() + '…';
+  return clampChallengeCardText(title, CHALLENGE_CARD_TITLE_MAX_LENGTH);
 }
 
 function locationPillClassName(status: GeolocationStatus): string {
@@ -494,7 +494,7 @@ function locationPillClassName(status: GeolocationStatus): string {
 
 function getShortDescription(challenge: Challenge): string {
   const configured = getConfigString(challenge, 'short_description');
-  return configured ?? challenge.description;
+  return clampChallengeCardText(configured ?? challenge.description, CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH);
 }
 
 function getLongDescription(challenge: Challenge): string {
