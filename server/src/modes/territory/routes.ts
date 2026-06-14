@@ -231,6 +231,19 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
             });
           }
 
+          if (postCommitData.activatedChallenge) {
+            await app.broadcaster.send({
+              gameId: postCommitData.gameId,
+              modeKey: 'territory',
+              eventType: socketServerEventTypes.challengeSpawned,
+              stateVersion: postCommitData.stateVersion,
+              payload: {
+                challenge: postCommitData.activatedChallenge,
+                zone: null,
+              },
+            });
+          }
+
           await sendZoneCaptureNotifications(app, postCommitData);
 
           const winConditionResult = await evaluateConfiguredWinConditions(app.db, app.modeRegistry, {

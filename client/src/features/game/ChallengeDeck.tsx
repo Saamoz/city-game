@@ -13,6 +13,15 @@ interface CompletedChallengeCard {
   teamColor: string | null;
 }
 
+interface ExitingChallengeCard {
+  challenge: Challenge;
+  index: number;
+}
+
+interface RenderedChallengeCard extends ExitingChallengeCard {
+  isExiting: boolean;
+}
+
 interface ChallengeDeckProps {
   challenges: Challenge[];
   completedCards: CompletedChallengeCard[];
@@ -66,13 +75,76 @@ export function ChallengeDeck({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRefs = useDragRefs();
   const peekPointerRef = useRef({ active: false, startY: 0, startTime: 0, moved: false });
+  const previousAvailableChallengesRef = useRef<Challenge[]>([]);
+  const exitTimersRef = useRef<Map<string, number>>(new Map());
+  const zonePickerRootRef = useRef<HTMLDivElement | null>(null);
   const [detailChallengeId, setDetailChallengeId] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
   const [confirmChallengeId, setConfirmChallengeId] = useState<string | null>(null);
+  const [zonePickerChallengeId, setZonePickerChallengeId] = useState<string | null>(null);
   const [targetZoneIdByChallengeId, setTargetZoneIdByChallengeId] = useState<Record<string, string>>({});
+  const [exitingChallenges, setExitingChallenges] = useState<ExitingChallengeCard[]>([]);
 
   const selectableZones = zones.filter((zone) => !zone.isDisabled).sort((left, right) => left.name.localeCompare(right.name));
   const detailChallenge = challenges.find((challenge) => challenge.id === detailChallengeId) ?? null;
+  const availableChallengeKey = availableChallenges.map((challenge) => challenge.id).join('|');
+  const renderedChallenges = buildRenderedChallengeCards(availableChallenges, exitingChallenges);
+
+  useEffect(() => {
+    const previousAvailableChallenges = previousAvailableChallengesRef.current;
+    const currentIds = new Set(availableChallenges.map((challenge) => challenge.id));
+    const removedChallenges = previousAvailableChallenges
+      .map((challenge, index) => ({ challenge, index }))
+      .filter(({ challenge }) => !currentIds.has(challenge.id));
+
+    if (removedChallenges.length > 0) {
+      setExitingChallenges((current) => {
+        const existingIds = new Set(current.map((entry) => entry.challenge.id));
+        return [
+          ...current.filter((entry) => !currentIds.has(entry.challenge.id)),
+          ...removedChallenges.filter(({ challenge }) => !existingIds.has(challenge.id)),
+        ];
+      });
+
+      for (const { challenge } of removedChallenges) {
+        const existingTimer = exitTimersRef.current.get(challenge.id);
+        if (existingTimer) {
+          window.clearTimeout(existingTimer);
+        }
+
+        const timer = window.setTimeout(() => {
+          setExitingChallenges((current) => current.filter((entry) => entry.challenge.id !== challenge.id));
+          exitTimersRef.current.delete(challenge.id);
+        }, 380);
+        exitTimersRef.current.set(challenge.id, timer);
+      }
+    }
+
+    previousAvailableChallengesRef.current = availableChallenges;
+  }, [availableChallengeKey]);
+
+  useEffect(() => () => {
+    for (const timer of exitTimersRef.current.values()) {
+      window.clearTimeout(timer);
+    }
+    exitTimersRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    if (!zonePickerChallengeId) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (zonePickerRootRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setZonePickerChallengeId(null);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [zonePickerChallengeId]);
 
   return (
     <>
@@ -119,7 +191,7 @@ export function ChallengeDeck({
         <p className="mt-3 text-xs leading-5 text-[#8a3c2d]">{locationMessage}</p>
       ) : null}
 
-      {availableChallenges.length ? (
+      {renderedChallenges.length ? (
         <div
           ref={scrollRef}
           className={isPeeking
@@ -145,17 +217,17 @@ export function ChallengeDeck({
             : (event) => handlePointerEnd(event, scrollRef.current, dragRefs)}
         >
           <div className="flex w-max pr-6">
-            {availableChallenges.map((challenge, index) => {
-              const isSelected = challenge.id === selectedChallengeId;
-              const isConfirming = confirmChallengeId === challenge.id;
-              const capturePending = isActionPending(`capture:${challenge.id}`);
+            {renderedChallenges.map(({ challenge, index, isExiting }) => {
+              const isSelected = !isExiting && challenge.id === selectedChallengeId;
+              const isConfirming = !isExiting && confirmChallengeId === challenge.id;
+              const capturePending = !isExiting && isActionPending(`capture:${challenge.id}`);
               const shortDescription = getShortDescription(challenge);
               const selectedTargetZoneId = targetZoneIdByChallengeId[challenge.id] ?? currentZoneId ?? selectableZones[0]?.id ?? '';
 
               return (
                 <div
                   key={challenge.id}
-                  className={!isPeeking && animatedChallengeIds.includes(challenge.id) ? 'animate-[deck-card-in_350ms_cubic-bezier(0.22,1,0.36,1)]' : ''}
+                  className={getCardAnimationClassName(isPeeking, isExiting, animatedChallengeIds.includes(challenge.id))}
                   style={getCardWrapperStyle(index, isPeeking)}
                   onClick={isPeeking ? () => onOpen() : undefined}
                 >
@@ -180,7 +252,7 @@ export function ChallengeDeck({
                   }}
                   style={{
                     transform: `rotate(${(index % 2 === 0 ? -1 : 1) * Math.min(index, 2) * 0.35}deg)`,
-                    pointerEvents: isPeeking ? 'none' : undefined,
+                    pointerEvents: isPeeking || isExiting ? 'none' : undefined,
                   }}
                 >
                   {isPeeking && index === 0 ? (
@@ -234,32 +306,61 @@ export function ChallengeDeck({
                               onClick={() => {
                                 onCaptureChallenge(challenge.id, selectedTargetZoneId || null);
                                 setConfirmChallengeId(null);
+                                setZonePickerChallengeId(null);
                               }}
                               type="button"
                             >
                               {capturePending ? 'Claiming…' : 'Confirm'}
                             </button>
-                            <select
-                              aria-label="Zone to claim"
-                              className="min-w-[4.75rem] max-w-[5.5rem] rounded-2xl border border-[#c8b48a]/70 bg-[#fff8eb] px-2 py-2 text-[11px] font-semibold text-[#24343a] outline-none"
-                              data-deck-interactive="true"
-                              disabled={capturePending || selectableZones.length === 0}
-                              onChange={(event) => {
-                                const nextZoneId = event.target.value;
-                                setTargetZoneIdByChallengeId((current) => ({ ...current, [challenge.id]: nextZoneId }));
-                              }}
-                              title={selectableZones.find((zone) => zone.id === selectedTargetZoneId)?.name ?? 'Choose zone'}
-                              value={selectedTargetZoneId}
-                            >
-                              {selectableZones.map((zone) => (
-                                <option key={zone.id} value={zone.id}>{zone.name}</option>
-                              ))}
-                            </select>
+                            <div ref={zonePickerChallengeId === challenge.id ? zonePickerRootRef : undefined} className="relative">
+                              <button
+                                aria-expanded={zonePickerChallengeId === challenge.id}
+                                aria-label="Choose zone to claim"
+                                className="flex h-full min-h-[2.75rem] w-11 items-center justify-center rounded-2xl border border-[#c8b48a]/70 bg-[#fff8eb] text-[#24343a] transition hover:bg-[#f2ead6] disabled:cursor-not-allowed disabled:opacity-60"
+                                data-deck-interactive="true"
+                                disabled={capturePending || selectableZones.length === 0}
+                                onClick={() => setZonePickerChallengeId((current) => current === challenge.id ? null : challenge.id)}
+                                title={selectableZones.find((zone) => zone.id === selectedTargetZoneId)?.name ?? 'Choose zone'}
+                                type="button"
+                              >
+                                <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24">
+                                  <path d="M9 18l-6 3V6l6-3 6 3 6-3v15l-6 3-6-3z" />
+                                  <path d="M9 3v15" />
+                                  <path d="M15 6v15" />
+                                </svg>
+                              </button>
+                              {zonePickerChallengeId === challenge.id ? (
+                                <div className="absolute right-0 top-full z-20 mt-2 max-h-48 w-56 overflow-y-auto rounded-2xl border border-[#c8b48a]/70 bg-[#fff8eb] p-1 shadow-[0_14px_34px_rgba(24,32,36,0.18)]" data-deck-interactive="true">
+                                  {selectableZones.map((zone) => {
+                                    const isSelectedZone = zone.id === selectedTargetZoneId;
+                                    return (
+                                      <button
+                                        key={zone.id}
+                                        className={[
+                                          'w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-[#24343a] transition hover:bg-[#efe5cf]',
+                                          isSelectedZone ? 'bg-[#e3d4b4]' : '',
+                                        ].join(' ')}
+                                        onClick={() => {
+                                          setTargetZoneIdByChallengeId((current) => ({ ...current, [challenge.id]: zone.id }));
+                                          setZonePickerChallengeId(null);
+                                        }}
+                                        type="button"
+                                      >
+                                        {zone.name}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
                           <button
                             className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#efe5cf] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#5d4d33] transition hover:bg-[#e6d8bc]"
                             data-deck-interactive="true"
-                            onClick={() => setConfirmChallengeId(null)}
+                            onClick={() => {
+                              setConfirmChallengeId(null);
+                              setZonePickerChallengeId(null);
+                            }}
                             type="button"
                           >
                             Cancel
@@ -275,6 +376,7 @@ export function ChallengeDeck({
                           disabled={capturePending || locationStatus === 'unsupported' || locationStatus === 'requesting'}
                           onClick={() => {
                             setTargetZoneIdByChallengeId((current) => ({ ...current, [challenge.id]: current[challenge.id] ?? currentZoneId ?? selectableZones[0]?.id ?? '' }));
+                            setZonePickerChallengeId(null);
                             setConfirmChallengeId(challenge.id);
                           }}
                           type="button"
@@ -503,6 +605,38 @@ function scrollDeck(container: HTMLDivElement | null, delta: number): void {
 
 function compareChallengesForDeck(left: Challenge, right: Challenge): number {
   return left.sortOrder - right.sortOrder || left.title.localeCompare(right.title);
+}
+
+function buildRenderedChallengeCards(
+  availableChallenges: Challenge[],
+  exitingChallenges: ExitingChallengeCard[],
+): RenderedChallengeCard[] {
+  const rendered: RenderedChallengeCard[] = availableChallenges.map((challenge, index) => ({
+    challenge,
+    index,
+    isExiting: false,
+  }));
+
+  for (const exitingChallenge of [...exitingChallenges].sort((left, right) => left.index - right.index)) {
+    rendered.splice(Math.min(exitingChallenge.index, rendered.length), 0, {
+      ...exitingChallenge,
+      isExiting: true,
+    });
+  }
+
+  return rendered;
+}
+
+function getCardAnimationClassName(isPeeking: boolean, isExiting: boolean, isNew: boolean): string {
+  if (isPeeking) {
+    return '';
+  }
+
+  if (isExiting) {
+    return 'pointer-events-none animate-[deck-card-out_380ms_cubic-bezier(0.55,0.06,0.68,0.19)_forwards]';
+  }
+
+  return isNew ? 'animate-[deck-card-in_350ms_cubic-bezier(0.22,1,0.36,1)]' : '';
 }
 
 function getDisplayTitle(title: string): string {
