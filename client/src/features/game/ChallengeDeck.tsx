@@ -217,11 +217,9 @@ export function ChallengeDeck({
                 <article
                   className={[
                     'relative snap-start min-w-[13.5rem] max-w-[13.5rem] lg:min-w-[17rem] lg:max-w-[17rem] flex-none rounded-[1.65rem] border p-3.5 lg:p-4 text-[#1f2a2f] shadow-[0_16px_80px_rgba(24,32,36,0.10)] transition duration-150',
-                    isZoneClaimBlocked
-                      ? 'z-0 border-[#b9c3c7] bg-[#e5ebed] text-[#6f7f86] opacity-80 grayscale shadow-none'
-                      : isSelected
-                        ? 'z-10 border-[#24343a] bg-[#fff8eb] shadow-[0_20px_80px_rgba(24,32,36,0.16)]'
-                        : 'z-0 border-[#c8b48a]/55 bg-[#f8f1df] hover:-translate-y-0.5 hover:bg-[#fbf4e4]',
+                    isSelected
+                      ? 'z-10 border-[#24343a] bg-[#fff8eb] shadow-[0_20px_80px_rgba(24,32,36,0.16)]'
+                      : 'z-0 border-[#c8b48a]/55 bg-[#f8f1df] hover:-translate-y-0.5 hover:bg-[#fbf4e4]',
                   ].join(' ')}
                   onClick={(event) => {
                     if (consumeSuppressedClick(dragRefs)) {

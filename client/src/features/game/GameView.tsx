@@ -982,7 +982,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 ].join(' ')}
               >
                 <ChallengeDeck
-                  allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones !== false}
+                  allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones === true}
                   animatedChallengeIds={animatedChallengeIds}
                   challenges={snapshot.challenges}
                   completedCards={completedCards}
@@ -1030,7 +1030,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           >
 
             <ChallengeDeck
-              allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones !== false}
+              allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones === true}
               animatedChallengeIds={animatedChallengeIds}
               challenges={snapshot.challenges}
               completedCards={completedCards}

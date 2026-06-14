@@ -83,7 +83,7 @@ const INITIAL_GAME_FORM: GameFormState = {
   requireGpsAccuracy: false,
   broadcastTeamLocations: true,
   allowMidgameJoin: true,
-  allowReclaimZones: true,
+  allowReclaimZones: false,
 };
 
 const INITIAL_TEAM_DRAFT: TeamDraftState = {
@@ -1062,7 +1062,7 @@ function buildGameForm(game: Game): GameFormState {
     requireGpsAccuracy: Boolean(settings.require_gps_accuracy),
     broadcastTeamLocations: settings.broadcast_team_locations !== false,
     allowMidgameJoin: settings.allow_midgame_join !== false,
-    allowReclaimZones: settings.allow_reclaim_zones !== false,
+    allowReclaimZones: settings.allow_reclaim_zones === true,
   };
 }
 

@@ -474,7 +474,7 @@ function normalizeGameSettings(input: JsonObject | undefined, existing: JsonObje
     next.broadcast_team_locations = true;
   }
   if (next.allow_reclaim_zones === undefined || next.allow_reclaim_zones === null) {
-    next.allow_reclaim_zones = true;
+    next.allow_reclaim_zones = false;
   }
 
   const activeChallengeCount = next.active_challenge_count;
