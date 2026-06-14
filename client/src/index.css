@@ -82,23 +82,23 @@ input {
 @keyframes deck-card-in {
   from {
     opacity: 0;
-    transform: translateX(40px);
+    transform: translateY(58px);
   }
 
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
   }
 }
 
 @keyframes deck-card-out {
   from {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
   }
 
   to {
     opacity: 0;
-    transform: translateX(-54px);
+    transform: translateY(-72px);
   }
 }
