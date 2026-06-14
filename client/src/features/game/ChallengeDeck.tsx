@@ -30,6 +30,7 @@ interface ChallengeDeckProps {
   currentZoneName: string | null;
   progressLabel: string;
   zones: Zone[];
+  allowReclaimZones: boolean;
   locationStatus: GeolocationStatus;
   locationMessage: string | null;
   selectedChallengeId: string | null;
@@ -59,6 +60,7 @@ export function ChallengeDeck({
   locationStatus,
   progressLabel,
   zones,
+  allowReclaimZones,
   locationMessage,
   selectedChallengeId,
   onSelectChallenge,
@@ -77,15 +79,13 @@ export function ChallengeDeck({
   const peekPointerRef = useRef({ active: false, startY: 0, startTime: 0, moved: false });
   const previousAvailableChallengesRef = useRef<Challenge[]>([]);
   const exitTimersRef = useRef<Map<string, number>>(new Map());
-  const zonePickerRootRef = useRef<HTMLDivElement | null>(null);
   const [detailChallengeId, setDetailChallengeId] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
   const [confirmChallengeId, setConfirmChallengeId] = useState<string | null>(null);
-  const [zonePickerChallengeId, setZonePickerChallengeId] = useState<string | null>(null);
-  const [targetZoneIdByChallengeId, setTargetZoneIdByChallengeId] = useState<Record<string, string>>({});
   const [exitingChallenges, setExitingChallenges] = useState<ExitingChallengeCard[]>([]);
 
-  const selectableZones = zones.filter((zone) => !zone.isDisabled).sort((left, right) => left.name.localeCompare(right.name));
+  const currentZone = currentZoneId ? zones.find((zone) => zone.id === currentZoneId) ?? null : null;
+  const isZoneClaimBlocked = !allowReclaimZones && Boolean(currentZone?.ownerTeamId);
   const detailChallenge = challenges.find((challenge) => challenge.id === detailChallengeId) ?? null;
   const availableChallengeKey = availableChallenges.map((challenge) => challenge.id).join('|');
   const renderedChallenges = buildRenderedChallengeCards(availableChallenges, exitingChallenges);
@@ -129,22 +129,6 @@ export function ChallengeDeck({
     }
     exitTimersRef.current.clear();
   }, []);
-
-  useEffect(() => {
-    if (!zonePickerChallengeId) {
-      return undefined;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (zonePickerRootRef.current?.contains(event.target as Node)) {
-        return;
-      }
-      setZonePickerChallengeId(null);
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [zonePickerChallengeId]);
 
   return (
     <>
@@ -222,7 +206,6 @@ export function ChallengeDeck({
               const isConfirming = !isExiting && confirmChallengeId === challenge.id;
               const capturePending = !isExiting && isActionPending(`capture:${challenge.id}`);
               const shortDescription = getShortDescription(challenge);
-              const selectedTargetZoneId = targetZoneIdByChallengeId[challenge.id] ?? currentZoneId ?? selectableZones[0]?.id ?? '';
 
               return (
                 <div
@@ -234,9 +217,11 @@ export function ChallengeDeck({
                 <article
                   className={[
                     'relative snap-start min-w-[13.5rem] max-w-[13.5rem] lg:min-w-[17rem] lg:max-w-[17rem] flex-none rounded-[1.65rem] border p-3.5 lg:p-4 text-[#1f2a2f] shadow-[0_16px_80px_rgba(24,32,36,0.10)] transition duration-150',
-                    isSelected
-                      ? 'z-10 border-[#24343a] bg-[#fff8eb] shadow-[0_20px_80px_rgba(24,32,36,0.16)]'
-                      : 'z-0 border-[#c8b48a]/55 bg-[#f8f1df] hover:-translate-y-0.5 hover:bg-[#fbf4e4]',
+                    isZoneClaimBlocked
+                      ? 'z-0 border-[#b9c3c7] bg-[#e5ebed] text-[#6f7f86] opacity-80 grayscale shadow-none'
+                      : isSelected
+                        ? 'z-10 border-[#24343a] bg-[#fff8eb] shadow-[0_20px_80px_rgba(24,32,36,0.16)]'
+                        : 'z-0 border-[#c8b48a]/55 bg-[#f8f1df] hover:-translate-y-0.5 hover:bg-[#fbf4e4]',
                   ].join(' ')}
                   onClick={(event) => {
                     if (consumeSuppressedClick(dragRefs)) {
@@ -296,71 +281,33 @@ export function ChallengeDeck({
                     </div>
 
                     <div className="mt-3 space-y-2">
-                      {isConfirming ? (
+                      {isZoneClaimBlocked ? (
+                        <button
+                          className="w-full rounded-2xl border border-[#aeb9bd] bg-[#cbd3d6] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#65757c] disabled:cursor-not-allowed"
+                          data-deck-interactive="true"
+                          disabled
+                          type="button"
+                        >
+                          Zone Claimed
+                        </button>
+                      ) : isConfirming ? (
                         <>
-                          <div className="flex gap-2">
-                            <button
-                              className="min-w-0 flex-1 rounded-2xl border border-[#8d2727] bg-[#b83a31] px-3 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#fff6ef] transition hover:bg-[#9e3028] disabled:cursor-not-allowed disabled:opacity-60"
-                              data-deck-interactive="true"
-                              disabled={capturePending || locationStatus === 'unsupported' || locationStatus === 'requesting' || !selectedTargetZoneId}
-                              onClick={() => {
-                                onCaptureChallenge(challenge.id, selectedTargetZoneId || null);
-                                setConfirmChallengeId(null);
-                                setZonePickerChallengeId(null);
-                              }}
-                              type="button"
-                            >
-                              {capturePending ? 'Claiming…' : 'Confirm'}
-                            </button>
-                            <div ref={zonePickerChallengeId === challenge.id ? zonePickerRootRef : undefined} className="relative">
-                              <button
-                                aria-expanded={zonePickerChallengeId === challenge.id}
-                                aria-label="Choose zone to claim"
-                                className="flex h-full min-h-[2.75rem] w-11 items-center justify-center rounded-2xl border border-[#c8b48a]/70 bg-[#fff8eb] text-[#24343a] transition hover:bg-[#f2ead6] disabled:cursor-not-allowed disabled:opacity-60"
-                                data-deck-interactive="true"
-                                disabled={capturePending || selectableZones.length === 0}
-                                onClick={() => setZonePickerChallengeId((current) => current === challenge.id ? null : challenge.id)}
-                                title={selectableZones.find((zone) => zone.id === selectedTargetZoneId)?.name ?? 'Choose zone'}
-                                type="button"
-                              >
-                                <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24">
-                                  <path d="M9 18l-6 3V6l6-3 6 3 6-3v15l-6 3-6-3z" />
-                                  <path d="M9 3v15" />
-                                  <path d="M15 6v15" />
-                                </svg>
-                              </button>
-                              {zonePickerChallengeId === challenge.id ? (
-                                <div className="absolute right-0 top-full z-20 mt-2 max-h-48 w-56 overflow-y-auto rounded-2xl border border-[#c8b48a]/70 bg-[#fff8eb] p-1 shadow-[0_14px_34px_rgba(24,32,36,0.18)]" data-deck-interactive="true">
-                                  {selectableZones.map((zone) => {
-                                    const isSelectedZone = zone.id === selectedTargetZoneId;
-                                    return (
-                                      <button
-                                        key={zone.id}
-                                        className={[
-                                          'w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-[#24343a] transition hover:bg-[#efe5cf]',
-                                          isSelectedZone ? 'bg-[#e3d4b4]' : '',
-                                        ].join(' ')}
-                                        onClick={() => {
-                                          setTargetZoneIdByChallengeId((current) => ({ ...current, [challenge.id]: zone.id }));
-                                          setZonePickerChallengeId(null);
-                                        }}
-                                        type="button"
-                                      >
-                                        {zone.name}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
+                          <button
+                            className="w-full rounded-2xl border border-[#8d2727] bg-[#b83a31] px-3 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#fff6ef] transition hover:bg-[#9e3028] disabled:cursor-not-allowed disabled:opacity-60"
+                            data-deck-interactive="true"
+                            disabled={capturePending || locationStatus === 'unsupported' || locationStatus === 'requesting'}
+                            onClick={() => {
+                              onCaptureChallenge(challenge.id, null);
+                              setConfirmChallengeId(null);
+                            }}
+                            type="button"
+                          >
+                            {capturePending ? 'Claiming…' : 'Confirm'}
+                          </button>
                           <button
                             className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#efe5cf] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#5d4d33] transition hover:bg-[#e6d8bc]"
                             data-deck-interactive="true"
-                            onClick={() => {
-                              setConfirmChallengeId(null);
-                              setZonePickerChallengeId(null);
-                            }}
+                            onClick={() => setConfirmChallengeId(null)}
                             type="button"
                           >
                             Cancel
@@ -374,11 +321,7 @@ export function ChallengeDeck({
                           ].join(' ')}
                           data-deck-interactive="true"
                           disabled={capturePending || locationStatus === 'unsupported' || locationStatus === 'requesting'}
-                          onClick={() => {
-                            setTargetZoneIdByChallengeId((current) => ({ ...current, [challenge.id]: current[challenge.id] ?? currentZoneId ?? selectableZones[0]?.id ?? '' }));
-                            setZonePickerChallengeId(null);
-                            setConfirmChallengeId(challenge.id);
-                          }}
+                          onClick={() => setConfirmChallengeId(challenge.id)}
                           type="button"
                         >
                           Claim

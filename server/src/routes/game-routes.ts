@@ -473,6 +473,9 @@ function normalizeGameSettings(input: JsonObject | undefined, existing: JsonObje
   if (next.broadcast_team_locations === undefined || next.broadcast_team_locations === null) {
     next.broadcast_team_locations = true;
   }
+  if (next.allow_reclaim_zones === undefined || next.allow_reclaim_zones === null) {
+    next.allow_reclaim_zones = true;
+  }
 
   const activeChallengeCount = next.active_challenge_count;
 

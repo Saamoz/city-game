@@ -117,6 +117,7 @@ export type GameSettings = JsonObject & {
                                    // (ST_Covers) always applies regardless of this setting.
   broadcast_team_locations?: boolean;
   allow_midgame_join?: boolean;
+  allow_reclaim_zones?: boolean;
 };
 
 export type WinCondition =

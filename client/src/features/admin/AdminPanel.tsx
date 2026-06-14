@@ -62,6 +62,7 @@ interface GameFormState {
   requireGpsAccuracy: boolean;
   broadcastTeamLocations: boolean;
   allowMidgameJoin: boolean;
+  allowReclaimZones: boolean;
 }
 
 interface TeamDraftState {
@@ -82,6 +83,7 @@ const INITIAL_GAME_FORM: GameFormState = {
   requireGpsAccuracy: false,
   broadcastTeamLocations: true,
   allowMidgameJoin: true,
+  allowReclaimZones: true,
 };
 
 const INITIAL_TEAM_DRAFT: TeamDraftState = {
@@ -757,6 +759,15 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                   />
                   Allow mid-game joins
                 </label>
+                <label className="flex items-center gap-3 text-sm font-medium text-[#21313a]">
+                  <input
+                    type="checkbox"
+                    checked={gameForm.allowReclaimZones}
+                    onChange={(event) => { setGameForm((current) => ({ ...current, allowReclaimZones: event.target.checked })); }}
+                    className="h-4 w-4 rounded border-[#9aabb5]"
+                  />
+                  Allow reclaiming zones
+                </label>
                 {selectedMap ? <MetaPill label={'Map center ' + selectedMap.centerLat.toFixed(3) + ', ' + selectedMap.centerLng.toFixed(3)} /> : null}
                 {selectedChallengeSet ? <MetaPill label={selectedChallengeSet.name} /> : null}
                 {currentGame ? <StatusBadge status={currentGame.status} /> : null}
@@ -1051,6 +1062,7 @@ function buildGameForm(game: Game): GameFormState {
     requireGpsAccuracy: Boolean(settings.require_gps_accuracy),
     broadcastTeamLocations: settings.broadcast_team_locations !== false,
     allowMidgameJoin: settings.allow_midgame_join !== false,
+    allowReclaimZones: settings.allow_reclaim_zones !== false,
   };
 }
 
@@ -1086,6 +1098,7 @@ function buildSettings(form: GameFormState, existing: JsonObject): JsonObject {
   next.require_gps_accuracy = form.requireGpsAccuracy;
   next.broadcast_team_locations = form.broadcastTeamLocations;
   next.allow_midgame_join = form.allowMidgameJoin;
+  next.allow_reclaim_zones = form.allowReclaimZones;
   return next;
 }
 

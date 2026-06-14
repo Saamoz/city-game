@@ -125,6 +125,7 @@ export async function completeChallenge(
   }
 
   const zoneBefore = lockedChallenge.zoneId ? await lockZone(db, lockedChallenge.zoneId) : null;
+  assertZoneReclaimAllowed(zoneBefore, game.settings as GameSettings);
 
   const [updatedClaim] = await db
     .update(challengeClaims)
@@ -212,6 +213,7 @@ async function completePortableChallengeDirectly(
   }
 
   const zoneBefore = await lockZone(db, zone.id);
+  assertZoneReclaimAllowed(zoneBefore, input.settings);
   const locationAtClaim = sql`ST_SetSRID(ST_MakePoint(${input.gpsPayload.lng}, ${input.gpsPayload.lat}), 4326)`;
 
   const [insertedClaim] = await db
@@ -263,6 +265,19 @@ async function completePortableChallengeDirectly(
     updatedChallenge,
     updatedClaim: insertedClaim,
     zoneBefore,
+  });
+}
+
+function assertZoneReclaimAllowed(zone: Zone | null, settings: GameSettings): void {
+  if (!zone || settings.allow_reclaim_zones !== false || !zone.ownerTeamId) {
+    return;
+  }
+
+  throw new AppError(errorCodes.validationError, {
+    message: 'This zone has already been claimed.',
+    details: {
+      zoneId: zone.id,
+    },
   });
 }
 
