@@ -74,6 +74,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
   const [pushPromptState, setPushPromptState] = useState<PushPromptState>('hidden');
   const [pushPromptMessage, setPushPromptMessage] = useState<string | null>(null);
   const countdownStartedRef = useRef(false);
+  const backgroundRefreshPendingRef = useRef(false);
 
   const loadRoster = useCallback(async (gameId: string, signal?: AbortSignal) => {
     const [nextTeams, nextPlayers] = await Promise.all([
@@ -117,9 +118,11 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
     setPlayers(nextPlayers);
   }, []);
 
-  const hydrate = useCallback(async (signal?: AbortSignal) => {
-    setStatus('loading');
-    setMessage(null);
+  const hydrate = useCallback(async (signal?: AbortSignal, background = false) => {
+    if (!background) {
+      setStatus('loading');
+      setMessage(null);
+    }
 
     try {
       const resolvedGame = initialGameId
@@ -228,6 +231,10 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
         return;
       }
 
+      if (background) {
+        return;
+      }
+
       setStatus('error');
       setMessage(getErrorMessage(error, 'Failed to load the current game.'));
     }
@@ -244,11 +251,21 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
       return;
     }
 
+    const controller = new AbortController();
     const interval = window.setInterval(() => {
-      void hydrate();
+      if (document.visibilityState === 'visible' && !backgroundRefreshPendingRef.current) {
+        backgroundRefreshPendingRef.current = true;
+        void hydrate(controller.signal, true).finally(() => {
+          backgroundRefreshPendingRef.current = false;
+        });
+      }
     }, 10000);
 
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearInterval(interval);
+      controller.abort();
+      backgroundRefreshPendingRef.current = false;
+    };
   }, [game?.status, hydrate, status]);
 
   useEffect(() => {
@@ -1137,6 +1154,12 @@ function SpectatorMapBackground({ game, teams, teamLocations, zones }: { game: G
       })),
     };
   }, [teams, zones]);
+  const sourceDataRef = useRef(sourceData);
+  const teamsRef = useRef(teams);
+  const teamLocationsRef = useRef(teamLocations);
+  sourceDataRef.current = sourceData;
+  teamsRef.current = teams;
+  teamLocationsRef.current = teamLocations;
 
   useEffect(() => {
     if (!containerRef.current || !mapboxToken || mapRef.current) {
@@ -1174,7 +1197,7 @@ function SpectatorMapBackground({ game, teams, teamLocations, zones }: { game: G
         if (!map.getSource('spectator-zones')) {
           map.addSource('spectator-zones', {
             type: 'geojson',
-            data: sourceData as any,
+            data: sourceDataRef.current as any,
           });
         }
 
@@ -1204,7 +1227,7 @@ function SpectatorMapBackground({ game, teams, teamLocations, zones }: { game: G
           });
         }
 
-        syncTeamLocationMarkers(map, teamMarkersRef.current, teams, teamLocations);
+        syncTeamLocationMarkers(map, teamMarkersRef.current, teamsRef.current, teamLocationsRef.current);
       });
     });
 
@@ -1217,7 +1240,7 @@ function SpectatorMapBackground({ game, teams, teamLocations, zones }: { game: G
         mapRef.current = null;
       }
     };
-  }, [game.centerLat, game.centerLng, game.defaultZoom, sourceData]);
+  }, [game.centerLat, game.centerLng, game.defaultZoom]);
 
   useEffect(() => {
     const map = mapRef.current;
