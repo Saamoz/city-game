@@ -345,6 +345,57 @@ describe('player routes', () => {
     });
   });
 
+  it('lets any teamed lobby player kick another player and broadcasts the roster update', async () => {
+    const targetPlayerId = '66666666-3333-4333-8333-333333333333';
+    await seedGame({ status: 'setup' });
+    await seedTeam();
+    await seedPlayer({ teamId: TEAM_ID, sessionToken: 'kick-requester-token' });
+    await seedPlayer({
+      id: targetPlayerId,
+      displayName: 'Kick Target',
+      teamId: TEAM_ID,
+      sessionToken: 'kick-target-token',
+      metadata: { lobby_ready: true },
+    });
+    app = await createPlayerTestApp();
+
+    const broadcasts: unknown[] = [];
+    app.broadcaster.send = async (input) => {
+      broadcasts.push(input);
+      return 1;
+    };
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/players/${targetPlayerId}/kick`,
+      headers: idempotencyHeaders('kick-lobby-player'),
+      cookies: {
+        [SESSION_COOKIE_NAME]: 'kick-requester-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      player: {
+        id: targetPlayerId,
+        teamId: null,
+        metadata: { lobby_ready: false },
+      },
+    });
+
+    const [storedTarget] = await testDatabase.db.select().from(players).where(eq(players.id, targetPlayerId)).limit(1);
+    expect(storedTarget?.teamId).toBeNull();
+    expect(storedTarget?.metadata).toMatchObject({ lobby_ready: false });
+    expect(broadcasts).toHaveLength(1);
+    expect(broadcasts[0]).toMatchObject({
+      eventType: 'player_joined',
+      payload: {
+        player: { id: targetPlayerId, teamId: null },
+        team: null,
+      },
+    });
+  });
+
   it('marks the current player ready and broadcasts the updated roster row', async () => {
     await seedGame({ status: 'setup' });
     await seedTeam();
@@ -421,7 +472,7 @@ describe('player routes', () => {
     });
   });
 
-  it('starts the game from the lobby once all teamed players are ready', async () => {
+  it('starts the game from the lobby once a majority of teamed players are ready', async () => {
     await seedGame({ status: 'setup' });
     await seedTeam();
     await seedPlayer({
@@ -435,6 +486,13 @@ describe('player routes', () => {
       sessionToken: 'start-game-player-two',
       teamId: TEAM_ID,
       metadata: { lobby_ready: true },
+    });
+    await seedPlayer({
+      id: '77777777-3333-4333-8333-333333333333',
+      displayName: 'Player Three',
+      sessionToken: 'start-game-player-three',
+      teamId: TEAM_ID,
+      metadata: { lobby_ready: false },
     });
     app = await createPlayerTestApp();
 
@@ -476,7 +534,7 @@ describe('player routes', () => {
     expect(storedGame?.status).toBe('active');
   });
 
-  it('blocks player-started game launch until every teamed player is ready', async () => {
+  it('blocks player-started game launch without a ready majority', async () => {
     await seedGame({ status: 'setup' });
     await seedTeam();
     await seedPlayer({
@@ -506,7 +564,7 @@ describe('player routes', () => {
     expect(response.json()).toEqual({
       error: {
         code: 'VALIDATION_ERROR',
-        message: 'All teamed players must be ready before the game can start.',
+        message: 'A majority of teamed players must be ready before the game can start.',
       },
     });
   });

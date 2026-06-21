@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { OsmImportService } from '../services/osm-import-service.js';
 import { closeTestDatabase, getTestDatabase, resetTestDatabase } from '../test/test-db.js';
 import { createTestApp } from '../test/create-test-app.js';
 
@@ -32,7 +33,6 @@ describe('map routes', () => {
       headers: idempotencyHeaders('create-map-route'),
       payload: {
         name: 'Toronto Template',
-        city: 'Toronto',
         centerLat: 43.6532,
         centerLng: -79.3832,
         defaultZoom: 11,
@@ -42,7 +42,6 @@ describe('map routes', () => {
     expect(createResponse.statusCode).toBe(201);
     expect(createResponse.json().map).toMatchObject({
       name: 'Toronto Template',
-      city: 'Toronto',
       centerLat: 43.6532,
       centerLng: -79.3832,
       defaultZoom: 11,
@@ -63,6 +62,38 @@ describe('map routes', () => {
     expect(updateResponse.json().map.name).toBe('Toronto Template Updated');
   });
 
+  it('uses the saved map name for an OSM preview', async () => {
+    const previewAdministrativeBoundaries = vi.fn(async () => ({
+      type: 'FeatureCollection' as const,
+      features: [],
+    }));
+    const osmImportService: OsmImportService = { previewAdministrativeBoundaries };
+    app = await createTestApp({ db: testDatabase.db, pool: testDatabase.pool, osmImportService });
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/maps',
+      headers: idempotencyHeaders('create-map-osm-preview'),
+      payload: {
+        name: 'Toronto',
+        centerLat: 43.6532,
+        centerLng: -79.3832,
+        defaultZoom: 11,
+      },
+    });
+    const mapId = createResponse.json().map.id as string;
+
+    const previewResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/maps/${mapId}/zones/import-osm`,
+      payload: {},
+    });
+
+    expect(previewResponse.statusCode).toBe(200);
+    expect(previewResponse.json()).toEqual({ type: 'FeatureCollection', features: [] });
+    expect(previewAdministrativeBoundaries).toHaveBeenCalledWith({ placeName: 'Toronto' });
+  });
+
   it('deletes a reusable map and its authored zones', async () => {
     app = await createTestApp({ db: testDatabase.db, pool: testDatabase.pool });
 
@@ -72,7 +103,6 @@ describe('map routes', () => {
       headers: idempotencyHeaders('create-map-delete-route'),
       payload: {
         name: 'Delete Me',
-        city: 'Toronto',
         centerLat: 43.6532,
         centerLng: -79.3832,
         defaultZoom: 11,
@@ -126,7 +156,6 @@ describe('map routes', () => {
       headers: idempotencyHeaders('create-map-for-zones'),
       payload: {
         name: 'Chicago Template',
-        city: 'Chicago',
         centerLat: 41.8781,
         centerLng: -87.6298,
         defaultZoom: 11,

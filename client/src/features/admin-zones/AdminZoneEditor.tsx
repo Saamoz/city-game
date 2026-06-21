@@ -39,7 +39,7 @@ interface AdminZoneEditorProps {
 
 type EditorMode = 'select' | 'draw' | 'split';
 type NoticeTone = 'info' | 'success' | 'error';
-type BaseCityId = 'toronto' | 'chicago' | 'custom';
+type ViewPresetId = 'toronto' | 'chicago' | 'custom';
 
 interface NoticeState {
   tone: NoticeTone;
@@ -48,18 +48,16 @@ interface NoticeState {
 
 interface MapFormState {
   name: string;
-  baseCityId: BaseCityId;
-  city: string;
+  viewPresetId: ViewPresetId;
 }
 
 interface ZoneFormState {
   name: string;
 }
 
-interface CityPreset {
-  id: Exclude<BaseCityId, 'custom'>;
+interface ViewPreset {
+  id: Exclude<ViewPresetId, 'custom'>;
   label: string;
-  city: string;
   centerLat: number;
   centerLng: number;
   defaultZoom: number;
@@ -82,12 +80,12 @@ const MERGE_TARGET_FILL = '#7ab0c8';
 const MERGE_TARGET_LINE = '#2a6a8a';
 const SNAP_THRESHOLD_PX = 18;
 
-const CITY_PRESETS: CityPreset[] = [
-  { id: 'toronto', label: 'Toronto', city: 'Toronto', centerLat: 43.6532, centerLng: -79.3832, defaultZoom: 11 },
-  { id: 'chicago', label: 'Chicago', city: 'Chicago', centerLat: 41.8781, centerLng: -87.6298, defaultZoom: 11 },
+const VIEW_PRESETS: ViewPreset[] = [
+  { id: 'toronto', label: 'Toronto', centerLat: 43.6532, centerLng: -79.3832, defaultZoom: 11 },
+  { id: 'chicago', label: 'Chicago', centerLat: 41.8781, centerLng: -87.6298, defaultZoom: 11 },
 ];
 
-const INITIAL_MAP_FORM: MapFormState = { name: '', baseCityId: 'toronto', city: CITY_PRESETS[0].city };
+const INITIAL_MAP_FORM: MapFormState = { name: '', viewPresetId: 'toronto' };
 const INITIAL_ZONE_FORM: ZoneFormState = { name: '' };
 
 export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
@@ -125,7 +123,6 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const [isDeleteArmed, setIsDeleteArmed] = useState(false);
   const [previewCollection, setPreviewCollection] = useState<GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject> | null>(null);
   const [previewOrigin, setPreviewOrigin] = useState<'osm' | 'file' | null>(null);
-  const [osmCity, setOsmCity] = useState('');
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
@@ -151,7 +148,6 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   useEffect(() => {
     if (!currentMap) return;
     setMapForm(buildFormFromMap(currentMap));
-    setOsmCity(currentMap.city ?? '');
     setIsDeleteMapArmed(false);
     if (typeof window !== 'undefined') {
       window.history.replaceState({}, '', '/admin/zones?mapId=' + encodeURIComponent(currentMap.id));
@@ -192,7 +188,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       fitMapToPositions(map, positions, 92, 13.8);
       return;
     }
-    const preset = getCityPreset(mapForm.baseCityId);
+    const preset = getViewPreset(mapForm.viewPresetId);
     if (currentMap) {
       map.flyTo({ center: [currentMap.centerLng, currentMap.centerLat], zoom: currentMap.defaultZoom, essential: true });
       return;
@@ -200,7 +196,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     if (preset) {
       map.flyTo({ center: [preset.centerLng, preset.centerLat], zoom: preset.defaultZoom, essential: true });
     }
-  }, [currentMap, mapForm.baseCityId, zones]);
+  }, [currentMap, mapForm.viewPresetId, zones]);
 
   const focusZone = useCallback((zone: MapZone | null) => {
     if (!zone) return;
@@ -266,7 +262,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current || !mapboxToken) return;
 
-    const preset = getCityPreset(mapForm.baseCityId);
+    const preset = getViewPreset(mapForm.viewPresetId);
     const initialCenter: [number, number] = currentMap
       ? [currentMap.centerLng, currentMap.centerLat]
       : preset ? [preset.centerLng, preset.centerLat] : [-97.1384, 49.8951];
@@ -465,7 +461,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       mapRef.current = null;
       map.remove();
     };
-  }, [currentMap, focusZone, mapForm.baseCityId]);
+  }, [currentMap, focusZone, mapForm.viewPresetId]);
 
   useEffect(() => { syncMapSources(); }, [syncMapSources]);
 
@@ -477,10 +473,10 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   }, [fitMapToCurrentData, currentMap, status]);
 
   useEffect(() => {
-    const preset = getCityPreset(mapForm.baseCityId);
+    const preset = getViewPreset(mapForm.viewPresetId);
     if (!preset || currentMap || zones.length > 0 || !mapRef.current) return;
     mapRef.current.flyTo({ center: [preset.centerLng, preset.centerLat], zoom: preset.defaultZoom, essential: true, duration: 650 });
-  }, [currentMap, mapForm.baseCityId, zones.length]);
+  }, [currentMap, mapForm.viewPresetId, zones.length]);
 
   const sortedMaps = useMemo(() => [...maps].sort((a, b) => a.name.localeCompare(b.name)), [maps]);
   const zoneRows = useMemo(() => [...zones].sort((a, b) => a.name.localeCompare(b.name)), [zones]);
@@ -719,14 +715,9 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       setNotice({ tone: 'error', message: 'Create or load a map before requesting an OSM preview.' });
       return;
     }
-    const city = osmCity.trim() || currentMap.city || '';
-    if (!city) {
-      setNotice({ tone: 'error', message: 'Enter a city name before requesting an OSM preview.' });
-      return;
-    }
     setIsPreviewLoading(true);
     try {
-      const preview = await previewOsmMapZones(currentMap.id, city);
+      const preview = await previewOsmMapZones(currentMap.id);
       setPreviewCollection(preview);
       setPreviewOrigin('osm');
       setNotice({ tone: 'info', message: `${preview.features.length} zones previewed from OSM. Review on the map, then Import.` });
@@ -785,7 +776,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
 
   const handleExportGeoJson = () => {
     if (!zones.length) { setNotice({ tone: 'error', message: 'No zones to export.' }); return; }
-    const fileName = slugify((currentMap?.city ?? currentMap?.name ?? 'map')) + '-zones.geojson';
+    const fileName = slugify(currentMap?.name ?? 'map') + '-zones.geojson';
     const blob = new Blob([JSON.stringify(buildZoneExport(zones), null, 2)], { type: 'application/geo+json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -879,7 +870,6 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                       ].join(' ')}
                     >
                       <p className="font-semibold text-[#172022]">{mapItem.name}</p>
-                      <p className="mt-0.5 text-xs text-[#6a7478]">{mapItem.city ?? 'No city'}</p>
                     </button>
                   ))}
                   {sortedMaps.length === 0 ? <p className="text-sm text-[#6a7478]">No authored maps yet.</p> : null}
@@ -896,34 +886,24 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                       className="w-full rounded-2xl border border-[#c4cac8] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#8c9997]"
                     />
                   </Field>
-                  <Field label="Base City">
+                  <Field label="Starting View">
                     <select
-                      value={mapForm.baseCityId}
+                      value={mapForm.viewPresetId}
                       onChange={(e) => {
-                        const nextId = e.target.value as BaseCityId;
-                        const preset = getCityPreset(nextId);
-                        setMapForm((c) => ({ ...c, baseCityId: nextId, city: preset?.city ?? c.city }));
+                        const nextId = e.target.value as ViewPresetId;
+                        const preset = getViewPreset(nextId);
+                        setMapForm((c) => ({ ...c, viewPresetId: nextId }));
                         if (preset && mapRef.current && !currentMap) {
                           mapRef.current.flyTo({ center: [preset.centerLng, preset.centerLat], zoom: preset.defaultZoom, duration: 650, essential: true });
                         }
                       }}
                       className="w-full rounded-2xl border border-[#c4cac8] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#8c9997]"
                     >
-                      {CITY_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                      {VIEW_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                       <option value="custom">Custom</option>
                     </select>
                   </Field>
                 </div>
-                {mapForm.baseCityId === 'custom' ? (
-                  <Field label="City Name">
-                    <input
-                      value={mapForm.city}
-                      onChange={(e) => setMapForm((c) => ({ ...c, city: e.target.value }))}
-                      placeholder="Custom city"
-                      className="w-full rounded-2xl border border-[#c4cac8] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#8c9997]"
-                    />
-                  </Field>
-                ) : null}
                 <div className="grid grid-cols-2 gap-2">
                   <ActionButton
                     onClick={() => void handleSaveMap()}
@@ -1047,13 +1027,8 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                 <div className="space-y-3">
                   <label className="block">
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-[#677174]">From OSM</span>
-                    <div className="flex gap-2">
-                      <input
-                        value={osmCity}
-                        onChange={(e) => setOsmCity(e.target.value)}
-                        placeholder={currentMap?.city ?? 'City name'}
-                        className="min-w-0 flex-1 rounded-2xl border border-[#c4cac8] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#8c9997]"
-                      />
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate text-sm text-[#596467]">{currentMap?.name ?? 'Save the map first'}</span>
                       <ActionButton
                         onClick={() => void handlePreviewOsm()}
                         label={isPreviewLoading ? 'Loading…' : 'Preview'}
@@ -1491,7 +1466,7 @@ function emptyFeatureCollection(): FeatureCollection<GeoJsonGeometry, GeoJsonPro
 }
 
 function buildFormFromMap(map: MapDefinition): MapFormState {
-  return { name: map.name, baseCityId: inferPresetId(map), city: map.city ?? '' };
+  return { name: map.name, viewPresetId: inferPresetId(map) };
 }
 
 function buildFormFromZone(zone: MapZone): ZoneFormState {
@@ -1505,14 +1480,14 @@ function buildMapPayload(
 ): MapUpsertInput {
   const name = form.name.trim();
   if (!name) throw new Error('Map name is required.');
-  const preset = getCityPreset(form.baseCityId);
+  const preset = getViewPreset(form.viewPresetId);
   const centerLat = preset?.centerLat ?? currentMap?.centerLat ?? fallback.fallbackCenterLat;
   const centerLng = preset?.centerLng ?? currentMap?.centerLng ?? fallback.fallbackCenterLng;
   const defaultZoom = preset?.defaultZoom ?? currentMap?.defaultZoom ?? (fallback.fallbackZoom ? Math.round(fallback.fallbackZoom) : null);
   if (centerLat == null || centerLng == null || defaultZoom == null) {
-    throw new Error('Choose a built-in city or position the map before saving.');
+    throw new Error('Choose a starting view or position the map before saving.');
   }
-  return { name, city: preset?.city ?? (form.city.trim() || null), centerLat, centerLng, defaultZoom, metadata: currentMap?.metadata ?? {} };
+  return { name, centerLat, centerLng, defaultZoom, metadata: currentMap?.metadata ?? {} };
 }
 
 function buildZonePayload(form: ZoneFormState, selectedZone: MapZone | null): Omit<MapZoneUpsertInput, 'geometry'> {
@@ -1547,14 +1522,16 @@ function fitMapToPositions(map: mapboxgl.Map | null, positions: Array<[number, n
   map.fitBounds(bounds, { padding, maxZoom, duration: 650, essential: true });
 }
 
-function getCityPreset(id: BaseCityId): CityPreset | null {
-  return CITY_PRESETS.find((p) => p.id === id) ?? null;
+function getViewPreset(id: ViewPresetId): ViewPreset | null {
+  return VIEW_PRESETS.find((p) => p.id === id) ?? null;
 }
 
-function inferPresetId(map: MapDefinition): BaseCityId {
-  const city = (map.city ?? '').toLowerCase();
-  if (city.includes('toronto')) return 'toronto';
-  if (city.includes('chicago')) return 'chicago';
+function inferPresetId(map: MapDefinition): ViewPresetId {
+  const preset = VIEW_PRESETS.find((candidate) =>
+    Math.abs(candidate.centerLat - map.centerLat) < 0.01
+    && Math.abs(candidate.centerLng - map.centerLng) < 0.01,
+  );
+  if (preset) return preset.id;
   return 'custom';
 }
 

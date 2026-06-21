@@ -103,8 +103,8 @@ function buildZoneFeature(
   zone: Zone,
   ownerColor: string | null,
 ): Feature<GeoJsonGeometry, GeoJsonProperties> {
-  const fillColor = ownerColor ? blendHex(ownerColor, DESATURATED_BASE, 0.62) : NEUTRAL_FILL;
-  const lineColor = ownerColor ? blendHex(ownerColor, '#596166', 0.48) : NEUTRAL_LINE;
+  const fillColor = ownerColor ? blendHex(ownerColor, DESATURATED_BASE, 0.48) : NEUTRAL_FILL;
+  const lineColor = ownerColor ? blendHex(ownerColor, '#596166', 0.36) : NEUTRAL_LINE;
 
   return {
     type: 'Feature',
@@ -117,8 +117,8 @@ function buildZoneFeature(
       ownerTeamId: zone.ownerTeamId,
       fillColor,
       lineColor,
-      fillOpacity: zone.ownerTeamId ? 0.24 : 0.14,
-      lineOpacity: zone.ownerTeamId ? 0.82 : 0.58,
+      fillOpacity: zone.ownerTeamId ? 0.3 : 0.14,
+      lineOpacity: zone.ownerTeamId ? 0.88 : 0.58,
       isDisabled: zone.isDisabled,
       claimRadiusMeters: zone.claimRadiusMeters,
     },

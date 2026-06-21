@@ -19,6 +19,14 @@ const paramsWithGameIdSchema = {
   },
 } as const;
 
+const paramsWithPlayerIdSchema = {
+  type: 'object',
+  required: ['id'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+  },
+} as const;
+
 const registerPlayerBodySchema = {
   type: 'object',
   additionalProperties: false,
@@ -249,6 +257,93 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
+  app.post(
+    '/players/:id/kick',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        params: paramsWithPlayerIdSchema,
+      },
+    },
+    async (request, reply) => {
+      let broadcastPayload: { gameId: string; modeKey: string; stateVersion: number; player: ReturnType<typeof serializePublicPlayer> } | null = null;
+
+      await executeIdempotentMutation(app, request, reply, async (db) => {
+        const requestingPlayer = request.player!;
+        const game = await getGameById(db, requestingPlayer.gameId);
+        const { id: targetPlayerId } = request.params as { id: string };
+
+        if (game.status !== 'setup') {
+          throw new AppError(errorCodes.validationError, {
+            message: 'Players can only be kicked before the game starts.',
+          });
+        }
+
+        if (!requestingPlayer.teamId) {
+          throw new AppError(errorCodes.validationError, {
+            message: 'Join a team before kicking another player.',
+          });
+        }
+
+        if (targetPlayerId === requestingPlayer.id) {
+          throw new AppError(errorCodes.validationError, {
+            message: 'Use Leave to remove yourself from the lobby.',
+          });
+        }
+
+        const [targetPlayer] = await db
+          .select()
+          .from(players)
+          .where(and(eq(players.id, targetPlayerId), eq(players.gameId, requestingPlayer.gameId)))
+          .limit(1);
+
+        if (!targetPlayer || !targetPlayer.teamId) {
+          throw new AppError(errorCodes.validationError, {
+            message: 'Player is not currently in this lobby.',
+          });
+        }
+
+        const [updatedPlayer] = await db
+          .update(players)
+          .set({
+            teamId: null,
+            metadata: withLobbyReady(targetPlayer.metadata as JsonObject, false),
+          })
+          .where(eq(players.id, targetPlayer.id))
+          .returning();
+
+        broadcastPayload = {
+          gameId: updatedPlayer.gameId,
+          modeKey: game.modeKey,
+          stateVersion: game.stateVersion,
+          player: serializePublicPlayer(updatedPlayer),
+        };
+
+        return {
+          gameId: requestingPlayer.gameId,
+          playerId: requestingPlayer.id,
+          statusCode: 200,
+          body: { player: serializePublicPlayer(updatedPlayer) },
+        };
+      }, async () => {
+        if (!broadcastPayload) {
+          return;
+        }
+
+        await app.broadcaster.send({
+          gameId: broadcastPayload.gameId,
+          modeKey: broadcastPayload.modeKey,
+          eventType: socketServerEventTypes.playerJoined,
+          stateVersion: broadcastPayload.stateVersion,
+          payload: {
+            player: broadcastPayload.player,
+            team: null,
+          },
+        });
+      });
+    },
+  );
+
   app.get(
     '/game/:id/players',
     {
@@ -400,9 +495,10 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
-        if (!teamedPlayers.every((entry) => isLobbyReady(entry.metadata as JsonObject))) {
+        const readyPlayerCount = teamedPlayers.filter((entry) => isLobbyReady(entry.metadata as JsonObject)).length;
+        if (readyPlayerCount <= teamedPlayers.length / 2) {
           throw new AppError(errorCodes.validationError, {
-            message: 'All teamed players must be ready before the game can start.',
+            message: 'A majority of teamed players must be ready before the game can start.',
           });
         }
 

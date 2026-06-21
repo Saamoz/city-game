@@ -41,7 +41,6 @@ describe("game and team routes", () => {
       payload: {
         name: "Downtown Territory",
         modeKey: "territory",
-        city: "Winnipeg",
         centerLat: 49.8951,
         centerLng: -97.1384,
         defaultZoom: 13,

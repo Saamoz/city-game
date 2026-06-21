@@ -16,7 +16,7 @@ const winCondition: WinConditions = [
 const config: SampleSeedConfig = {
   seedKey: 'chicago_sample_v1',
   name: 'Chicago Territory Demo',
-  city: 'Chicago',
+  mapName: 'Chicago Base Map',
   centerLat: 41.8781,
   centerLng: -87.6298,
   defaultZoom: 12,

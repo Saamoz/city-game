@@ -18,7 +18,7 @@ const winCondition: WinConditions = [
 const config: SampleSeedConfig = {
   seedKey: DEV_SEED_KEY,
   name: 'Winnipeg Territory Demo',
-  city: 'Winnipeg',
+  mapName: 'Winnipeg Base Map',
   centerLat: 49.8951,
   centerLng: -97.1384,
   defaultZoom: 13,

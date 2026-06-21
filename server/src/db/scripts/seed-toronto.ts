@@ -16,7 +16,7 @@ const winCondition: WinConditions = [
 const config: SampleSeedConfig = {
   seedKey: 'toronto_sample_v1',
   name: 'Toronto Territory Demo',
-  city: 'Toronto',
+  mapName: 'Toronto Base Map',
   centerLat: 43.6532,
   centerLng: -79.3832,
   defaultZoom: 12,

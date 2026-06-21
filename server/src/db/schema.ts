@@ -28,7 +28,6 @@ export const maps = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     name: varchar('name', { length: 255 }).notNull(),
-    city: varchar('city', { length: 255 }),
     centerLat: decimal('center_lat', { precision: 10, scale: 7 }).notNull(),
     centerLng: decimal('center_lng', { precision: 10, scale: 7 }).notNull(),
     defaultZoom: integer('default_zoom').notNull(),
@@ -105,7 +104,6 @@ export const games = pgTable(
     challengeSetId: uuid('challenge_set_id').references(() => challengeSets.id, { onDelete: 'set null' }),
     name: varchar('name', { length: 255 }).notNull(),
     modeKey: varchar('mode_key', { length: 50 }).notNull(),
-    city: varchar('city', { length: 255 }),
     centerLat: decimal('center_lat', { precision: 10, scale: 7 }).notNull(),
     centerLng: decimal('center_lng', { precision: 10, scale: 7 }).notNull(),
     defaultZoom: integer('default_zoom').notNull(),

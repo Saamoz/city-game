@@ -39,7 +39,7 @@ describe('osm import service', () => {
       minIntervalMs: 0,
     });
 
-    const preview = await service.previewAdministrativeBoundaries({ city: 'Chicago' });
+    const preview = await service.previewAdministrativeBoundaries({ placeName: 'Chicago Base Map' });
 
     expect(requests).toHaveLength(2);
     expect(requests[0]).toContain('relation["boundary"="administrative"]');
@@ -70,7 +70,7 @@ describe('osm import service', () => {
             adminLevel: '10',
             metadata: {
               source: 'osm',
-              sourceCity: 'Chicago',
+              sourceMapName: 'Chicago Base Map',
               osmType: 'way',
               osmId: 101,
               adminLevel: '10',
@@ -96,13 +96,13 @@ describe('osm import service', () => {
       },
     });
 
-    await service.previewAdministrativeBoundaries({ city: 'Chicago' });
-    await service.previewAdministrativeBoundaries({ city: 'Chicago' });
+    await service.previewAdministrativeBoundaries({ placeName: 'Chicago Base Map' });
+    await service.previewAdministrativeBoundaries({ placeName: 'Chicago Base Map' });
 
     expect(sleepCalls).toEqual([500]);
   });
 
-  it('builds an Overpass query with escaped city names', () => {
+  it('builds an Overpass query with escaped map names', () => {
     const query = buildOverpassQuery('St. John"s', 'relation');
 
     expect(query).toContain('St. John\\"s');

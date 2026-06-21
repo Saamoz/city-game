@@ -19,6 +19,20 @@ html, body, #root {
   min-height: 100%;
 }
 
+html.game-view-active,
+body.game-view-active,
+body.game-view-active #root {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.game-view-active {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+}
+
 body {
   min-height: 100vh;
   background:

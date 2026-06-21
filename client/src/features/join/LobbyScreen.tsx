@@ -11,6 +11,8 @@ interface LobbyScreenProps {
   mapZones: MapZone[];
   connectionMessage: string | null;
   onLeaveTeam(): void;
+  onKickPlayer(player: Player): void;
+  kickingPlayerId: string | null;
   isLeavingTeam: boolean;
   canShowNotificationPrompt: boolean;
   notificationPromptMessage: string | null;
@@ -38,6 +40,8 @@ export function LobbyScreen({
   mapZones,
   connectionMessage,
   onLeaveTeam,
+  onKickPlayer,
+  kickingPlayerId,
   isLeavingTeam,
   canShowNotificationPrompt,
   notificationPromptMessage,
@@ -53,6 +57,7 @@ export function LobbyScreen({
   onSetReady,
   onStartGame,
 }: LobbyScreenProps) {
+  const readyPlayersRequired = Math.floor(totalReadyEligiblePlayers / 2) + 1;
   const playersByTeamId = useMemo(() => {
     const roster = new Map<string, Player[]>();
     for (const team of teams) {
@@ -99,7 +104,7 @@ export function LobbyScreen({
             </div>
             <div className="mt-4 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <div className="inline-flex items-center gap-3 rounded-full border border-[#d8c6a0]/70 bg-[#fbf6ea] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#6f6045]">
-                <span>{readyCount}/{totalReadyEligiblePlayers} Ready</span>
+                <span>{readyCount}/{totalReadyEligiblePlayers} Ready · {readyPlayersRequired} needed</span>
               </div>
               <button
                 className="rounded-full border border-[#b7a47d]/70 bg-[#efe5cf] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#2f403f] transition hover:bg-[#e5d8bc] disabled:cursor-not-allowed disabled:opacity-60"
@@ -172,10 +177,10 @@ export function LobbyScreen({
                       const isReady = entry.metadata?.lobby_ready === true;
                       return (
                         <div key={entry.id} className="flex items-center justify-between gap-3 rounded-full bg-[#f3ecd8] px-3 py-2">
-                          <span className={isCurrentPlayer ? 'font-semibold' : ''} style={isCurrentPlayer ? { color: team.color } : undefined}>
+                          <span className={['min-w-0 truncate', isCurrentPlayer ? 'font-semibold' : ''].join(' ')} style={isCurrentPlayer ? { color: team.color } : undefined}>
                             {entry.displayName}
                           </span>
-                          <div className="flex items-center gap-2">
+                          <div className="flex shrink-0 items-center gap-2">
                             <span
                               className={[
                                 'rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.18em]',
@@ -190,7 +195,17 @@ export function LobbyScreen({
                               <span className="rounded-full border border-[#d3c099] bg-[#fff9ee] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[#6f6045]">
                                 You
                               </span>
-                            ) : null}
+                            ) : (
+                              <button
+                                aria-label={`Kick ${entry.displayName}`}
+                                className="rounded-full border border-[#c9a6a0] bg-[#fff5f1] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8a3c32] transition hover:bg-[#f4ddd7] disabled:cursor-not-allowed disabled:opacity-55"
+                                disabled={kickingPlayerId !== null}
+                                onClick={() => onKickPlayer(entry)}
+                                type="button"
+                              >
+                                {kickingPlayerId === entry.id ? 'Kicking' : 'Kick'}
+                              </button>
+                            )}
                           </div>
                         </div>
                       );

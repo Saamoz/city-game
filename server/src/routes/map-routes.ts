@@ -100,7 +100,6 @@ const mapBodySchema = {
   required: ['name', 'centerLat', 'centerLng', 'defaultZoom'],
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 255 },
-    city: { anyOf: [{ type: 'string', minLength: 1, maxLength: 255 }, { type: 'null' }] },
     centerLat: { type: 'number' },
     centerLng: { type: 'number' },
     defaultZoom: { type: 'integer' },
@@ -118,7 +117,6 @@ const mapUpdateBodySchema = {
   minProperties: 1,
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 255 },
-    city: { anyOf: [{ type: 'string', minLength: 1, maxLength: 255 }, { type: 'null' }] },
     centerLat: { type: 'number' },
     centerLng: { type: 'number' },
     defaultZoom: { type: 'integer' },
@@ -206,9 +204,6 @@ const zoneImportBodySchema = {
 const osmImportBodySchema = {
   type: 'object',
   additionalProperties: false,
-  properties: {
-    city: { type: 'string', minLength: 1, maxLength: 255 },
-  },
 } as const;
 
 const mapParamsSchema = {
@@ -257,7 +252,6 @@ export const mapRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const body = request.body as {
         name: string;
-        city?: string | null;
         centerLat: number;
         centerLng: number;
         defaultZoom: number;
@@ -295,7 +289,6 @@ export const mapRoutes: FastifyPluginAsync = async (app) => {
       const { id } = request.params as { id: string };
       const body = request.body as {
         name?: string;
-        city?: string | null;
         centerLat?: number;
         centerLng?: number;
         defaultZoom?: number;
@@ -400,16 +393,7 @@ export const mapRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const map = await getMapByIdOrThrow(app.db, id);
-      const body = request.body as { city?: string };
-      const city = body.city?.trim() || map.city?.trim();
-
-      if (!city) {
-        throw new AppError(errorCodes.validationError, {
-          message: 'City is required for OSM preview when the map has no city set.',
-        });
-      }
-
-      const featureCollection = await app.osmImportService.previewAdministrativeBoundaries({ city });
+      const featureCollection = await app.osmImportService.previewAdministrativeBoundaries({ placeName: map.name });
       reply.send(featureCollection as GeoJsonFeatureCollection<GeoJsonPolygon, OsmPreviewProperties>);
     },
   );

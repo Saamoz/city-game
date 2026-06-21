@@ -15,7 +15,7 @@ export interface OsmPreviewProperties extends JsonObject {
 
 export interface OsmImportService {
   previewAdministrativeBoundaries(input: {
-    city: string;
+    placeName: string;
   }): Promise<GeoJsonFeatureCollection<GeoJsonPolygon, OsmPreviewProperties>>;
 }
 
@@ -78,28 +78,28 @@ export function createOsmImportService(options: CreateOsmImportServiceOptions = 
   }
 
   return {
-    async previewAdministrativeBoundaries({ city }) {
-      const normalizedCity = city.trim();
+    async previewAdministrativeBoundaries({ placeName }) {
+      const normalizedPlaceName = placeName.trim();
 
-      if (!normalizedCity) {
+      if (!normalizedPlaceName) {
         throw new AppError(errorCodes.validationError, {
-          message: 'City is required for OSM preview.',
+          message: 'Map name is required for OSM preview.',
         });
       }
 
-      const relationResult = await fetchPreviewCollection('relation', normalizedCity);
+      const relationResult = await fetchPreviewCollection('relation', normalizedPlaceName);
 
       if (relationResult.features.length > 0) {
         return relationResult;
       }
 
-      return fetchPreviewCollection('way', normalizedCity);
+      return fetchPreviewCollection('way', normalizedPlaceName);
     },
   };
 
   async function fetchPreviewCollection(
     elementType: 'relation' | 'way',
-    city: string,
+    placeName: string,
   ): Promise<GeoJsonFeatureCollection<GeoJsonPolygon, OsmPreviewProperties>> {
     await waitForRateLimit();
 
@@ -108,7 +108,7 @@ export function createOsmImportService(options: CreateOsmImportServiceOptions = 
       headers: {
         'content-type': 'text/plain;charset=UTF-8',
       },
-      body: buildOverpassQuery(city, elementType),
+      body: buildOverpassQuery(placeName, elementType),
       signal: AbortSignal.timeout(timeoutMs),
     }).catch((cause) => {
       throw new AppError(errorCodes.internalServerError, {
@@ -130,16 +130,16 @@ export function createOsmImportService(options: CreateOsmImportServiceOptions = 
     const payload = (await response.json()) as OverpassResponse;
     const geoJson = osmtogeojson(payload as never) as RawGeoJsonFeatureCollection;
 
-    return normalizePreviewCollection(geoJson, city);
+    return normalizePreviewCollection(geoJson, placeName);
   }
 }
 
-export function buildOverpassQuery(city: string, elementType: 'relation' | 'way'): string {
-  const escapedCity = city.replace(/\\/g, '\\\\').replace(/"/g, '\\"').trim();
+export function buildOverpassQuery(placeName: string, elementType: 'relation' | 'way'): string {
+  const escapedPlaceName = placeName.replace(/\\/g, '\\\\').replace(/"/g, '\\"').trim();
 
   return [
     '[out:json][timeout:25];',
-    `area["boundary"="administrative"]["name"="${escapedCity}"]->.searchArea;`,
+    `area["boundary"="administrative"]["name"="${escapedPlaceName}"]->.searchArea;`,
     `${elementType}["boundary"="administrative"]["admin_level"~"9|10"](area.searchArea);`,
     'out geom;',
   ].join('\n');
@@ -147,10 +147,10 @@ export function buildOverpassQuery(city: string, elementType: 'relation' | 'way'
 
 function normalizePreviewCollection(
   collection: RawGeoJsonFeatureCollection,
-  city: string,
+  placeName: string,
 ): GeoJsonFeatureCollection<GeoJsonPolygon, OsmPreviewProperties> {
   const features = collection.features
-    .flatMap((feature, index) => normalizeFeature(feature, city, index))
+    .flatMap((feature, index) => normalizeFeature(feature, placeName, index))
     .sort((left, right) => left.properties.name.localeCompare(right.properties.name));
 
   return {
@@ -161,7 +161,7 @@ function normalizePreviewCollection(
 
 function normalizeFeature(
   feature: RawGeoJsonFeature,
-  city: string,
+  placeName: string,
   fallbackIndex: number,
 ): Array<GeoJsonFeature<GeoJsonPolygon, OsmPreviewProperties>> {
   if (!feature.geometry) {
@@ -184,7 +184,7 @@ function normalizeFeature(
     adminLevel,
     metadata: {
       source: 'osm',
-      sourceCity: city,
+      sourceMapName: placeName,
       osmType,
       osmId,
       adminLevel,

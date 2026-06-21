@@ -125,7 +125,6 @@ export function serializeGameRecord(game: GameRecord): Game {
     challengeSetId: game.challengeSetId,
     name: game.name,
     modeKey: game.modeKey as GameModeKey,
-    city: game.city,
     centerLat: Number(game.centerLat),
     centerLng: Number(game.centerLng),
     defaultZoom: game.defaultZoom,

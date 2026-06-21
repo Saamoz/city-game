@@ -51,7 +51,6 @@ interface NoticeState {
 
 interface GameFormState {
   name: string;
-  city: string;
   modeKey: Game['modeKey'];
   mapId: string;
   challengeSetId: string;
@@ -72,7 +71,6 @@ interface TeamDraftState {
 
 const INITIAL_GAME_FORM: GameFormState = {
   name: '',
-  city: '',
   modeKey: 'territory',
   mapId: '',
   challengeSetId: '',
@@ -198,7 +196,6 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
           ...INITIAL_GAME_FORM,
           mapId: nextMaps[0]?.id ?? '',
           challengeSetId: nextChallengeSets[0]?.id ?? '',
-          city: nextMaps[0]?.city ?? '',
         });
         setTeams([]);
         setPlayers([]);
@@ -248,14 +245,6 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
   }, [selectedGameId, syncRoute]);
 
   useEffect(() => {
-    if (!selectedMap) {
-      return;
-    }
-
-    setGameForm((current) => current.city.trim() ? current : { ...current, city: selectedMap.city ?? '' });
-  }, [selectedMap]);
-
-  useEffect(() => {
     if (!zones.length) {
       setSelectedZoneOwnerTeamId('');
       return;
@@ -293,7 +282,6 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
       ...INITIAL_GAME_FORM,
       mapId: maps[0]?.id ?? '',
       challengeSetId: challengeSets[0]?.id ?? '',
-      city: maps[0]?.city ?? '',
     });
     setTeams([]);
     setPlayers([]);
@@ -330,7 +318,6 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
       const payload = {
         name,
         modeKey: gameForm.modeKey,
-        city: gameForm.city.trim() || null,
         mapId: gameForm.mapId,
         challengeSetId: gameForm.challengeSetId,
         winCondition: buildWinCondition(gameForm),
@@ -600,7 +587,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold">{game.name}</p>
-                    <p className={selectedGameId === game.id ? 'mt-1 text-xs text-white/76' : 'mt-1 text-xs text-[#60707a]'}>{game.city ?? 'No city'}</p>
+                    <p className={selectedGameId === game.id ? 'mt-1 text-xs text-white/76' : 'mt-1 text-xs text-[#60707a]'}>{maps.find((map) => map.id === game.mapId)?.name ?? 'No map selected'}</p>
                   </div>
                   <StatusBadge status={game.status} />
                 </div>
@@ -638,14 +625,6 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                     onChange={(event) => { setGameForm((current) => ({ ...current, name: event.target.value })); }}
                     className={inputClassName}
                     placeholder="Toronto Opening Night"
-                  />
-                </Field>
-                <Field label="City">
-                  <input
-                    value={gameForm.city}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, city: event.target.value })); }}
-                    className={inputClassName}
-                    placeholder="Toronto"
                   />
                 </Field>
                 <Field label="Mode">
@@ -1051,7 +1030,6 @@ function buildGameForm(game: Game): GameFormState {
 
   return {
     name: game.name,
-    city: game.city ?? '',
     modeKey: game.modeKey,
     mapId: game.mapId ?? '',
     challengeSetId: game.challengeSetId ?? '',

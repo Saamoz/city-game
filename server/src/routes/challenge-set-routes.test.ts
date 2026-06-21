@@ -267,7 +267,6 @@ async function seedAuthoredMap(app: FastifyInstance) {
     headers: idempotencyHeaders('create-authored-map'),
     payload: {
       name: 'Toronto Base Map',
-      city: 'Toronto',
       centerLat: 43.6532,
       centerLng: -79.3832,
       defaultZoom: 11,
@@ -325,4 +324,3 @@ function createSquarePolygon(centerLng: number, centerLat: number, radius: numbe
     ]],
   };
 }
-

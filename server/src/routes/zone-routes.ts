@@ -1,12 +1,11 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { GeoJsonFeatureCollection, GeoJsonGeometry, GeoJsonPolygon, JsonObject } from '@city-game/shared';
+import type { GeoJsonFeatureCollection, GeoJsonGeometry, JsonObject } from '@city-game/shared';
 import { errorCodes } from '@city-game/shared';
 import { eq } from 'drizzle-orm';
 import type { DatabaseClient } from '../db/connection.js';
 import { games } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import { executeIdempotentMutation } from '../services/idempotency-service.js';
-import type { OsmPreviewProperties } from '../services/osm-import-service.js';
 import {
   createZone,
   deleteZoneById,
@@ -167,15 +166,6 @@ const zoneImportBodySchema = {
   },
 } as const;
 
-const osmImportBodySchema = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['city'],
-  properties: {
-    city: { type: 'string', minLength: 1, maxLength: 255 },
-  },
-} as const;
-
 const gameParamsSchema = {
   type: 'object',
   required: ['id'],
@@ -262,31 +252,6 @@ export const zoneRoutes: FastifyPluginAsync = async (app) => {
           body: { zones },
         };
       });
-    },
-  );
-
-  app.post(
-    '/game/:id/zones/import-osm',
-    {
-      preHandler: [app.requireAdmin],
-      config: {
-        skipIdempotency: true,
-      },
-      schema: {
-        params: gameParamsSchema,
-        body: osmImportBodySchema,
-      },
-    },
-    async (request, reply) => {
-      const { id } = request.params as { id: string };
-      await getGameById(app.db, id);
-
-      const body = request.body as { city: string };
-      const featureCollection = await app.osmImportService.previewAdministrativeBoundaries({
-        city: body.city,
-      });
-
-      reply.send(featureCollection as GeoJsonFeatureCollection<GeoJsonPolygon, OsmPreviewProperties>);
     },
   );
 

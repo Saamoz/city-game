@@ -89,8 +89,12 @@ export function buildZoneScoreboard(snapshot: GameStateSnapshot | null): ZoneSco
 }
 
 export function buildFeedEntries(events: GameEventRecord[], snapshot: GameStateSnapshot | null): FeedEntry[] {
-  const teamNameById = new Map(snapshot?.teams.map((team) => [team.id, team.name]) ?? []);
-  const teamColorById = new Map(snapshot?.teams.map((team) => [team.id, team.color]) ?? []);
+  return buildFeedEntriesForTeams(events, snapshot?.teams ?? []);
+}
+
+export function buildFeedEntriesForTeams(events: GameEventRecord[], teams: Team[]): FeedEntry[] {
+  const teamNameById = new Map(teams.map((team) => [team.id, team.name]));
+  const teamColorById = new Map(teams.map((team) => [team.id, team.color]));
 
   return events
     .map((event) => formatFeedEntry(event, teamNameById, teamColorById))

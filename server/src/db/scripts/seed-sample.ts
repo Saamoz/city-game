@@ -51,7 +51,7 @@ export interface ChallengeSeed {
 export interface SampleSeedConfig {
   seedKey: string;
   name: string;
-  city: string;
+  mapName: string;
   centerLat: number;
   centerLng: number;
   defaultZoom: number;
@@ -90,8 +90,7 @@ export async function runSampleSeed(config: SampleSeedConfig, options?: { clearE
       const transactionalDb = tx as unknown as DatabaseClient;
 
       const map = await createMap(transactionalDb, {
-        name: config.city + ' Base Map',
-        city: config.city,
+        name: config.mapName,
         centerLat: config.centerLat,
         centerLng: config.centerLng,
         defaultZoom: config.defaultZoom,
@@ -121,7 +120,6 @@ export async function runSampleSeed(config: SampleSeedConfig, options?: { clearE
           mapId: map.id,
           name: config.name,
           modeKey: 'territory',
-          city: config.city,
           centerLat: String(config.centerLat),
           centerLng: String(config.centerLng),
           defaultZoom: config.defaultZoom,

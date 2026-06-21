@@ -153,16 +153,15 @@ export function Landing({ initialGameId, onEnterGame, suppressAutoEnter }: Landi
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.45em] text-[#9b741f]">Territory Field Guide</p>
             <h1 className="mt-5 max-w-3xl font-[Georgia,Times_New_Roman,serif] text-4xl font-semibold leading-tight text-[#1f2a2f] sm:text-5xl lg:text-6xl">
-              Active operations, team entry, and city control.
+              Active operations, team entry, and territory control.
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-[#415057] sm:text-lg">
               The app discovers the live match, issues the browser session, and moves a player from briefing into the shared field map. The UI should feel like a field manual, not a landing page.
             </p>
           </div>
 
-          <div className="mt-10 grid gap-4 sm:grid-cols-3">
+          <div className="mt-10 grid gap-4 sm:grid-cols-2">
             <InfoTile label="Match" value={game?.name ?? (status === 'loading' ? 'Checking active game' : 'No active game')} />
-            <InfoTile label="City" value={game?.city ?? 'Unspecified'} />
             <InfoTile label="Status" value={game?.status ?? (status === 'empty' ? 'Idle' : 'Pending')} />
           </div>
         </div>
@@ -188,7 +187,6 @@ export function Landing({ initialGameId, onEnterGame, suppressAutoEnter }: Landi
                   {game.name}
                 </h2>
                 <p className="mt-3 text-sm leading-6 text-[#d9d1c0]">
-                  {game.city ? `${game.city} · ` : ''}
                   {initialGameId ? 'Opened from a direct game link.' : 'Discovered automatically from /game/active.'}
                 </p>
               </div>

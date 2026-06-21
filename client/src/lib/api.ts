@@ -110,7 +110,6 @@ export interface ZoneUpsertInput {
 
 export interface MapUpsertInput {
   name: string;
-  city?: string | null;
   centerLat: number;
   centerLng: number;
   defaultZoom: number;
@@ -148,7 +147,6 @@ export async function getGame(gameId: string, signal?: AbortSignal): Promise<Gam
 export async function createGameDefinition(input: {
   name: string;
   modeKey: Game['modeKey'];
-  city?: string | null;
   mapId?: string | null;
   challengeSetId?: string | null;
   centerLat?: number;
@@ -168,8 +166,7 @@ export async function updateGameDefinition(
   gameId: string,
   input: {
     name?: string;
-    city?: string | null;
-    mapId?: string | null;
+      mapId?: string | null;
     challengeSetId?: string | null;
     centerLat?: number;
     centerLng?: number;
@@ -352,12 +349,11 @@ export async function importMapZoneDefinitions(
 
 export async function previewOsmMapZones(
   mapId: string,
-  city: string | null,
   signal?: AbortSignal,
 ): Promise<GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject>> {
   return apiRequest<GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject>>('/maps/' + mapId + '/zones/import-osm', {
     method: 'POST',
-    body: city ? { city } : {},
+    body: {},
     signal,
     idempotent: false,
   });
@@ -401,6 +397,13 @@ export async function joinTeam(gameId: string, joinCode: string): Promise<JoinTe
 
 export async function leaveCurrentTeam(): Promise<Player> {
   const response = await apiRequest<PlayerResponse>('/players/me/leave-team', {
+    method: 'POST',
+  });
+  return response.player;
+}
+
+export async function kickLobbyPlayer(playerId: string): Promise<Player> {
+  const response = await apiRequest<PlayerResponse>('/players/' + playerId + '/kick', {
     method: 'POST',
   });
   return response.player;
@@ -558,19 +561,6 @@ export async function importAdminZones(
     body: featureCollection,
   });
   return response.zones;
-}
-
-export async function previewOsmZones(
-  gameId: string,
-  city: string,
-  signal?: AbortSignal,
-): Promise<GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject>> {
-  return apiRequest<GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject>>('/game/' + gameId + '/zones/import-osm', {
-    method: 'POST',
-    body: { city },
-    signal,
-    idempotent: false,
-  });
 }
 
 export async function adminForceCompleteChallenge(challengeId: string, input?: { submission?: JsonValue | null; notes?: string }): Promise<CompleteChallengeResponse> {

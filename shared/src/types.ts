@@ -132,7 +132,6 @@ export type ResourceAwardMap = Partial<Record<string, number>>;
 export interface MapDefinition {
   id: Uuid;
   name: string;
-  city: string | null;
   centerLat: number;
   centerLng: number;
   defaultZoom: number;
@@ -190,7 +189,6 @@ export interface Game {
   challengeSetId: Uuid | null;
   name: string;
   modeKey: GameModeKey;
-  city: string | null;
   centerLat: number;
   centerLng: number;
   defaultZoom: number;

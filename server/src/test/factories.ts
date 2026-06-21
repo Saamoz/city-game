@@ -5,7 +5,6 @@ export function createTestGame(overrides: Record<string, unknown> = {}) {
     id: '11111111-1111-4111-8111-111111111111',
     name: 'Test Game',
     modeKey: 'territory',
-    city: 'Winnipeg',
     centerLat: '49.8951',
     centerLng: '-97.1384',
     defaultZoom: 13,

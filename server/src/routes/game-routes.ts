@@ -37,7 +37,6 @@ const gameCreateBodySchema = {
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 255 },
     modeKey: { type: 'string', enum: [...GAME_MODE_KEYS] },
-    city: { type: 'string', minLength: 1, maxLength: 255 },
     mapId: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
     challengeSetId: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
     centerLat: { type: 'number' },
@@ -59,7 +58,6 @@ const gameUpdateBodySchema = {
   additionalProperties: false,
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 255 },
-    city: { type: 'string', minLength: 1, maxLength: 255 },
     mapId: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
     challengeSetId: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
     centerLat: { type: 'number' },
@@ -150,7 +148,6 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
         const body = request.body as {
           name: string;
           modeKey: string;
-          city?: string;
           mapId?: string | null;
           challengeSetId?: string | null;
           centerLat?: number;
@@ -185,7 +182,6 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
             challengeSetId: body.challengeSetId ?? null,
             name: body.name,
             modeKey: body.modeKey,
-            city: body.city ?? mapDefaults?.city ?? null,
             centerLat: centerLat.toString(),
             centerLng: centerLng.toString(),
             defaultZoom,
@@ -234,7 +230,6 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
         const existingGame = await getGameById(db, id);
         const body = request.body as {
           name?: string;
-          city?: string;
           mapId?: string | null;
           challengeSetId?: string | null;
           centerLat?: number;
@@ -268,7 +263,6 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
             mapId: nextMapId ?? null,
             challengeSetId: nextChallengeSetId ?? null,
             name: body.name ?? existingGame.name,
-            city: body.city ?? mapDefaults?.city ?? existingGame.city,
             centerLat: body.centerLat === undefined ? (mapDefaults ? String(mapDefaults.centerLat) : existingGame.centerLat) : body.centerLat.toString(),
             centerLng: body.centerLng === undefined ? (mapDefaults ? String(mapDefaults.centerLng) : existingGame.centerLng) : body.centerLng.toString(),
             defaultZoom: body.defaultZoom ?? mapDefaults?.defaultZoom ?? existingGame.defaultZoom,

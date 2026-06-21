@@ -8,7 +8,6 @@ import { AppError } from '../lib/errors.js';
 interface MapRow {
   id: string;
   name: string;
-  city: string | null;
   centerLat: string;
   centerLng: string;
   defaultZoom: number;
@@ -35,7 +34,6 @@ interface MapZoneRow {
 
 export interface MapInput {
   name: string;
-  city?: string | null;
   centerLat: number;
   centerLng: number;
   defaultZoom: number;
@@ -45,7 +43,6 @@ export interface MapInput {
 
 export interface MapUpdateInput {
   name?: string;
-  city?: string | null;
   centerLat?: number;
   centerLng?: number;
   defaultZoom?: number;
@@ -95,7 +92,6 @@ export async function getMapByIdOrThrow(db: DatabaseClient, mapId: string): Prom
 export async function createMap(db: DatabaseClient, input: MapInput): Promise<MapDefinition> {
   const [inserted] = await db.insert(maps).values({
     name: input.name,
-    city: input.city ?? null,
     centerLat: input.centerLat.toString(),
     centerLng: input.centerLng.toString(),
     defaultZoom: input.defaultZoom,
@@ -111,7 +107,6 @@ export async function updateMap(db: DatabaseClient, mapId: string, input: MapUpd
 
   await db.update(maps).set({
     name: input.name ?? existing.name,
-    city: input.city === undefined ? existing.city : input.city,
     centerLat: String(input.centerLat ?? existing.centerLat),
     centerLng: String(input.centerLng ?? existing.centerLng),
     defaultZoom: input.defaultZoom ?? existing.defaultZoom,
@@ -441,7 +436,6 @@ export async function cloneMapZonesToGame(db: DatabaseClient, mapId: string, gam
 export async function applyMapDefaultsToGame(db: DatabaseClient, mapId: string) {
   const map = await getMapByIdOrThrow(db, mapId);
   return {
-    city: map.city,
     centerLat: map.centerLat,
     centerLng: map.centerLng,
     defaultZoom: map.defaultZoom,
@@ -474,7 +468,6 @@ function buildCentroidSql(geometry: GeoJsonGeometry) {
 const mapSelectFields = {
   id: maps.id,
   name: maps.name,
-  city: maps.city,
   centerLat: maps.centerLat,
   centerLng: maps.centerLng,
   defaultZoom: maps.defaultZoom,
@@ -503,7 +496,6 @@ function serializeMapRow(row: MapRow): MapDefinition {
   return {
     id: row.id,
     name: row.name,
-    city: row.city,
     centerLat: Number(row.centerLat),
     centerLng: Number(row.centerLng),
     defaultZoom: row.defaultZoom,

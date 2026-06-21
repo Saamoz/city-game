@@ -114,6 +114,22 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const { runAction, isPending } = useIdempotentAction();
 
   useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const previousScrollY = window.scrollY;
+
+    html.classList.add('game-view-active');
+    body.classList.add('game-view-active');
+    window.scrollTo(0, 0);
+
+    return () => {
+      html.classList.remove('game-view-active');
+      body.classList.remove('game-view-active');
+      window.scrollTo(0, previousScrollY);
+    };
+  }, []);
+
+  useEffect(() => {
     const controller = new AbortController();
     setLoading(gameId);
     setSelectedChallengeId(null);
@@ -849,12 +865,12 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   }, [focusZoneById]);
 
   return (
-    <main className="relative h-screen overflow-hidden bg-[#dfe6e8] text-[#1f2a2f]">
+    <main className="fixed inset-0 h-[100dvh] overflow-hidden overscroll-none bg-[#dfe6e8] text-[#1f2a2f]">
       <div ref={mapContainerRef} className="absolute inset-0" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,234,215,0.16),transparent_28%),linear-gradient(180deg,rgba(223,230,232,0.04),rgba(223,230,232,0.16))]" />
       <ZoneLayer map={mapForLayer} snapshot={snapshot} />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-[linear-gradient(180deg,rgba(243,236,220,0.9),rgba(243,236,220,0))] px-4 pb-10 pt-4 lg:px-8">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-[linear-gradient(180deg,rgba(243,236,220,0.9),rgba(243,236,220,0))] px-4 pb-10 pt-[calc(env(safe-area-inset-top,0px)+1rem)] lg:px-8">
         <div className="pointer-events-auto mx-auto max-w-7xl">
 
           {/* Mobile top bar */}
@@ -1362,7 +1378,13 @@ function buildCompletedCards(snapshot: GameStateSnapshot | null): CompletedCardV
 
   return snapshot.challenges
     .filter((challenge) => challenge.status === 'completed')
-    .sort((left, right) => left.title.localeCompare(right.title))
+    .sort((left, right) => {
+      const leftCompletedAt = completedClaimsByChallengeId.get(left.id)?.completedAt;
+      const rightCompletedAt = completedClaimsByChallengeId.get(right.id)?.completedAt;
+      const leftTime = leftCompletedAt ? new Date(leftCompletedAt).getTime() : 0;
+      const rightTime = rightCompletedAt ? new Date(rightCompletedAt).getTime() : 0;
+      return rightTime - leftTime || right.sortOrder - left.sortOrder || left.title.localeCompare(right.title);
+    })
     .map((challenge) => {
       const completedClaim = completedClaimsByChallengeId.get(challenge.id);
       const team = completedClaim ? teamById.get(completedClaim.teamId) ?? null : null;

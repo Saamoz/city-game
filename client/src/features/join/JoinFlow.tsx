@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { socketServerEventTypes, type Game, type MapDefinition, type MapZone, type Player, type SocketEventPayloadMap, type Team, type TeamLocation, type Zone } from '@city-game/shared';
+import { socketServerEventTypes, type Game, type GameEventRecord, type MapDefinition, type MapZone, type Player, type SocketEventPayloadMap, type Team, type TeamLocation, type Zone } from '@city-game/shared';
 import {
   ApiError,
   getActiveGame,
   getCurrentPlayer,
   getGame,
   getMap,
+  getRecentEvents,
   getTeamLocations,
   getTeams,
   joinTeam,
+  kickLobbyPlayer,
   leaveCurrentTeam,
   listMapZones,
   listPlayers,
@@ -18,6 +20,7 @@ import {
   startLobbyGame,
   subscribeCurrentPlayerPush,
 } from '../../lib/api';
+import { buildFeedEntriesForTeams, type FeedEntry } from '../game/Phase32Panels';
 import { buildRenderedZoneGeometry, collectGeometryPositions } from '../game/mapGeometry';
 import { clearTeamLocationMarkers, syncTeamLocationMarkers } from '../game/teamLocationMarkers';
 import {
@@ -57,9 +60,11 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
   const [mapZones, setMapZones] = useState<MapZone[]>([]);
   const [spectatorZones, setSpectatorZones] = useState<Zone[]>([]);
   const [spectatorTeamLocations, setSpectatorTeamLocations] = useState<TeamLocation[]>([]);
+  const [spectatorEvents, setSpectatorEvents] = useState<GameEventRecord[]>([]);
   const [name, setName] = useState(persistedDisplayName);
   const [submitting, setSubmitting] = useState<'register' | null>(null);
   const [joiningTeamId, setJoiningTeamId] = useState<string | null>(null);
+  const [kickingPlayerId, setKickingPlayerId] = useState<string | null>(null);
   const [isLeavingTeam, setIsLeavingTeam] = useState(false);
   const [readyPending, setReadyPending] = useState(false);
   const [startPending, setStartPending] = useState(false);
@@ -97,16 +102,18 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
   }, []);
 
   const loadSpectatorAssets = useCallback(async (gameId: string, signal?: AbortSignal) => {
-    const [nextTeams, nextZones, nextTeamLocations, nextPlayers] = await Promise.all([
+    const [nextTeams, nextZones, nextTeamLocations, nextPlayers, nextEvents] = await Promise.all([
       getTeams(gameId, signal),
       listZones(gameId, signal),
       getTeamLocations(gameId, signal),
       listPlayers(gameId, signal),
+      getRecentEvents(gameId, { limit: 40, signal }).catch(() => []),
     ]);
 
     setTeams(nextTeams);
     setSpectatorZones(nextZones);
     setSpectatorTeamLocations(nextTeamLocations);
+    setSpectatorEvents(nextEvents);
     setPlayers(nextPlayers);
   }, []);
 
@@ -215,6 +222,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
         setMapZones([]);
         setSpectatorZones([]);
         setSpectatorTeamLocations([]);
+        setSpectatorEvents([]);
         setStep('home');
         setMessage('No active game is running right now.');
         return;
@@ -316,6 +324,11 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
       setPlayers((currentPlayers) => upsertPlayer(currentPlayers, payload.player));
       if (payload.player.id === player.id) {
         setPlayer(payload.player);
+        if (!payload.player.teamId) {
+          setMessage('You were removed from the lobby. Choose a team to rejoin.');
+          setStep('team_picker');
+          setSession({ step: 'team_picker', teamId: null });
+        }
       }
       const joinedTeam = payload.team;
       if (joinedTeam) {
@@ -476,6 +489,28 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
     }
   }
 
+  async function handleKickPlayer(targetPlayer: Player) {
+    if (!player || kickingPlayerId || targetPlayer.id === player.id) {
+      return;
+    }
+
+    if (!window.confirm(`Kick ${targetPlayer.displayName} from the lobby?`)) {
+      return;
+    }
+
+    setKickingPlayerId(targetPlayer.id);
+    setMessage(null);
+
+    try {
+      const kickedPlayer = await kickLobbyPlayer(targetPlayer.id);
+      setPlayers((currentPlayers) => upsertPlayer(currentPlayers, kickedPlayer));
+    } catch (error) {
+      setMessage(getErrorMessage(error, 'Unable to kick that player right now.'));
+    } finally {
+      setKickingPlayerId(null);
+    }
+  }
+
   async function handleSetReady(ready: boolean) {
     if (!player || readyPending) {
       return;
@@ -580,7 +615,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
   const teamedPlayers = useMemo(() => players.filter((entry) => entry.teamId), [players]);
   const readyPlayers = useMemo(() => teamedPlayers.filter((entry) => isLobbyReady(entry.metadata)).length, [teamedPlayers]);
   const isCurrentPlayerReady = useMemo(() => (player ? isLobbyReady(player.metadata) : false), [player]);
-  const canStartLobbyGame = Boolean(teamedPlayers.length > 0 && readyPlayers === teamedPlayers.length);
+  const canStartLobbyGame = Boolean(teamedPlayers.length > 0 && readyPlayers > teamedPlayers.length / 2);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#f5f0e8] text-[#223238]">
@@ -601,6 +636,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
           spectatorTeams={teams}
           spectatorTeamLocations={spectatorTeamLocations}
           spectatorZones={spectatorZones}
+          spectatorEvents={spectatorEvents}
           name={name}
           joiningTeamId={joiningTeamId}
           onEnterGame={() => onEnterGame(game.id)}
@@ -637,6 +673,8 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
             players={players}
             teams={teams}
             onLeaveTeam={handleLeaveTeam}
+            onKickPlayer={handleKickPlayer}
+            kickingPlayerId={kickingPlayerId}
             isLeavingTeam={isLeavingTeam}
             canShowNotificationPrompt={pushPromptState === 'ready' || pushPromptState === 'subscribing'}
             notificationPromptMessage={pushPromptMessage}
@@ -668,6 +706,7 @@ function HomeScreen(props: {
   spectatorTeams: Team[];
   spectatorTeamLocations: TeamLocation[];
   spectatorZones: Zone[];
+  spectatorEvents: GameEventRecord[];
   submitting: boolean;
   joiningTeamId: string | null;
   canJoinCurrentGame: boolean;
@@ -679,9 +718,12 @@ function HomeScreen(props: {
   onRegister(event: FormEvent<HTMLFormElement>): void;
   onEnterGame(): void;
 }) {
-  const subtitle = props.game.city ? props.game.city : null;
   const hasRegisteredPlayer = Boolean(props.player && props.player.gameId === props.game.id);
   const showSpectatorView = !props.canJoinCurrentGame;
+  const spectatorFeedEntries = useMemo(
+    () => buildFeedEntriesForTeams(props.spectatorEvents, props.spectatorTeams),
+    [props.spectatorEvents, props.spectatorTeams],
+  );
 
   return (
     <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#f5f0e8] px-5 py-8 sm:px-8">
@@ -693,20 +735,25 @@ function HomeScreen(props: {
       ].join(' ')}>
         {showSpectatorView ? (
           <div className="pointer-events-none flex min-h-[calc(100vh-4rem)] flex-col justify-between gap-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#d8c6a0]/75 bg-[#f7efdc]/94 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#5d4d33] shadow-[0_12px_28px_rgba(24,32,36,0.12)] backdrop-blur">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#c8a86b]" />
-                Spectator View
+            <div className="space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#d8c6a0]/75 bg-[#f7efdc]/94 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#5d4d33] shadow-[0_12px_28px_rgba(24,32,36,0.12)] backdrop-blur">
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#c8a86b]" />
+                  Spectator View
+                </div>
+                {props.canReturnToGame ? (
+                  <button
+                    className="pointer-events-auto inline-flex items-center justify-center rounded-full bg-[#24343a] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#f4ead7] shadow-[0_12px_28px_rgba(24,32,36,0.18)] transition hover:bg-[#1d2b30]"
+                    onClick={props.onEnterGame}
+                    type="button"
+                  >
+                    Return to Game
+                  </button>
+                ) : null}
               </div>
-              {props.canReturnToGame ? (
-                <button
-                  className="pointer-events-auto inline-flex items-center justify-center rounded-full bg-[#24343a] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#f4ead7] shadow-[0_12px_28px_rgba(24,32,36,0.18)] transition hover:bg-[#1d2b30]"
-                  onClick={props.onEnterGame}
-                  type="button"
-                >
-                  Return to Game
-                </button>
-              ) : null}
+              <div className="flex justify-end">
+                <SpectatorFeedPanel entries={spectatorFeedEntries} />
+              </div>
             </div>
             <SpectatorTeamPanel
               canJoin={props.canJoinMidGame}
@@ -733,10 +780,6 @@ function HomeScreen(props: {
               <h1 className="font-[Georgia,Times_New_Roman,serif] text-5xl font-semibold text-[#223238] sm:text-6xl">
                 {props.game.name}
               </h1>
-              {subtitle ? (
-                <p className="mt-4 font-[Georgia,Times_New_Roman,serif] text-lg text-[#6d6758] sm:text-xl">{subtitle}</p>
-              ) : null}
-
               {props.canJoinCurrentGame ? (
                 hasRegisteredPlayer ? (
               <div className="mt-10 w-full max-w-sm rounded-[1.8rem] border border-[#d5c59f] bg-[#f0ebe0] px-6 py-6 shadow-[0_20px_48px_rgba(35,52,58,0.12)]">
@@ -784,6 +827,58 @@ function HomeScreen(props: {
   );
 }
 
+
+function SpectatorFeedPanel({ entries }: { entries: FeedEntry[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleEntries = expanded ? entries.slice(0, 20) : entries.slice(0, 3);
+
+  return (
+    <section className="pointer-events-auto w-full max-w-sm rounded-[1.4rem] border border-[#d8c6a0]/80 bg-[#f7efdc]/94 p-3 shadow-[0_18px_42px_rgba(24,32,36,0.16)] backdrop-blur">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8c7a57]">Game Feed</p>
+          <p className="mt-1 text-xs text-[#66757a]">Latest activity</p>
+        </div>
+        {entries.length > 3 ? (
+          <button
+            className="rounded-full border border-[#b7a47d]/75 bg-[#fffaf0] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#3d4b50] transition hover:bg-[#f1e6cc]"
+            onClick={() => setExpanded((current) => !current)}
+            type="button"
+          >
+            {expanded ? 'Collapse' : 'Expand'}
+          </button>
+        ) : null}
+      </div>
+
+      {visibleEntries.length ? (
+        <div className={["mt-3 space-y-1.5 overflow-y-auto pr-1", expanded ? 'max-h-[42vh]' : 'max-h-32'].join(' ')}>
+          {visibleEntries.map((entry) => (
+            <article key={entry.id} className="rounded-xl border border-[#d6c6a2]/80 bg-[#fffaf0]/92 px-3 py-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2">
+                  {entry.accentColor ? <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: entry.accentColor }} /> : null}
+                  <p className="text-xs font-semibold leading-5 text-[#223238]">{entry.title}</p>
+                </div>
+                <time className="shrink-0 pt-0.5 text-[10px] uppercase tracking-[0.12em] text-[#7a6a48]">{formatSpectatorEventTime(entry.createdAt)}</time>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-[#66757a]">No game activity yet.</p>
+      )}
+    </section>
+  );
+}
+
+function formatSpectatorEventTime(value: string): string {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    return '';
+  }
+
+  return timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
 function SpectatorTeamPanel(props: {
   canJoin: boolean;
@@ -1033,10 +1128,10 @@ function SpectatorMapBackground({ game, teams, teamLocations, zones }: { game: G
         properties: {
           id: zone.id,
           name: zone.name,
-          fillColor: zone.ownerTeamId ? blendHex(teamColorById.get(zone.ownerTeamId) ?? '#c8a86b', '#c9c0af', 0.62) : '#b8b9b3',
-          lineColor: zone.ownerTeamId ? blendHex(teamColorById.get(zone.ownerTeamId) ?? '#756e61', '#596166', 0.48) : '#7d817b',
-          fillOpacity: zone.ownerTeamId ? 0.24 : 0.14,
-          lineOpacity: zone.ownerTeamId ? 0.82 : 0.58,
+          fillColor: zone.ownerTeamId ? blendHex(teamColorById.get(zone.ownerTeamId) ?? '#c8a86b', '#c9c0af', 0.48) : '#b8b9b3',
+          lineColor: zone.ownerTeamId ? blendHex(teamColorById.get(zone.ownerTeamId) ?? '#756e61', '#596166', 0.36) : '#7d817b',
+          fillOpacity: zone.ownerTeamId ? 0.3 : 0.14,
+          lineOpacity: zone.ownerTeamId ? 0.88 : 0.58,
         },
         geometry: buildRenderedZoneGeometry(zone),
       })),
