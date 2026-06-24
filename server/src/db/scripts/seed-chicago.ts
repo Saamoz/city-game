@@ -4,7 +4,6 @@ import { runSampleSeed, squarePolygon, type SampleSeedConfig } from './seed-samp
 const gameSettings: GameSettings = {
   max_concurrent_claims: 2,
   claim_timeout_minutes: 10,
-  location_tracking_enabled: false,
   require_gps_accuracy: false,
 };
 

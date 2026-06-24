@@ -12,8 +12,6 @@ const GAME_ID = '11111111-1111-4111-8111-111111111111';
 const TEAM_ID = '22222222-2222-4222-8222-222222222222';
 const PLAYER_ID = '33333333-3333-4333-8333-333333333333';
 
-const DEFAULT_LOCATION_RETENTION_HOURS = 24;
-
 describe('player routes', () => {
   let app: FastifyInstance;
   let testDatabase: Awaited<ReturnType<typeof getTestDatabase>>;
@@ -714,7 +712,7 @@ describe('player routes', () => {
     });
   });
 
-  it('updates the current player location without storing a sample when tracking is disabled', async () => {
+  it('updates the current player location without storing a sample outside an active team', async () => {
     await seedGame();
     await seedPlayer({ teamId: null, sessionToken: 'location-session-token' });
     app = await createPlayerTestApp();
@@ -755,7 +753,6 @@ describe('player routes', () => {
       tracking: {
         enabled: false,
         sampleStored: false,
-        retentionHours: DEFAULT_LOCATION_RETENTION_HOURS,
       },
     });
 
@@ -776,12 +773,11 @@ describe('player routes', () => {
 
   it('stores a location sample when tracking is enabled for the game', async () => {
     await seedGame({
-      settings: {
-        location_tracking_enabled: true,
-        location_retention_hours: 12,
-      },
+      status: 'active',
+      settings: {},
     });
-    await seedPlayer({ teamId: null, sessionToken: 'tracked-location-token' });
+    await seedTeam();
+    await seedPlayer({ teamId: TEAM_ID, sessionToken: 'tracked-location-token' });
     app = await createPlayerTestApp();
 
     const capturedAt = new Date().toISOString();
@@ -807,14 +803,15 @@ describe('player routes', () => {
       tracking: {
         enabled: true,
         sampleStored: true,
-        retentionHours: 12,
       },
     });
 
     const [storedSample] = await testDatabase.db
       .select({
         gameId: playerLocationSamples.gameId,
+        teamId: playerLocationSamples.teamId,
         playerId: playerLocationSamples.playerId,
+        sampleBucket: playerLocationSamples.sampleBucket,
         recordedAt: playerLocationSamples.recordedAt,
         gpsErrorMeters: playerLocationSamples.gpsErrorMeters,
         speedMps: playerLocationSamples.speedMps,
@@ -827,23 +824,24 @@ describe('player routes', () => {
 
     expect(storedSample).toMatchObject({
       gameId: GAME_ID,
+      teamId: TEAM_ID,
       playerId: PLAYER_ID,
       gpsErrorMeters: 5,
       speedMps: 2.5,
       headingDegrees: 90,
       source: 'browser',
     });
+    expect(storedSample?.sampleBucket).toBeTypeOf('number');
     expect(storedSample?.recordedAt.toISOString()).toBe(capturedAt);
   });
 
   it('replays a tracked location update without inserting a duplicate sample', async () => {
     await seedGame({
-      settings: {
-        location_tracking_enabled: true,
-        location_retention_hours: 6,
-      },
+      status: 'active',
+      settings: {},
     });
-    await seedPlayer({ teamId: null, sessionToken: 'location-replay-token' });
+    await seedTeam();
+    await seedPlayer({ teamId: TEAM_ID, sessionToken: 'location-replay-token' });
     app = await createPlayerTestApp();
 
     const payload = {
@@ -878,6 +876,49 @@ describe('player routes', () => {
     expect(secondResponse.json()).toEqual(firstResponse.json());
 
     const storedSamples = await testDatabase.db.select().from(playerLocationSamples).where(eq(playerLocationSamples.playerId, PLAYER_ID));
+    expect(storedSamples).toHaveLength(1);
+  });
+
+  it('stores at most one representative location per team sampling window', async () => {
+    await seedGame({ status: 'active' });
+    await seedTeam();
+    await seedPlayer({ teamId: TEAM_ID, sessionToken: 'team-sample-player-one' });
+    await seedPlayer({
+      id: '66666666-6666-4666-8666-666666666666',
+      teamId: TEAM_ID,
+      displayName: 'Player Two',
+      sessionToken: 'team-sample-player-two',
+    });
+    app = await createPlayerTestApp();
+
+    const capturedAt = new Date().toISOString();
+    const payload = {
+      lat: 49.8951,
+      lng: -97.1384,
+      gpsErrorMeters: 4,
+      capturedAt,
+    };
+    const firstResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/location',
+      headers: idempotencyHeaders('team-sample-player-one'),
+      cookies: { [SESSION_COOKIE_NAME]: 'team-sample-player-one' },
+      payload,
+    });
+    const secondResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/location',
+      headers: idempotencyHeaders('team-sample-player-two'),
+      cookies: { [SESSION_COOKIE_NAME]: 'team-sample-player-two' },
+      payload: { ...payload, lat: 49.896 },
+    });
+
+    expect(firstResponse.json().tracking.sampleStored).toBe(true);
+    expect(secondResponse.json().tracking.sampleStored).toBe(false);
+    const storedSamples = await testDatabase.db
+      .select()
+      .from(playerLocationSamples)
+      .where(and(eq(playerLocationSamples.gameId, GAME_ID), eq(playerLocationSamples.teamId, TEAM_ID)));
     expect(storedSamples).toHaveLength(1);
   });
 

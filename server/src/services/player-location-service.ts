@@ -1,17 +1,16 @@
-import { and, eq, lt, sql } from 'drizzle-orm';
-import type { GpsPayload, GameSettings } from '@city-game/shared';
+import { eq, sql } from 'drizzle-orm';
+import type { GpsPayload } from '@city-game/shared';
 import { errorCodes } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { games, playerLocationSamples, players } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
+import { getTeamLocationRepresentative } from './team-location-service.js';
 
-const DEFAULT_LOCATION_RETENTION_HOURS = 24;
 const DEFAULT_LOCATION_SOURCE = 'browser';
-const MS_PER_HOUR = 60 * 60 * 1_000;
+const TEAM_LOCATION_SAMPLE_INTERVAL_MS = 15_000;
 
 export interface LocationTrackingSettings {
   enabled: boolean;
-  retentionHours: number;
 }
 
 export interface UpdatePlayerLocationInput {
@@ -25,16 +24,12 @@ export interface UpdatePlayerLocationResult {
   sampleStored: boolean;
 }
 
-export interface CleanupPlayerLocationSamplesResult {
-  deletedSamples: number;
-}
-
 export async function updatePlayerLocation(
   db: DatabaseClient,
   input: UpdatePlayerLocationInput,
 ): Promise<UpdatePlayerLocationResult> {
   const [existingPlayer] = await db
-    .select({ id: players.id, gameId: players.gameId })
+    .select({ id: players.id, gameId: players.gameId, teamId: players.teamId })
     .from(players)
     .where(eq(players.id, input.playerId))
     .limit(1);
@@ -43,13 +38,19 @@ export async function updatePlayerLocation(
     throw new AppError(errorCodes.unauthorized);
   }
 
-  const [game] = await db.select({ settings: games.settings }).from(games).where(eq(games.id, existingPlayer.gameId)).limit(1);
+  const [game] = await db
+    .select({ status: games.status })
+    .from(games)
+    .where(eq(games.id, existingPlayer.gameId))
+    .limit(1);
 
   if (!game) {
     throw new AppError(errorCodes.gameNotFound);
   }
 
-  const tracking = getLocationTrackingSettings(game.settings);
+  const tracking = {
+    enabled: game.status === 'active' && existingPlayer.teamId !== null,
+  };
   const recordedAt = new Date(input.gpsPayload.capturedAt);
 
   const [player] = await db
@@ -65,18 +66,27 @@ export async function updatePlayerLocation(
 
   let sampleStored = false;
 
-  if (tracking.enabled) {
-    await db.insert(playerLocationSamples).values({
-      gameId: player.gameId,
-      playerId: player.id,
-      recordedAt,
-      location: sql`ST_SetSRID(ST_MakePoint(${input.gpsPayload.lng}, ${input.gpsPayload.lat}), 4326)`,
-      gpsErrorMeters: input.gpsPayload.gpsErrorMeters,
-      speedMps: input.gpsPayload.speedMps,
-      headingDegrees: input.gpsPayload.headingDegrees,
-      source: DEFAULT_LOCATION_SOURCE,
-    });
-    sampleStored = true;
+  if (tracking.enabled && player.teamId) {
+    const representative = await getTeamLocationRepresentative(db, player.gameId, player.teamId);
+    if (representative?.id === player.id) {
+      const insertedSamples = await db
+        .insert(playerLocationSamples)
+        .values({
+          gameId: player.gameId,
+          teamId: player.teamId,
+          playerId: player.id,
+          sampleBucket: Math.floor(recordedAt.getTime() / TEAM_LOCATION_SAMPLE_INTERVAL_MS),
+          recordedAt,
+          location: sql`ST_SetSRID(ST_MakePoint(${input.gpsPayload.lng}, ${input.gpsPayload.lat}), 4326)`,
+          gpsErrorMeters: input.gpsPayload.gpsErrorMeters,
+          speedMps: input.gpsPayload.speedMps,
+          headingDegrees: input.gpsPayload.headingDegrees,
+          source: DEFAULT_LOCATION_SOURCE,
+        })
+        .onConflictDoNothing()
+        .returning({ id: playerLocationSamples.id });
+      sampleStored = insertedSamples.length > 0;
+    }
   }
 
   return {
@@ -84,53 +94,4 @@ export async function updatePlayerLocation(
     tracking,
     sampleStored,
   };
-}
-
-export async function cleanupPlayerLocationSamples(
-  db: DatabaseClient,
-  now: Date = new Date(),
-): Promise<CleanupPlayerLocationSamplesResult> {
-  const gameRows = await db.select({ id: games.id, settings: games.settings }).from(games);
-  let deletedSamples = 0;
-
-  for (const game of gameRows) {
-    const tracking = getLocationTrackingSettings(game.settings);
-    const cutoff = new Date(now.getTime() - tracking.retentionHours * MS_PER_HOUR);
-    const deletedRows = await db
-      .delete(playerLocationSamples)
-      .where(and(eq(playerLocationSamples.gameId, game.id), lt(playerLocationSamples.recordedAt, cutoff)))
-      .returning({ id: playerLocationSamples.id });
-
-    deletedSamples += deletedRows.length;
-  }
-
-  return {
-    deletedSamples,
-  };
-}
-
-export function getLocationTrackingSettings(settings: unknown): LocationTrackingSettings {
-  const gameSettings = normalizeGameSettings(settings);
-  const retentionHours = getRetentionHours(gameSettings.location_retention_hours);
-
-  return {
-    enabled: gameSettings.location_tracking_enabled === true,
-    retentionHours,
-  };
-}
-
-function normalizeGameSettings(settings: unknown): GameSettings {
-  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
-    return {};
-  }
-
-  return settings as GameSettings;
-}
-
-function getRetentionHours(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-    return DEFAULT_LOCATION_RETENTION_HOURS;
-  }
-
-  return value;
 }

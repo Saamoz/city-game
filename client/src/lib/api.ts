@@ -81,7 +81,6 @@ interface PlayerLocationResponse {
   tracking: {
     enabled: boolean;
     sampleStored: boolean;
-    retentionHours: number;
   };
 }
 
@@ -180,6 +179,13 @@ export async function updateGameDefinition(
     body: input,
   });
   return response.game;
+}
+
+export async function deleteGameDefinition(gameId: string): Promise<string> {
+  const response = await apiRequest<{ deletedGameId: string }>('/game/' + gameId, {
+    method: 'DELETE',
+  });
+  return response.deletedGameId;
 }
 
 export async function transitionGameLifecycle(gameId: string, transition: 'start' | 'pause' | 'resume' | 'end'): Promise<Game> {

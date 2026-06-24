@@ -1,7 +1,48 @@
-import { and, eq, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import type { GameSettings, TeamLocation } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { players, teams } from '../db/schema.js';
+
+export interface TeamLocationRepresentative {
+  id: string;
+  teamId: string;
+  lastLat: string;
+  lastLng: string;
+  lastGpsError: number | null;
+  lastSeenAt: Date;
+}
+
+export async function getTeamLocationRepresentative(
+  db: DatabaseClient,
+  gameId: string,
+  teamId: string,
+): Promise<TeamLocationRepresentative | null> {
+  const [player] = await db
+    .select({
+      id: players.id,
+      teamId: players.teamId,
+      lastLat: players.lastLat,
+      lastLng: players.lastLng,
+      lastGpsError: players.lastGpsError,
+      lastSeenAt: players.lastSeenAt,
+    })
+    .from(players)
+    .where(and(
+      eq(players.gameId, gameId),
+      eq(players.teamId, teamId),
+      isNotNull(players.lastLat),
+      isNotNull(players.lastLng),
+      isNotNull(players.lastSeenAt),
+    ))
+    .orderBy(desc(players.lastSeenAt), desc(players.id))
+    .limit(1);
+
+  if (!player || !player.teamId || !player.lastLat || !player.lastLng || !player.lastSeenAt) {
+    return null;
+  }
+
+  return player as TeamLocationRepresentative;
+}
 
 export async function listTeamLocationsByGame(
   db: DatabaseClient,
@@ -11,6 +52,7 @@ export async function listTeamLocationsByGame(
     db.select({ id: teams.id }).from(teams).where(eq(teams.gameId, gameId)),
     db
       .select({
+        id: players.id,
         teamId: players.teamId,
         lastLat: players.lastLat,
         lastLng: players.lastLng,
@@ -36,7 +78,9 @@ export async function listTeamLocationsByGame(
     }
 
     const existing = newestByTeamId.get(row.teamId);
-    if (!existing || row.lastSeenAt.getTime() >= existing.lastSeenAt!.getTime()) {
+    const rowTime = row.lastSeenAt.getTime();
+    const existingTime = existing?.lastSeenAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+    if (!existing || rowTime > existingTime || (rowTime === existingTime && row.id > existing.id)) {
       newestByTeamId.set(row.teamId, row);
     }
   }

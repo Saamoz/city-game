@@ -21,6 +21,7 @@ import {
   adminResetChallenge,
   createGameDefinition,
   createTeamDefinition,
+  deleteGameDefinition,
   getGame,
   getScoreboard,
   getTeams,
@@ -97,6 +98,8 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const [isSavingGame, setIsSavingGame] = useState(false);
   const [isCreatingTeam, setIsCreatingTeam] = useState(false);
+  const [isDeletingGame, setIsDeletingGame] = useState(false);
+  const [isDeleteGameArmed, setIsDeleteGameArmed] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [games, setGames] = useState<Game[]>([]);
   const [maps, setMaps] = useState<MapDefinition[]>([]);
@@ -264,6 +267,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
 
   const handleSelectGame = async (gameId: string) => {
     setSelectedGameId(gameId);
+    setIsDeleteGameArmed(false);
     setNotice(null);
     setIsRefreshing(true);
     try {
@@ -276,6 +280,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
   };
 
   const handleCreateDraft = () => {
+    setIsDeleteGameArmed(false);
     setSelectedGameId(null);
     setCurrentGame(null);
     setGameForm({
@@ -361,6 +366,30 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
       setNotice({ tone: 'error', message: getApiErrorMessage(error) });
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  const handleDeleteGame = async () => {
+    if (!currentGame || currentGame.status === 'active' || currentGame.status === 'paused') {
+      return;
+    }
+
+    if (!isDeleteGameArmed) {
+      setIsDeleteGameArmed(true);
+      return;
+    }
+
+    const deletedGameName = currentGame.name;
+    setIsDeletingGame(true);
+    try {
+      await deleteGameDefinition(currentGame.id);
+      setIsDeleteGameArmed(false);
+      await loadPanel(null);
+      setNotice({ tone: 'success', message: deletedGameName + ' and all of its runtime data were deleted.' });
+    } catch (error) {
+      setNotice({ tone: 'error', message: getApiErrorMessage(error) });
+    } finally {
+      setIsDeletingGame(false);
     }
   };
 
@@ -793,6 +822,21 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                   disabled={!currentGame || currentGame.status === 'completed' || isRefreshing}
                   onClick={() => { void handleLifecycle('end'); }}
                 />
+                <div className="border-t border-[#d9e1e5] pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#a03d32]">Delete Game Data</p>
+                  <p className="mt-2 text-sm text-[#5f6d74]">Deletes the selected game, locations, players, teams, events, and runtime state. Authored maps and challenge sets are kept.</p>
+                  <button
+                    type="button"
+                    onClick={() => { void handleDeleteGame(); }}
+                    disabled={!currentGame || currentGame.status === 'active' || currentGame.status === 'paused' || isDeletingGame}
+                    className="mt-3 rounded-full border border-[#b94b3f] px-4 py-2 text-sm font-semibold text-[#9b352c] transition hover:bg-[#fff2ef] disabled:cursor-not-allowed disabled:border-[#cbd3d8] disabled:text-[#8b969c]"
+                  >
+                    {isDeletingGame ? 'Deleting…' : isDeleteGameArmed ? 'Confirm Delete All Data' : 'Delete Game Data'}
+                  </button>
+                  {currentGame?.status === 'active' || currentGame?.status === 'paused' ? (
+                    <p className="mt-2 text-xs text-[#7a858b]">End the game before deleting it.</p>
+                  ) : null}
+                </div>
               </div>
             </PanelCard>
           </div>

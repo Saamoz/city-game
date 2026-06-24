@@ -7,6 +7,7 @@ import { AppError } from '../lib/errors.js';
 import { generateJoinCode } from '../lib/join-code.js';
 import { executeIdempotentMutation } from '../services/idempotency-service.js';
 import {
+  deleteGameFully,
   getGameById,
   serializeGameRecord,
   transitionGameLifecycle,
@@ -282,6 +283,24 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
           body: { game: serializeGameRecord(game) },
         };
       });
+    },
+  );
+
+  app.delete(
+    '/game/:id',
+    {
+      preHandler: [app.requireAdmin],
+      config: {
+        skipIdempotency: true,
+      },
+      schema: {
+        params: paramsWithGameIdSchema,
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      await deleteGameFully(app.db, id);
+      reply.send({ deletedGameId: id });
     },
   );
 

@@ -10,7 +10,19 @@ import {
   type WinCondition,
 } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
-import { gameEvents, games } from '../db/schema.js';
+import {
+  actionReceipts,
+  annotations,
+  challengeClaims,
+  challenges,
+  gameEvents,
+  games,
+  playerLocationSamples,
+  players,
+  resourceLedger,
+  teams,
+  zones,
+} from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import type { ModeRegistry } from '../modes/index.js';
 import { cloneChallengeSetToGame } from './challenge-set-service.js';
@@ -64,6 +76,36 @@ export async function getGameById(db: DatabaseClient, gameId: string): Promise<G
   }
 
   return game;
+}
+
+export async function deleteGameFully(db: DatabaseClient, gameId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const transactionalDb = tx as unknown as DatabaseClient;
+    const game = await lockGameById(transactionalDb, gameId);
+
+    if (game.status === 'active' || game.status === 'paused') {
+      throw new AppError(errorCodes.invalidGameStateTransition, {
+        message: 'End the game before deleting its data.',
+        details: { currentStatus: game.status },
+      });
+    }
+
+    await transactionalDb
+      .update(challenges)
+      .set({ currentClaimId: null })
+      .where(eq(challenges.gameId, gameId));
+    await transactionalDb.delete(playerLocationSamples).where(eq(playerLocationSamples.gameId, gameId));
+    await transactionalDb.delete(annotations).where(eq(annotations.gameId, gameId));
+    await transactionalDb.delete(actionReceipts).where(eq(actionReceipts.gameId, gameId));
+    await transactionalDb.delete(resourceLedger).where(eq(resourceLedger.gameId, gameId));
+    await transactionalDb.delete(challengeClaims).where(eq(challengeClaims.gameId, gameId));
+    await transactionalDb.delete(challenges).where(eq(challenges.gameId, gameId));
+    await transactionalDb.delete(zones).where(eq(zones.gameId, gameId));
+    await transactionalDb.delete(gameEvents).where(eq(gameEvents.gameId, gameId));
+    await transactionalDb.delete(players).where(eq(players.gameId, gameId));
+    await transactionalDb.delete(teams).where(eq(teams.gameId, gameId));
+    await transactionalDb.delete(games).where(eq(games.id, gameId));
+  });
 }
 
 export async function lockGameById(db: DatabaseClient, gameId: string): Promise<GameRecord> {

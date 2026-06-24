@@ -6,7 +6,6 @@ const DEV_SEED_KEY = 'dev_sample_v1';
 const gameSettings: GameSettings = {
   max_concurrent_claims: 2,
   claim_timeout_minutes: 10,
-  location_tracking_enabled: false,
   require_gps_accuracy: false,
 };
 

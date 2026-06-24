@@ -105,8 +105,6 @@ export type NotificationConfig = JsonObject & {
 };
 
 export type GameSettings = JsonObject & {
-  location_tracking_enabled?: boolean;
-  location_retention_hours?: number;
   notification_config?: NotificationConfig;
   max_concurrent_claims?: number;
   claim_timeout_minutes?: number;

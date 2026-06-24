@@ -636,7 +636,6 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
             tracking: {
               enabled: result.tracking.enabled,
               sampleStored: result.sampleStored,
-              retentionHours: result.tracking.retentionHours,
             },
           },
         };

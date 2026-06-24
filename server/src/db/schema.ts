@@ -342,7 +342,9 @@ export const playerLocationSamples = pgTable(
   {
     id: bigserial('id', { mode: 'number' }).primaryKey(),
     gameId: uuid('game_id').notNull().references(() => games.id),
+    teamId: uuid('team_id').references(() => teams.id),
     playerId: uuid('player_id').notNull().references(() => players.id),
+    sampleBucket: bigint('sample_bucket', { mode: 'number' }),
     recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull(),
     location: geometryPoint4326('location').notNull(),
     gpsErrorMeters: real('gps_error_meters'),
@@ -353,6 +355,8 @@ export const playerLocationSamples = pgTable(
   (table) => ({
     locationSamplesGeoIdx: index('idx_location_samples_geo').using('gist', table.location),
     locationCleanupIdx: index('idx_location_cleanup').on(table.gameId, table.recordedAt),
+    locationTeamPathIdx: index('idx_location_team_path').on(table.gameId, table.teamId, table.recordedAt),
+    locationTeamBucketUnique: uniqueIndex('idx_location_team_bucket_unique').on(table.gameId, table.teamId, table.sampleBucket),
   }),
 );
 

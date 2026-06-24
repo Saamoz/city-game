@@ -1,10 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { STATE_VERSION_HEADER, eventTypes } from "@city-game/shared";
-import { gameEvents, games, resourceLedger, teams } from "../db/schema.js";
+import { gameEvents, games, playerLocationSamples, players, resourceLedger, teams } from "../db/schema.js";
 import { createTestApp } from "../test/create-test-app.js";
-import { createTestGame, createTestTeam } from "../test/factories.js";
+import { createTestGame, createTestPlayer, createTestTeam } from "../test/factories.js";
 import { closeTestDatabase, getTestDatabase, resetTestDatabase } from "../test/test-db.js";
 
 const ADMIN_TOKEN = "test-admin-token";
@@ -45,7 +45,7 @@ describe("game and team routes", () => {
         centerLng: -97.1384,
         defaultZoom: 13,
         winCondition: [{ type: "all_zones" }],
-        settings: { location_tracking_enabled: true },
+        settings: {},
       },
     });
 
@@ -57,7 +57,6 @@ describe("game and team routes", () => {
         status: "setup",
         winCondition: [{ type: "all_zones" }],
         settings: {
-          location_tracking_enabled: true,
           active_challenge_count: 3,
           allow_midgame_join: true,
           broadcast_team_locations: true,
@@ -107,6 +106,53 @@ describe("game and team routes", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json().error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("deletes a completed game and all of its runtime data", async () => {
+    await seedGame({ status: "completed" });
+    await seedTeam();
+    await testDatabase.db.insert(players).values(createTestPlayer({ teamId: TEAM_ID }));
+    await testDatabase.db.insert(playerLocationSamples).values({
+      gameId: GAME_ID,
+      teamId: TEAM_ID,
+      playerId: "33333333-3333-4333-8333-333333333333",
+      sampleBucket: 123,
+      recordedAt: new Date(),
+      location: sql`ST_SetSRID(ST_MakePoint(${-97.1384}, ${49.8951}), 4326)`,
+      source: "browser",
+    });
+    app = await createGameTestApp();
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/game/${GAME_ID}`,
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ deletedGameId: GAME_ID });
+    expect(await testDatabase.db.select().from(playerLocationSamples)).toHaveLength(0);
+    expect(await testDatabase.db.select().from(players)).toHaveLength(0);
+    expect(await testDatabase.db.select().from(teams)).toHaveLength(0);
+    expect(await testDatabase.db.select().from(games)).toHaveLength(0);
+  });
+
+  it("refuses to delete a running game", async () => {
+    await seedGame({ status: "active" });
+    app = await createGameTestApp();
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/game/${GAME_ID}`,
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toMatchObject({
+      code: "INVALID_GAME_STATE_TRANSITION",
+      message: "End the game before deleting its data.",
+    });
+    expect(await testDatabase.db.select().from(games)).toHaveLength(1);
   });
 
   it("gets and updates a game", async () => {
