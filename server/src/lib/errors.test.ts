@@ -92,4 +92,33 @@ describe('app error handler', () => {
       ]),
     );
   });
+
+  it('normalizes zone connectivity constraint errors into VALIDATION_ERROR', async () => {
+    app = await createTestApp({
+      register(instance) {
+        instance.get('/test/zone-connectivity', async () => {
+          throw Object.assign(new Error('zone graph disconnected'), {
+            code: '23514',
+            constraint: 'map_zones_connected',
+          });
+        });
+      },
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/test/zone-connectivity',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Zones must form one connected area by sharing boundary edges. Corner-only contact does not count.',
+        details: {
+          constraint: 'map_zones_connected',
+        },
+      },
+    });
+  });
 });

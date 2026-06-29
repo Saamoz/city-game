@@ -407,7 +407,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
 
       // Snap indicator during draw/split modes
       if (isDrawing) {
-        const nearest = findNearestZoneVertex(event.lngLat.lng, event.lngLat.lat, zonesRef.current, map, SNAP_THRESHOLD_PX);
+        const nearest = findNearestZoneBoundaryPoint(event.lngLat.lng, event.lngLat.lat, zonesRef.current, map, SNAP_THRESHOLD_PX);
         if (nearest) {
           snapEl.style.display = 'block';
           snapMarker.setLngLat(nearest).addTo(map);
@@ -671,9 +671,18 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
         return;
       }
       // Update existing zone
+      let nextGeometry = editingGeometryZoneId === selectedZone.id && geometryDraft ? geometryDraft : undefined;
+      if (nextGeometry?.type === 'Polygon' && mapRef.current) {
+        nextGeometry = snapPolygonVertices(
+          nextGeometry,
+          zones.filter((zone) => zone.id !== selectedZone.id),
+          mapRef.current,
+          SNAP_THRESHOLD_PX,
+        );
+      }
       const updatedZone = await updateMapZoneDefinition(selectedZone.id, {
         ...payload,
-        geometry: editingGeometryZoneId === selectedZone.id && geometryDraft ? geometryDraft : undefined,
+        geometry: nextGeometry,
       });
       setZones((prev) => prev.map((z) => (z.id === updatedZone.id ? updatedZone : z)));
       setZoneForm(buildFormFromZone(updatedZone));
@@ -1236,7 +1245,7 @@ function MapStatusCard({ title, body }: { title: string; body: string }) {
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
 
-function findNearestZoneVertex(
+function findNearestZoneBoundaryPoint(
   lng: number, lat: number,
   zones: MapZone[],
   map: mapboxgl.Map,
@@ -1245,13 +1254,35 @@ function findNearestZoneVertex(
   const pt = map.project([lng, lat]);
   let best: [number, number] | null = null;
   let bestDist = thresholdPx;
+
   for (const zone of zones) {
-    for (const [vLng, vLat] of collectGeometryPositions(zone.geometry as unknown as RuntimeZone['geometry'])) {
-      const vPt = map.project([vLng, vLat]);
-      const dist = Math.hypot(vPt.x - pt.x, vPt.y - pt.y);
-      if (dist < bestDist) { bestDist = dist; best = [vLng, vLat]; }
+    for (const ring of collectBoundaryRings(zone.geometry)) {
+      for (let index = 1; index < ring.length; index += 1) {
+        const [startLng, startLat] = ring[index - 1];
+        const [endLng, endLat] = ring[index];
+        const start = map.project([startLng, startLat]);
+        const end = map.project([endLng, endLat]);
+        const deltaX = end.x - start.x;
+        const deltaY = end.y - start.y;
+        const lengthSquared = (deltaX * deltaX) + (deltaY * deltaY);
+        const projection = lengthSquared === 0
+          ? 0
+          : Math.min(1, Math.max(0, (((pt.x - start.x) * deltaX) + ((pt.y - start.y) * deltaY)) / lengthSquared));
+        const projectedX = start.x + (projection * deltaX);
+        const projectedY = start.y + (projection * deltaY);
+        const distance = Math.hypot(projectedX - pt.x, projectedY - pt.y);
+
+        if (distance < bestDist) {
+          bestDist = distance;
+          best = [
+            startLng + (projection * (endLng - startLng)),
+            startLat + (projection * (endLat - startLat)),
+          ];
+        }
+      }
     }
   }
+
   return best;
 }
 
@@ -1266,11 +1297,21 @@ function snapPolygonVertices(
     ...geometry,
     coordinates: geometry.coordinates.map((ring) =>
       ring.map(([lng, lat]) => {
-        const snapped = findNearestZoneVertex(lng, lat, zones, map, thresholdPx);
+        const snapped = findNearestZoneBoundaryPoint(lng, lat, zones, map, thresholdPx);
         return (snapped ?? [lng, lat]) as [number, number];
       }),
     ),
   };
+}
+
+function collectBoundaryRings(geometry: GeoJsonGeometry): Array<Array<[number, number]>> {
+  if (geometry.type === 'Polygon') {
+    return geometry.coordinates as Array<Array<[number, number]>>;
+  }
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.flat() as Array<Array<[number, number]>>;
+  }
+  return [];
 }
 
 function autoClipAgainstZones(

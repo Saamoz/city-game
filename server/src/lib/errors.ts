@@ -76,12 +76,42 @@ export function registerAppErrorHandler(app: FastifyInstance): void {
       return;
     }
 
+    const zoneConnectivityConstraint = getZoneConnectivityConstraint(error);
+    if (zoneConnectivityConstraint) {
+      reply.status(getErrorDefinition(errorCodes.validationError).statusCode).send(
+        buildErrorResponse(errorCodes.validationError, {
+          message: 'Zones must form one connected area by sharing boundary edges. Corner-only contact does not count.',
+          details: {
+            constraint: zoneConnectivityConstraint,
+          },
+        }),
+      );
+      return;
+    }
+
     request.log.error({ err: error }, 'request failed');
 
     reply.status(getErrorDefinition(errorCodes.internalServerError).statusCode).send(
       buildErrorResponse(errorCodes.internalServerError),
     );
   });
+}
+
+function getZoneConnectivityConstraint(error: unknown): string | null {
+  let candidate = error;
+
+  for (let depth = 0; depth < 5 && candidate && typeof candidate === 'object'; depth += 1) {
+    const databaseError = candidate as { code?: unknown; constraint?: unknown; cause?: unknown };
+    if (
+      databaseError.code === '23514'
+      && (databaseError.constraint === 'map_zones_connected' || databaseError.constraint === 'zones_connected')
+    ) {
+      return databaseError.constraint;
+    }
+    candidate = databaseError.cause;
+  }
+
+  return null;
 }
 
 function isFastifyValidationError(

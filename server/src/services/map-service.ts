@@ -218,25 +218,40 @@ export async function importMapZones(
     };
   }>,
 ): Promise<MapZone[]> {
-  const created: MapZone[] = [];
+  return db.transaction(async (tx) => {
+    const transactionalDb = tx as unknown as DatabaseClient;
+    const created: MapZone[] = [];
 
-  for (const [index, feature] of features.entries()) {
-    created.push(await createMapZone(db, {
-      mapId,
-      name: feature.properties?.name?.trim() || ('Imported Zone ' + (index + 1)),
-      geometry: feature.geometry,
-      pointValue: feature.properties?.pointValue ?? 1,
-      claimRadiusMeters: feature.properties?.claimRadiusMeters ?? null,
-      maxGpsErrorMeters: feature.properties?.maxGpsErrorMeters ?? null,
-      isDisabled: feature.properties?.isDisabled ?? false,
-      metadata: feature.properties?.metadata ?? {},
-    }));
-  }
+    for (const [index, feature] of features.entries()) {
+      created.push(await createMapZone(transactionalDb, {
+        mapId,
+        name: feature.properties?.name?.trim() || ('Imported Zone ' + (index + 1)),
+        geometry: feature.geometry,
+        pointValue: feature.properties?.pointValue ?? 1,
+        claimRadiusMeters: feature.properties?.claimRadiusMeters ?? null,
+        maxGpsErrorMeters: feature.properties?.maxGpsErrorMeters ?? null,
+        isDisabled: feature.properties?.isDisabled ?? false,
+        metadata: feature.properties?.metadata ?? {},
+      }));
+    }
 
-  return created;
+    return created;
+  });
 }
 
 export async function splitMapZoneById(
+  db: DatabaseClient,
+  mapZoneId: string,
+  options?: { splitLine?: GeoJsonGeometry | null },
+): Promise<[MapZone, MapZone]> {
+  return db.transaction(async (tx) => splitMapZoneInTransaction(
+    tx as unknown as DatabaseClient,
+    mapZoneId,
+    options,
+  ));
+}
+
+async function splitMapZoneInTransaction(
   db: DatabaseClient,
   mapZoneId: string,
   options?: { splitLine?: GeoJsonGeometry | null },
@@ -351,6 +366,18 @@ export async function splitMapZoneById(
 }
 
 export async function mergeMapZonesById(
+  db: DatabaseClient,
+  zoneIds: [string, string],
+  input: { name?: string } = {},
+): Promise<MapZone> {
+  return db.transaction(async (tx) => mergeMapZonesInTransaction(
+    tx as unknown as DatabaseClient,
+    zoneIds,
+    input,
+  ));
+}
+
+async function mergeMapZonesInTransaction(
   db: DatabaseClient,
   zoneIds: [string, string],
   input: { name?: string } = {},
