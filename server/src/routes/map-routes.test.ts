@@ -173,6 +173,7 @@ describe('map routes', () => {
       },
     });
     expect(firstZoneResponse.statusCode).toBe(201);
+    const firstZoneId = firstZoneResponse.json().zone.id as string;
 
     const disconnectedResponse = await app.inject({
       method: 'POST',
@@ -200,6 +201,17 @@ describe('map routes', () => {
     });
     expect(cornerOnlyResponse.statusCode).toBe(400);
 
+    const overlappingResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/maps/${mapId}/zones`,
+      headers: idempotencyHeaders('create-overlapping-zone'),
+      payload: {
+        name: 'Overlapping',
+        geometry: createRectangle(-97.14, 49.88, -97.12, 49.90),
+      },
+    });
+    expect(overlappingResponse.statusCode).toBe(400);
+
     const sharedEdgeResponse = await app.inject({
       method: 'POST',
       url: `/api/v1/maps/${mapId}/zones`,
@@ -210,6 +222,25 @@ describe('map routes', () => {
       },
     });
     expect(sharedEdgeResponse.statusCode).toBe(201);
+
+    const synchronizedEditResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/map-zones/${firstZoneId}`,
+      headers: idempotencyHeaders('move-shared-zone-edge'),
+      payload: {
+        geometry: createRectangle(-97.15, 49.88, -97.125, 49.90),
+      },
+    });
+    expect(synchronizedEditResponse.statusCode).toBe(200);
+    expect(synchronizedEditResponse.json().zones).toHaveLength(2);
+    const synchronizedNeighbor = (synchronizedEditResponse.json().zones as Array<{
+      id: string;
+      geometry: { coordinates: number[][][] };
+    }>).find((zone) => zone.id !== firstZoneId);
+    expect(synchronizedNeighbor?.geometry.coordinates[0]).toEqual(expect.arrayContaining([
+      [-97.125, 49.88],
+      [-97.125, 49.90],
+    ]));
   });
 
   it('prevents deleting a zone that disconnects the remaining map', async () => {

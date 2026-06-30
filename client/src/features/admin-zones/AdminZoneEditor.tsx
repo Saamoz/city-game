@@ -5,6 +5,7 @@ import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import type { Feature, FeatureCollection, GeoJsonProperties, MultiPolygon, Polygon } from 'geojson';
 import { difference as turfDifference, featureCollection, feature as turfFeature } from '@turf/turf';
+import { propagateSharedBoundaryEdit } from '@city-game/shared';
 import type {
   GeoJsonFeatureCollection,
   GeoJsonGeometry,
@@ -116,6 +117,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [zoneForm, setZoneForm] = useState<ZoneFormState>(INITIAL_ZONE_FORM);
   const [geometryDraft, setGeometryDraft] = useState<GeoJsonGeometry | null>(null);
+  const [synchronizedGeometryDrafts, setSynchronizedGeometryDrafts] = useState<Record<string, GeoJsonGeometry>>({});
   const [editingGeometryZoneId, setEditingGeometryZoneId] = useState<string | null>(null);
   const [isSavingMap, setIsSavingMap] = useState(false);
   const [isDeleteMapArmed, setIsDeleteMapArmed] = useState(false);
@@ -132,6 +134,13 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
 
   const selectedZone = useMemo(() => zones.find((z) => z.id === selectedZoneId) ?? null, [selectedZoneId, zones]);
   const mergeTargetZone = useMemo(() => zones.find((z) => z.id === mergeTargetId) ?? null, [mergeTargetId, zones]);
+  const renderedZones = useMemo(
+    () => zones.map((zone) => ({
+      ...zone,
+      geometry: synchronizedGeometryDrafts[zone.id] ?? zone.geometry,
+    })),
+    [synchronizedGeometryDrafts, zones],
+  );
   const hasGeometrySession = Boolean(geometryDraft) || Boolean(editingGeometryZoneId);
 
   // Sync refs
@@ -163,6 +172,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const clearGeometrySession = useCallback(() => {
     drawRef.current?.deleteAll();
     setGeometryDraft(null);
+    setSynchronizedGeometryDrafts({});
     setEditingGeometryZoneId(null);
     setMode('select');
     splitZoneIdRef.current = null;
@@ -172,8 +182,15 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const syncMapSources = useCallback(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
-    syncEditorSources(map, zones, selectedZoneId, mergeTargetId, previewCollection);
-  }, [mergeTargetId, previewCollection, selectedZoneId, zones]);
+    syncEditorSources(
+      map,
+      renderedZones,
+      selectedZoneId,
+      mergeTargetId,
+      previewCollection,
+      new Set(Object.keys(synchronizedGeometryDrafts)),
+    );
+  }, [mergeTargetId, previewCollection, renderedZones, selectedZoneId, synchronizedGeometryDrafts]);
 
   const fitMapToCurrentData = useCallback((focusZone?: MapZone | null) => {
     const map = mapRef.current;
@@ -396,7 +413,35 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     const handleDrawUpdate = (event: { features: Array<Feature> }) => {
       const feature = event.features[0];
       if (!feature?.geometry) return;
-      setGeometryDraft(feature.geometry as GeoJsonGeometry);
+      const nextGeometry = feature.geometry as GeoJsonGeometry;
+      setGeometryDraft(nextGeometry);
+
+      const editingZoneId = editSessionRef.current.editingZoneId;
+      const editingZone = editingZoneId
+        ? zonesRef.current.find((zone) => zone.id === editingZoneId) ?? null
+        : null;
+      if (!editingZone) {
+        setSynchronizedGeometryDrafts({});
+        return;
+      }
+
+      try {
+        const propagation = propagateSharedBoundaryEdit(
+          editingZone.id,
+          editingZone.geometry,
+          nextGeometry,
+          zonesRef.current,
+        );
+        const neighborDrafts = { ...propagation.geometries };
+        delete neighborDrafts[editingZone.id];
+        setSynchronizedGeometryDrafts(neighborDrafts);
+      } catch (error) {
+        setSynchronizedGeometryDrafts({});
+        setNotice({
+          tone: 'error',
+          message: error instanceof Error ? error.message : 'Unable to synchronize adjacent zone boundaries.',
+        });
+      }
     };
 
     const handleMouseMove = (event: mapboxgl.MapMouseEvent) => {
@@ -575,7 +620,8 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     drawRef.current.changeMode('direct_select', { featureId: drawFeatureId });
     setEditingGeometryZoneId(selectedZone.id);
     setGeometryDraft(selectedZone.geometry);
-    setNotice({ tone: 'info', message: 'Drag vertices to reshape. Click a vertex then press Delete/Backspace to remove it. Save when done.' });
+    setSynchronizedGeometryDrafts({});
+    setNotice({ tone: 'info', message: 'Drag vertices to reshape. Shared vertices move adjacent zones automatically. Save when done.' });
   };
 
   const handleDeleteMap = async () => {
@@ -671,20 +717,14 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
         return;
       }
       // Update existing zone
-      let nextGeometry = editingGeometryZoneId === selectedZone.id && geometryDraft ? geometryDraft : undefined;
-      if (nextGeometry?.type === 'Polygon' && mapRef.current) {
-        nextGeometry = snapPolygonVertices(
-          nextGeometry,
-          zones.filter((zone) => zone.id !== selectedZone.id),
-          mapRef.current,
-          SNAP_THRESHOLD_PX,
-        );
-      }
-      const updatedZone = await updateMapZoneDefinition(selectedZone.id, {
+      const nextGeometry = editingGeometryZoneId === selectedZone.id && geometryDraft ? geometryDraft : undefined;
+      const result = await updateMapZoneDefinition(selectedZone.id, {
         ...payload,
         geometry: nextGeometry,
       });
-      setZones((prev) => prev.map((z) => (z.id === updatedZone.id ? updatedZone : z)));
+      const updatedZoneById = new Map(result.zones.map((zone) => [zone.id, zone]));
+      setZones((prev) => prev.map((zone) => updatedZoneById.get(zone.id) ?? zone));
+      const updatedZone = result.zone;
       setZoneForm(buildFormFromZone(updatedZone));
       clearGeometrySession();
       setNotice({ tone: 'success', message: 'Zone saved.' });
@@ -1343,10 +1383,11 @@ function syncEditorSources(
   selectedZoneId: string | null,
   mergeTargetId: string | null,
   previewCollection: GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject> | null,
+  synchronizedZoneIds: Set<string> = new Set(),
 ): void {
   ensureEditorLayers(map);
   (map.getSource(MAP_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined)
-    ?.setData(buildZoneCollection(zones, selectedZoneId, mergeTargetId));
+    ?.setData(buildZoneCollection(zones, selectedZoneId, mergeTargetId, synchronizedZoneIds));
   (map.getSource(PREVIEW_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined)
     ?.setData(toPreviewFeatureCollection(previewCollection));
 }
@@ -1427,11 +1468,13 @@ function buildZoneCollection(
   zones: MapZone[],
   selectedZoneId: string | null,
   mergeTargetId: string | null,
+  synchronizedZoneIds: Set<string> = new Set(),
 ): FeatureCollection<GeoJsonGeometry, GeoJsonProperties> {
   return {
     type: 'FeatureCollection',
     features: zones.map((zone) => {
       const isMergeTarget = zone.id === mergeTargetId;
+      const isSynchronized = synchronizedZoneIds.has(zone.id);
       return {
         type: 'Feature',
         id: zone.id,
@@ -1440,9 +1483,9 @@ function buildZoneCollection(
           id: zone.id,
           name: zone.name,
           selected: zone.id === selectedZoneId ? 1 : 0,
-          fillColor: zone.isDisabled ? '#d7dbd4' : (isMergeTarget ? MERGE_TARGET_FILL : NEUTRAL_FILL),
-          lineColor: isMergeTarget ? MERGE_TARGET_LINE : (zone.isDisabled ? '#9aa39e' : NEUTRAL_LINE),
-          fillOpacity: zone.isDisabled ? 0.08 : (isMergeTarget ? 0.3 : 0.22),
+          fillColor: zone.isDisabled ? '#d7dbd4' : (isMergeTarget ? MERGE_TARGET_FILL : (isSynchronized ? '#d8c89f' : NEUTRAL_FILL)),
+          lineColor: isMergeTarget ? MERGE_TARGET_LINE : (zone.isDisabled ? '#9aa39e' : (isSynchronized ? '#8f6b24' : NEUTRAL_LINE)),
+          fillOpacity: zone.isDisabled ? 0.08 : (isMergeTarget || isSynchronized ? 0.3 : 0.22),
         },
       } satisfies Feature<GeoJsonGeometry, GeoJsonProperties>;
     }),

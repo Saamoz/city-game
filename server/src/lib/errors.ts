@@ -80,7 +80,7 @@ export function registerAppErrorHandler(app: FastifyInstance): void {
     if (zoneConnectivityConstraint) {
       reply.status(getErrorDefinition(errorCodes.validationError).statusCode).send(
         buildErrorResponse(errorCodes.validationError, {
-          message: 'Zones must form one connected area by sharing boundary edges. Corner-only contact does not count.',
+          message: 'Zones must form one connected partition with shared boundary edges and no overlaps.',
           details: {
             constraint: zoneConnectivityConstraint,
           },

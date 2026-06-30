@@ -418,8 +418,8 @@ export const mapRoutes: FastifyPluginAsync = async (app) => {
         metadata?: JsonObject;
       };
 
-      const zone = await updateMapZone(app.db, id, body);
-      reply.send({ zone });
+      const result = await updateMapZone(app.db, id, body);
+      reply.send(result);
     },
   );
 

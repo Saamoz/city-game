@@ -1,5 +1,12 @@
 import { asc, eq, inArray, sql } from 'drizzle-orm';
-import type { GeoJsonGeometry, GeoJsonPoint, JsonObject, MapDefinition, MapZone } from '@city-game/shared';
+import {
+  propagateSharedBoundaryEdit,
+  type GeoJsonGeometry,
+  type GeoJsonPoint,
+  type JsonObject,
+  type MapDefinition,
+  type MapZone,
+} from '@city-game/shared';
 import { errorCodes } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { games, mapZones, maps, zones } from '../db/schema.js';
@@ -69,6 +76,11 @@ export interface MapZoneUpdateInput {
   maxGpsErrorMeters?: number | null;
   isDisabled?: boolean;
   metadata?: JsonObject;
+}
+
+export interface MapZoneUpdateResult {
+  zone: MapZone;
+  zones: MapZone[];
 }
 
 export async function listMaps(db: DatabaseClient): Promise<MapDefinition[]> {
@@ -173,29 +185,63 @@ export async function createMapZone(db: DatabaseClient, input: MapZoneInput): Pr
   return getMapZoneByIdOrThrow(db, inserted.id);
 }
 
-export async function updateMapZone(db: DatabaseClient, mapZoneId: string, input: MapZoneUpdateInput): Promise<MapZone> {
-  const existing = await getMapZoneByIdOrThrow(db, mapZoneId);
-  if (input.geometry) {
-    await validateGeometry(db, input.geometry);
-  }
+export async function updateMapZone(
+  db: DatabaseClient,
+  mapZoneId: string,
+  input: MapZoneUpdateInput,
+): Promise<MapZoneUpdateResult> {
+  return db.transaction(async (tx) => {
+    const transactionalDb = tx as unknown as DatabaseClient;
+    const existing = await getMapZoneByIdOrThrow(transactionalDb, mapZoneId);
+    const updatedAt = new Date();
+    let affectedZoneIds = [mapZoneId];
 
-  const updateValues: Record<string, unknown> = {
-    name: input.name ?? existing.name,
-    pointValue: input.pointValue ?? existing.pointValue,
-    claimRadiusMeters: input.claimRadiusMeters === undefined ? existing.claimRadiusMeters : input.claimRadiusMeters,
-    maxGpsErrorMeters: input.maxGpsErrorMeters === undefined ? existing.maxGpsErrorMeters : input.maxGpsErrorMeters,
-    isDisabled: input.isDisabled ?? existing.isDisabled,
-    metadata: input.metadata ?? existing.metadata,
-    updatedAt: new Date(),
-  };
+    if (input.geometry) {
+      await validateGeometry(transactionalDb, input.geometry);
+      const mapZoneRows = await listMapZones(transactionalDb, existing.mapId);
+      const propagation = propagateSharedBoundaryEdit(
+        mapZoneId,
+        existing.geometry,
+        input.geometry,
+        mapZoneRows,
+      );
+      affectedZoneIds = propagation.affectedZoneIds;
 
-  if (input.geometry) {
-    updateValues.geometry = buildGeometrySql(input.geometry);
-    updateValues.centroid = buildCentroidSql(input.geometry);
-  }
+      for (const [zoneId, geometry] of Object.entries(propagation.geometries)) {
+        await validateGeometry(transactionalDb, geometry);
+        await transactionalDb
+          .update(mapZones)
+          .set({
+            geometry: buildGeometrySql(geometry),
+            centroid: buildCentroidSql(geometry),
+            updatedAt,
+          })
+          .where(eq(mapZones.id, zoneId));
+      }
+    }
 
-  await db.update(mapZones).set(updateValues).where(eq(mapZones.id, mapZoneId));
-  return getMapZoneByIdOrThrow(db, mapZoneId);
+    await transactionalDb.update(mapZones).set({
+      name: input.name ?? existing.name,
+      pointValue: input.pointValue ?? existing.pointValue,
+      claimRadiusMeters: input.claimRadiusMeters === undefined ? existing.claimRadiusMeters : input.claimRadiusMeters,
+      maxGpsErrorMeters: input.maxGpsErrorMeters === undefined ? existing.maxGpsErrorMeters : input.maxGpsErrorMeters,
+      isDisabled: input.isDisabled ?? existing.isDisabled,
+      metadata: input.metadata ?? existing.metadata,
+      updatedAt,
+    }).where(eq(mapZones.id, mapZoneId));
+
+    const updatedZones = await listMapZones(transactionalDb, existing.mapId);
+    const affectedZones = updatedZones.filter((zone) => affectedZoneIds.includes(zone.id));
+    const zone = affectedZones.find((entry) => entry.id === mapZoneId);
+    if (!zone) {
+      throw new AppError(errorCodes.validationError, { message: 'Updated map zone not found.' });
+    }
+
+    return {
+      zone,
+      zones: affectedZones,
+    };
+  });
 }
 
 export async function deleteMapZoneById(db: DatabaseClient, mapZoneId: string): Promise<boolean> {

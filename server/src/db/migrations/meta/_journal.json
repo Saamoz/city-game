@@ -64,6 +64,13 @@
       "when": 1782738767611,
       "tag": "0008_zone_connectivity",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782748613241,
+      "tag": "0009_zone_partition_overlap",
+      "breakpoints": true
     }
   ]
 }

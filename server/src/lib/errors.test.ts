@@ -114,7 +114,7 @@ describe('app error handler', () => {
     expect(response.json()).toEqual({
       error: {
         code: 'VALIDATION_ERROR',
-        message: 'Zones must form one connected area by sharing boundary edges. Corner-only contact does not count.',
+        message: 'Zones must form one connected partition with shared boundary edges and no overlaps.',
         details: {
           constraint: 'map_zones_connected',
         },

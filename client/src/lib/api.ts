@@ -72,6 +72,7 @@ interface ZonesResponse { zones: Zone[] }
 interface ZoneResponse { zone: Zone }
 interface MapZonesResponse { zones: MapZone[] }
 interface MapZoneResponse { zone: MapZone }
+interface MapZoneUpdateResponse { zone: MapZone; zones: MapZone[] }
 interface ZoneImportResponse { zones: Zone[] }
 interface MapZoneImportResponse { zones: MapZone[] }
 
@@ -328,12 +329,14 @@ export async function createMapZoneDefinition(mapId: string, input: MapZoneUpser
   return response.zone;
 }
 
-export async function updateMapZoneDefinition(mapZoneId: string, input: Partial<MapZoneUpsertInput>): Promise<MapZone> {
-  const response = await apiRequest<MapZoneResponse>('/map-zones/' + mapZoneId, {
+export async function updateMapZoneDefinition(
+  mapZoneId: string,
+  input: Partial<MapZoneUpsertInput>,
+): Promise<MapZoneUpdateResponse> {
+  return apiRequest<MapZoneUpdateResponse>('/map-zones/' + mapZoneId, {
     method: 'PATCH',
     body: input,
   });
-  return response.zone;
 }
 
 export async function deleteMapZoneDefinition(mapZoneId: string): Promise<void> {
