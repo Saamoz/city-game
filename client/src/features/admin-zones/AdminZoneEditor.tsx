@@ -22,6 +22,7 @@ import {
   deleteMapDefinition,
   deleteMapZoneDefinition,
   getMap,
+  getMapZonePartitionStatus,
   healMapZoneGaps,
   importMapZoneDefinitions,
   listMaps,
@@ -31,7 +32,9 @@ import {
   splitMapZone,
   updateMapDefinition,
   updateMapZoneDefinition,
+  type HealMapZoneGapsSkip,
   type MapUpsertInput,
+  type MapZonePartitionReport,
   type MapZoneUpsertInput,
 } from '../../lib/api';
 import { buildRenderedZoneGeometry, collectGeometryPositions, getZoneAnchor } from '../game/mapGeometry';
@@ -143,6 +146,10 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const [gapToleranceMeters, setGapToleranceMeters] = useState(DEFAULT_GAP_TOLERANCE_METERS);
   const [isHealingGaps, setIsHealingGaps] = useState(false);
   const [showGapDetails, setShowGapDetails] = useState(false);
+  const [partitionReport, setPartitionReport] = useState<MapZonePartitionReport | null>(null);
+  const [isCheckingPartition, setIsCheckingPartition] = useState(false);
+  const [lastHealSkips, setLastHealSkips] = useState<HealMapZoneGapsSkip[]>([]);
+  const [showSkipDetails, setShowSkipDetails] = useState(false);
 
   const selectedZone = useMemo(() => zones.find((z) => z.id === selectedZoneId) ?? null, [selectedZoneId, zones]);
   const mergeTargetZone = useMemo(() => zones.find((z) => z.id === mergeTargetId) ?? null, [mergeTargetId, zones]);
@@ -249,6 +256,18 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     return nextZones;
   }, []);
 
+  const refreshPartitionStatus = useCallback(async (mapId: string) => {
+    setIsCheckingPartition(true);
+    try {
+      const report = await getMapZonePartitionStatus(mapId);
+      setPartitionReport(report);
+    } catch {
+      setPartitionReport(null);
+    } finally {
+      setIsCheckingPartition(false);
+    }
+  }, []);
+
   const loadMapBundle = useCallback(async (targetMapId?: string | null) => {
     setStatus('loading');
     setErrorMessage(null);
@@ -258,6 +277,8 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     setIsDeleteArmed(false);
     setMergeTargetId(null);
     setIsMergePickMode(false);
+    setPartitionReport(null);
+    setLastHealSkips([]);
     clearGeometrySession();
 
     try {
@@ -285,11 +306,12 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       setSelectedZoneId(nextZones[0]?.id ?? null);
       setZoneForm(nextZones[0] ? buildFormFromZone(nextZones[0]) : INITIAL_ZONE_FORM);
       setStatus('ready');
+      if (nextZones.length > 0) void refreshPartitionStatus(resolvedMapId);
     } catch (error) {
       setStatus('error');
       setErrorMessage(getApiErrorMessage(error));
     }
-  }, [clearGeometrySession]);
+  }, [clearGeometrySession, refreshPartitionStatus]);
 
   useEffect(() => { void loadMapBundle(initialMapId); }, [initialMapId, loadMapBundle]);
 
@@ -907,12 +929,14 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     try {
       const result = await healMapZoneGaps(currentMap.id, gapToleranceMeters);
       setZones(result.zones);
+      setLastHealSkips(result.skippedGaps);
+      void refreshPartitionStatus(currentMap.id);
       const parts: string[] = [];
       if (result.healedGapCount > 0) {
         parts.push(`Healed ${result.healedGapCount} boundary gap${result.healedGapCount === 1 ? '' : 's'}.`);
       }
       if (result.skippedGapCount > 0) {
-        parts.push(`Skipped ${result.skippedGapCount} gap${result.skippedGapCount === 1 ? '' : 's'} that would have broken zone shapes or overlap rules — these are still listed below for manual fixing.`);
+        parts.push(`Skipped ${result.skippedGapCount} gap${result.skippedGapCount === 1 ? '' : 's'} — see "Why gaps were skipped" below for the reason each one failed.`);
       }
       if (parts.length === 0) {
         parts.push('No gaps found within the current search radius.');
@@ -1085,6 +1109,50 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                       disabled={isHealingGaps || gapReport.gaps.length === 0 || hasGeometrySession}
                     />
                   </div>
+
+                  {lastHealSkips.length > 0 ? (
+                    <div className="space-y-2 rounded-2xl border border-[#e3b9a8] bg-[#fbf0eb] px-3 py-2.5 text-sm text-[#8a3a24]">
+                      <button
+                        type="button"
+                        onClick={() => setShowSkipDetails((v) => !v)}
+                        className="text-xs font-semibold uppercase tracking-[0.14em] text-[#8a3a24] underline underline-offset-2"
+                      >
+                        {showSkipDetails ? 'Hide' : 'Why'} gaps were skipped ({lastHealSkips.length})
+                      </button>
+                      {showSkipDetails ? (
+                        <ul className="max-h-40 space-y-1.5 overflow-y-auto rounded-xl border border-[#e3b9a8] bg-white px-2.5 py-2 text-xs text-[#5c3224]">
+                          {lastHealSkips.map((skip, index) => (
+                            <li key={index}>
+                              <span className="font-semibold">
+                                {skip.zoneIds.map((id) => zones.find((z) => z.id === id)?.name ?? 'Unknown zone').join(' ↔ ')}
+                              </span>
+                              {' — '}{skip.reason}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {partitionReport && partitionReport.overlaps.length > 0 ? (
+                    <div className="space-y-2 rounded-2xl border border-[#c98d3a] bg-[#fdf3e2] px-3 py-2.5 text-sm text-[#7a4a10]">
+                      <p className="font-semibold">
+                        {partitionReport.overlaps.length} zone pair{partitionReport.overlaps.length === 1 ? '' : 's'} actually overlap
+                      </p>
+                      <p className="text-xs text-[#8f5f1c]">
+                        This is different from a boundary gap — these zones physically overlap each other, which is very likely why gap fixes involving them get skipped. Fixing this requires manually reshaping one of each pair (Edit Vertices), not a gap heal.
+                      </p>
+                      <ul className="max-h-32 space-y-1 overflow-y-auto rounded-xl border border-[#c98d3a] bg-white px-2.5 py-2 text-xs text-[#5c3f14]">
+                        {partitionReport.overlaps.map((overlap) => (
+                          <li key={`${overlap.zoneAId}-${overlap.zoneBId}`}>
+                            {overlap.zoneAName} ↔ {overlap.zoneBName} — {formatOverlapArea(overlap.overlapAreaSqMeters)}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {isCheckingPartition ? <p className="text-xs text-[#6a7478]">Checking for overlaps…</p> : null}
                 </Panel>
               ) : null}
 
@@ -1799,6 +1867,10 @@ function slugify(value: string): string {
 
 function formatGapDistance(meters: number): string {
   return meters < 1 ? `${Math.round(meters * 100)}cm` : `${meters.toFixed(1)}m`;
+}
+
+function formatOverlapArea(sqMeters: number): string {
+  return sqMeters < 10000 ? `${Math.round(sqMeters)}m²` : `${(sqMeters / 10000).toFixed(2)}ha`;
 }
 
 function createDrawStyles(): object[] {

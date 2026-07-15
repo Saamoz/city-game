@@ -4,6 +4,7 @@ import { errorCodes } from '@city-game/shared';
 import { AppError } from '../lib/errors.js';
 import type { OsmPreviewProperties } from '../services/osm-import-service.js';
 import {
+  checkMapZonePartition,
   createMap,
   createMapZone,
   deleteMapById,
@@ -422,6 +423,20 @@ export const mapRoutes: FastifyPluginAsync = async (app) => {
       const body = (request.body ?? {}) as { toleranceMeters?: number };
       const result = await healMapZoneGaps(app.db, id, body.toleranceMeters ?? 2);
       reply.send(result);
+    },
+  );
+
+  app.get(
+    '/maps/:id/zones/partition-status',
+    {
+      schema: {
+        params: mapParamsSchema,
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const report = await checkMapZonePartition(app.db, id);
+      reply.send(report);
     },
   );
 

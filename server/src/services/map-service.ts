@@ -246,10 +246,17 @@ export async function updateMapZone(
   });
 }
 
+export interface HealMapZoneGapsSkip {
+  zoneIds: string[];
+  gapMeters: number;
+  reason: string;
+}
+
 export interface HealMapZoneGapsResult {
   zones: MapZone[];
   healedGapCount: number;
   skippedGapCount: number;
+  skippedGaps: HealMapZoneGapsSkip[];
 }
 
 export async function healMapZoneGaps(
@@ -261,6 +268,7 @@ export async function healMapZoneGaps(
     const transactionalDb = tx as unknown as DatabaseClient;
     await getMapByIdOrThrow(transactionalDb, mapId);
     const mapZoneRows = await listMapZones(transactionalDb, mapId);
+    const zoneNameById = new Map(mapZoneRows.map((zone) => [zone.id, zone.name]));
     const fixes = planAdjacencyGapFixes(mapZoneRows, toleranceMeters);
 
     // The map-wide "connected, non-overlapping partition" check is a
@@ -275,13 +283,24 @@ export async function healMapZoneGaps(
     // to DEFERRED, makes all of its writes, then flips to IMMEDIATE once to
     // force the check against the combined result -- catching only fixes
     // that are genuinely bad, not ones that are momentarily incomplete.
+    //
+    // Note this check is map-WIDE: if the map already has some unrelated
+    // pre-existing overlap or disconnection elsewhere (e.g. from data that
+    // predates this constraint, or was imported before it was enforced),
+    // EVERY gap fix will fail this check, since it evaluates the whole
+    // map's zones each time, not just the ones this fix touches. That's a
+    // real, separate data problem this function can't fix by itself --
+    // logging the reason below is what makes that visible instead of
+    // silently skipping everything.
     const currentGeometries = new Map(mapZoneRows.map((zone) => [zone.id, zone.geometry]));
     let healedGapCount = 0;
     let skippedGapCount = 0;
+    const skippedGaps: HealMapZoneGapsSkip[] = [];
 
     for (const [index, fix] of fixes.entries()) {
       const touchedZoneIds = Array.from(new Set(fix.edits.map((edit) => edit.zoneId)));
       if (touchedZoneIds.length === 0) continue;
+      const zoneLabel = fix.gap.zoneIds.map((zoneId) => zoneNameById.get(zoneId) ?? zoneId).join(' <-> ');
 
       const candidateGeometries = new Map<string, GeoJsonGeometry>();
       for (const zoneId of touchedZoneIds) {
@@ -291,18 +310,22 @@ export async function healMapZoneGaps(
         candidateGeometries.set(zoneId, applyAdjacencyGapFix(base, zoneEdits));
       }
 
-      let shapesValid = true;
+      let shapeReason: string | null = null;
       for (const geometry of candidateGeometries.values()) {
         try {
           await validateGeometry(transactionalDb, geometry);
-        } catch {
-          shapesValid = false;
+        } catch (error) {
+          shapeReason = error instanceof AppError
+            ? String((error.details as { reason?: string } | undefined)?.reason ?? error.message)
+            : 'unknown shape validation failure';
           break;
         }
       }
 
-      if (!shapesValid) {
+      if (shapeReason) {
         skippedGapCount += 1;
+        skippedGaps.push({ zoneIds: fix.gap.zoneIds, gapMeters: fix.gap.gapMeters, reason: shapeReason });
+        console.warn('[heal-gaps] skipped fix (invalid shape):', { mapId, zones: zoneLabel, gapMeters: fix.gap.gapMeters, reason: shapeReason });
         continue;
       }
 
@@ -329,18 +352,89 @@ export async function healMapZoneGaps(
           currentGeometries.set(zoneId, geometry);
         }
         healedGapCount += 1;
-      } catch {
+      } catch (error) {
         await transactionalDb.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${savepoint}`));
+        const reason = error instanceof Error ? error.message : 'unknown map-wide constraint failure';
         skippedGapCount += 1;
+        skippedGaps.push({ zoneIds: fix.gap.zoneIds, gapMeters: fix.gap.gapMeters, reason });
+        console.warn('[heal-gaps] skipped fix (map-wide constraint):', { mapId, zones: zoneLabel, gapMeters: fix.gap.gapMeters, reason });
       }
+    }
+
+    if (skippedGaps.length > 0) {
+      console.warn(`[heal-gaps] map ${mapId}: healed ${healedGapCount}, skipped ${skippedGaps.length} of ${fixes.length} fixes`);
     }
 
     return {
       zones: await listMapZones(transactionalDb, mapId),
       healedGapCount,
       skippedGapCount,
+      skippedGaps,
     };
   });
+}
+
+export interface MapZonePartitionOverlap {
+  zoneAId: string;
+  zoneAName: string;
+  zoneBId: string;
+  zoneBName: string;
+  overlapAreaSqMeters: number;
+}
+
+export interface MapZonePartitionReport {
+  isConnected: boolean;
+  hasNoOverlaps: boolean;
+  overlaps: MapZonePartitionOverlap[];
+}
+
+/**
+ * Reports whether this map currently satisfies the same connectivity/overlap
+ * rule the map_zones_connected constraint enforces, and -- unlike that
+ * constraint's boolean pass/fail -- lists which specific zone pairs actually
+ * overlap. Gap healing only fixes near-miss vertices; a real overlap (e.g.
+ * from data imported before this constraint existed) is a different problem
+ * that blocks every write to this map's zones, including gap healing, until
+ * it's resolved by hand.
+ */
+export async function checkMapZonePartition(db: DatabaseClient, mapId: string): Promise<MapZonePartitionReport> {
+  await getMapByIdOrThrow(db, mapId);
+
+  const statusResult = await db.execute<{ connected: boolean; noOverlaps: boolean }>(sql`
+    SELECT
+      map_zone_graph_connected(${mapId}::uuid) AS "connected",
+      map_zone_partition_has_no_overlaps(${mapId}::uuid) AS "noOverlaps"
+  `);
+
+  const overlapsResult = await db.execute<{
+    zoneAId: string;
+    zoneAName: string;
+    zoneBId: string;
+    zoneBName: string;
+    areaSqMeters: number | null;
+  }>(sql`
+    SELECT
+      a.id AS "zoneAId", a.name AS "zoneAName",
+      b.id AS "zoneBId", b.name AS "zoneBName",
+      ST_Area(ST_Intersection(a.geometry, b.geometry)::geography) AS "areaSqMeters"
+    FROM ${mapZones} a
+    JOIN ${mapZones} b ON a.map_id = b.map_id AND a.id < b.id
+    WHERE a.map_id = ${mapId}
+      AND ST_Area(ST_Intersection(a.geometry, b.geometry)) > 0.000000000001
+    ORDER BY "areaSqMeters" DESC NULLS LAST
+  `);
+
+  return {
+    isConnected: Boolean(statusResult.rows[0]?.connected),
+    hasNoOverlaps: Boolean(statusResult.rows[0]?.noOverlaps),
+    overlaps: overlapsResult.rows.map((row) => ({
+      zoneAId: row.zoneAId,
+      zoneAName: row.zoneAName,
+      zoneBId: row.zoneBId,
+      zoneBName: row.zoneBName,
+      overlapAreaSqMeters: Number(row.areaSqMeters ?? 0),
+    })),
+  };
 }
 
 export async function deleteMapZoneById(db: DatabaseClient, mapZoneId: string): Promise<boolean> {

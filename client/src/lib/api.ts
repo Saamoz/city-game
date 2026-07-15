@@ -75,7 +75,25 @@ interface MapZoneResponse { zone: MapZone }
 interface MapZoneUpdateResponse { zone: MapZone; zones: MapZone[] }
 interface ZoneImportResponse { zones: Zone[] }
 interface MapZoneImportResponse { zones: MapZone[] }
-interface HealMapZoneGapsResponse { zones: MapZone[]; healedGapCount: number; skippedGapCount: number }
+export interface HealMapZoneGapsSkip { zoneIds: string[]; gapMeters: number; reason: string }
+interface HealMapZoneGapsResponse {
+  zones: MapZone[];
+  healedGapCount: number;
+  skippedGapCount: number;
+  skippedGaps: HealMapZoneGapsSkip[];
+}
+export interface MapZonePartitionOverlap {
+  zoneAId: string;
+  zoneAName: string;
+  zoneBId: string;
+  zoneBName: string;
+  overlapAreaSqMeters: number;
+}
+export interface MapZonePartitionReport {
+  isConnected: boolean;
+  hasNoOverlaps: boolean;
+  overlaps: MapZonePartitionOverlap[];
+}
 
 interface PlayerLocationResponse {
   player: Player;
@@ -390,6 +408,10 @@ export async function healMapZoneGaps(mapId: string, toleranceMeters?: number): 
     method: 'POST',
     body: toleranceMeters ? { toleranceMeters } : {},
   });
+}
+
+export async function getMapZonePartitionStatus(mapId: string): Promise<MapZonePartitionReport> {
+  return apiRequest<MapZonePartitionReport>('/maps/' + mapId + '/zones/partition-status');
 }
 
 export async function getCurrentPlayer(signal?: AbortSignal): Promise<Player> {
