@@ -1,6 +1,7 @@
 import { asc, eq, inArray, sql } from 'drizzle-orm';
 import {
-  healAdjacencyGaps,
+  applyAdjacencyGapFix,
+  planAdjacencyGapFixes,
   propagateSharedBoundaryEdit,
   type GeoJsonGeometry,
   type GeoJsonPoint,
@@ -248,6 +249,7 @@ export async function updateMapZone(
 export interface HealMapZoneGapsResult {
   zones: MapZone[];
   healedGapCount: number;
+  skippedGapCount: number;
 }
 
 export async function healMapZoneGaps(
@@ -259,24 +261,67 @@ export async function healMapZoneGaps(
     const transactionalDb = tx as unknown as DatabaseClient;
     await getMapByIdOrThrow(transactionalDb, mapId);
     const mapZoneRows = await listMapZones(transactionalDb, mapId);
-    const { geometries, healedGapCount } = healAdjacencyGaps(mapZoneRows, toleranceMeters);
+    const fixes = planAdjacencyGapFixes(mapZoneRows, toleranceMeters);
+
+    // Applied one gap at a time (against the running, already-healed state)
+    // and validated individually: a single fix that would corrupt a zone's
+    // shape is skipped instead of aborting every other legitimate fix in
+    // the batch.
+    const currentGeometries = new Map(mapZoneRows.map((zone) => [zone.id, zone.geometry]));
+    let healedGapCount = 0;
+    let skippedGapCount = 0;
+
+    for (const fix of fixes) {
+      const touchedZoneIds = Array.from(new Set(fix.edits.map((edit) => edit.zoneId)));
+      if (touchedZoneIds.length === 0) continue;
+
+      const candidateGeometries = new Map<string, GeoJsonGeometry>();
+      for (const zoneId of touchedZoneIds) {
+        const base = currentGeometries.get(zoneId);
+        if (!base) continue;
+        const zoneEdits = fix.edits.filter((edit) => edit.zoneId === zoneId);
+        candidateGeometries.set(zoneId, applyAdjacencyGapFix(base, zoneEdits));
+      }
+
+      let allValid = true;
+      for (const geometry of candidateGeometries.values()) {
+        try {
+          await validateGeometry(transactionalDb, geometry);
+        } catch {
+          allValid = false;
+          break;
+        }
+      }
+
+      if (!allValid) {
+        skippedGapCount += 1;
+        continue;
+      }
+
+      for (const [zoneId, geometry] of candidateGeometries) {
+        currentGeometries.set(zoneId, geometry);
+      }
+      healedGapCount += 1;
+    }
 
     const updatedAt = new Date();
-    for (const [zoneId, geometry] of Object.entries(geometries)) {
-      await validateGeometry(transactionalDb, geometry);
+    for (const zone of mapZoneRows) {
+      const nextGeometry = currentGeometries.get(zone.id);
+      if (!nextGeometry || geometryValuesEqual(nextGeometry, zone.geometry)) continue;
       await transactionalDb
         .update(mapZones)
         .set({
-          geometry: buildGeometrySql(geometry),
-          centroid: buildCentroidSql(geometry),
+          geometry: buildGeometrySql(nextGeometry),
+          centroid: buildCentroidSql(nextGeometry),
           updatedAt,
         })
-        .where(eq(mapZones.id, zoneId));
+        .where(eq(mapZones.id, zone.id));
     }
 
     return {
       zones: await listMapZones(transactionalDb, mapId),
       healedGapCount,
+      skippedGapCount,
     };
   });
 }
@@ -565,6 +610,10 @@ export async function validateGeometry(db: DatabaseClient, geometry: GeoJsonGeom
       details: { reason: result.rows[0]?.reason ?? 'Unknown geometry validation failure.' },
     });
   }
+}
+
+function geometryValuesEqual(left: GeoJsonGeometry, right: GeoJsonGeometry): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function buildGeometrySql(geometry: GeoJsonGeometry) {

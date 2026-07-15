@@ -75,7 +75,7 @@ interface MapZoneResponse { zone: MapZone }
 interface MapZoneUpdateResponse { zone: MapZone; zones: MapZone[] }
 interface ZoneImportResponse { zones: Zone[] }
 interface MapZoneImportResponse { zones: MapZone[] }
-interface HealMapZoneGapsResponse { zones: MapZone[]; healedGapCount: number }
+interface HealMapZoneGapsResponse { zones: MapZone[]; healedGapCount: number; skippedGapCount: number }
 
 interface PlayerLocationResponse {
   player: Player;

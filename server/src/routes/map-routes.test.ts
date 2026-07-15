@@ -305,6 +305,7 @@ describe('map routes', () => {
 
     expect(healResponse.statusCode).toBe(200);
     expect(healResponse.json().healedGapCount).toBeGreaterThan(0);
+    expect(healResponse.json().skippedGapCount).toBe(0);
 
     const healedZones = healResponse.json().zones as Array<{ id: string; geometry: { coordinates: number[][][] } }>;
     const healedA = healedZones.find((zone) => zone.id === zoneAId)!;

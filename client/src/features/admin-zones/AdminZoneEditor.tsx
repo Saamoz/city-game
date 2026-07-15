@@ -105,6 +105,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const snapMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const didFitBoundsRef = useRef(false);
   const zonesRef = useRef<MapZone[]>([]);
+  const gapsRef = useRef<AdjacencyGap[]>([]);
   const selectedZoneIdRef = useRef<string | null>(null);
   const previewCollectionRef = useRef<GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject> | null>(null);
   const modeRef = useRef<EditorMode>('select');
@@ -160,6 +161,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
 
   // Sync refs
   useEffect(() => { zonesRef.current = zones; }, [zones]);
+  useEffect(() => { gapsRef.current = gapReport.gaps; }, [gapReport]);
   useEffect(() => { selectedZoneIdRef.current = selectedZoneId; }, [selectedZoneId]);
   useEffect(() => { previewCollectionRef.current = previewCollection; }, [previewCollection]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
@@ -503,7 +505,15 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     };
 
     const handleLoad = () => {
-      syncEditorSources(map, zonesRef.current, selectedZoneIdRef.current, mergeTargetIdRef.current, previewCollectionRef.current);
+      syncEditorSources(
+        map,
+        zonesRef.current,
+        selectedZoneIdRef.current,
+        mergeTargetIdRef.current,
+        previewCollectionRef.current,
+        new Set(),
+        gapsRef.current,
+      );
     };
 
     map.on('load', handleLoad);
@@ -897,11 +907,19 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     try {
       const result = await healMapZoneGaps(currentMap.id, gapToleranceMeters);
       setZones(result.zones);
+      const parts: string[] = [];
+      if (result.healedGapCount > 0) {
+        parts.push(`Healed ${result.healedGapCount} boundary gap${result.healedGapCount === 1 ? '' : 's'}.`);
+      }
+      if (result.skippedGapCount > 0) {
+        parts.push(`Skipped ${result.skippedGapCount} gap${result.skippedGapCount === 1 ? '' : 's'} that would have created an invalid shape.`);
+      }
+      if (parts.length === 0) {
+        parts.push('No gaps found within the current search radius.');
+      }
       setNotice({
-        tone: 'success',
-        message: result.healedGapCount > 0
-          ? `Healed ${result.healedGapCount} boundary gap${result.healedGapCount === 1 ? '' : 's'}.`
-          : 'No gaps found within the current search radius.',
+        tone: result.healedGapCount > 0 && result.skippedGapCount === 0 ? 'success' : 'info',
+        message: parts.join(' '),
       });
     } catch (error) {
       setNotice({ tone: 'error', message: getApiErrorMessage(error) });

@@ -389,9 +389,16 @@ export interface AdjacencyGapReport {
   toleranceMeters: number;
 }
 
-export interface HealAdjacencyGapsResult {
-  geometries: Record<string, GeoJsonGeometry>;
-  healedGapCount: number;
+export interface AdjacencyGapVertexEdit {
+  zoneId: string;
+  ringPath: string;
+  vertexIndex: number;
+  position: Position;
+}
+
+export interface AdjacencyGapFix {
+  gap: AdjacencyGap;
+  edits: AdjacencyGapVertexEdit[];
 }
 
 export function findAdjacencyGaps(zones: BoundaryEditZone[], toleranceMeters: number): AdjacencyGapReport {
@@ -426,32 +433,37 @@ export function findAdjacencyGaps(zones: BoundaryEditZone[], toleranceMeters: nu
   return { gaps, toleranceMeters };
 }
 
-export function healAdjacencyGaps(zones: BoundaryEditZone[], toleranceMeters: number): HealAdjacencyGapsResult {
+/**
+ * Plans a fix for each detected gap independently, as a list of vertex
+ * edits per zone, rather than one combined geometry per zone. Applying gaps
+ * one at a time (via `applyAdjacencyGapFix`) and validating after each lets
+ * a caller skip a single bad fix without losing every other legitimate one —
+ * important on a real map where one gap producing an invalid shape shouldn't
+ * block the rest of a batch heal.
+ */
+export function planAdjacencyGapFixes(zones: BoundaryEditZone[], toleranceMeters: number): AdjacencyGapFix[] {
   const { gaps } = findAdjacencyGaps(zones, toleranceMeters);
-  if (gaps.length === 0) {
-    return { geometries: {}, healedGapCount: 0 };
-  }
+  return gaps.map((gap) => ({
+    gap,
+    edits: gap.vertices
+      .filter((vertex) => !positionsEqual(vertex.position, gap.suggestedFix))
+      .map((vertex) => ({
+        zoneId: vertex.zoneId,
+        ringPath: vertex.ringPath,
+        vertexIndex: vertex.vertexIndex,
+        position: gap.suggestedFix,
+      })),
+  }));
+}
 
-  const editsByZone = new Map<string, Map<string, Map<number, Position>>>();
-  for (const gap of gaps) {
-    for (const vertex of gap.vertices) {
-      if (positionsEqual(vertex.position, gap.suggestedFix)) continue;
-      const byRing = editsByZone.get(vertex.zoneId) ?? new Map<string, Map<number, Position>>();
-      editsByZone.set(vertex.zoneId, byRing);
-      const byVertex = byRing.get(vertex.ringPath) ?? new Map<number, Position>();
-      byRing.set(vertex.ringPath, byVertex);
-      byVertex.set(vertex.vertexIndex, gap.suggestedFix);
-    }
+export function applyAdjacencyGapFix(geometry: GeoJsonGeometry, edits: AdjacencyGapVertexEdit[]): GeoJsonGeometry {
+  const byRing = new Map<string, Map<number, Position>>();
+  for (const edit of edits) {
+    const byVertex = byRing.get(edit.ringPath) ?? new Map<number, Position>();
+    byRing.set(edit.ringPath, byVertex);
+    byVertex.set(edit.vertexIndex, edit.position);
   }
-
-  const geometries: Record<string, GeoJsonGeometry> = {};
-  for (const zone of zones) {
-    const byRing = editsByZone.get(zone.id);
-    if (!byRing) continue;
-    geometries[zone.id] = applyVertexEdits(zone.geometry, byRing);
-  }
-
-  return { geometries, healedGapCount: gaps.length };
+  return applyVertexEdits(geometry, byRing);
 }
 
 function collectZoneVertexRefs(zone: BoundaryEditZone): AdjacencyGapVertex[] {
@@ -473,39 +485,63 @@ function collectZoneVertexRefs(zone: BoundaryEditZone): AdjacencyGapVertex[] {
   return refs;
 }
 
+/**
+ * Groups nearby cross-zone vertices using diameter-bounded (complete-linkage)
+ * clustering: two clusters only merge if EVERY member of one is within
+ * tolerance of EVERY member of the other. Plain single-linkage (union-find
+ * on any pair within tolerance) lets clusters "chain" — A near B near C
+ * merges A with C even if A and C are farther apart than the tolerance —
+ * which on a dense real-world map merges unrelated vertices from different
+ * zones and corrupts their shapes. Requiring every pairwise distance to stay
+ * within tolerance keeps each cluster a genuine single point of contact.
+ */
 function clusterNearbyVertices(refs: AdjacencyGapVertex[], toleranceMeters: number): AdjacencyGapVertex[][] {
-  const parent = refs.map((_ref, index) => index);
-  const find = (index: number): number => {
-    while (parent[index] !== index) {
-      parent[index] = parent[parent[index]];
-      index = parent[index];
-    }
-    return index;
-  };
-  const union = (a: number, b: number) => {
-    const rootA = find(a);
-    const rootB = find(b);
-    if (rootA !== rootB) parent[rootA] = rootB;
-  };
+  let nextClusterId = 0;
+  const clusters = new Map<number, number[]>();
+  const clusterOf = new Map<number, number>();
+  refs.forEach((_ref, index) => {
+    const id = nextClusterId;
+    nextClusterId += 1;
+    clusters.set(id, [index]);
+    clusterOf.set(index, id);
+  });
 
+  const candidates: Array<{ i: number; j: number; distance: number }> = [];
   for (let i = 0; i < refs.length; i += 1) {
     for (let j = i + 1; j < refs.length; j += 1) {
       if (refs[i].zoneId === refs[j].zoneId) continue;
-      if (metersBetween(refs[i].position, refs[j].position) <= toleranceMeters) {
-        union(i, j);
-      }
+      const distance = metersBetween(refs[i].position, refs[j].position);
+      if (distance <= toleranceMeters) candidates.push({ i, j, distance });
     }
   }
+  candidates.sort((a, b) => a.distance - b.distance);
 
-  const clusters = new Map<number, AdjacencyGapVertex[]>();
-  refs.forEach((ref, index) => {
-    const root = find(index);
-    const list = clusters.get(root) ?? [];
-    list.push(ref);
-    clusters.set(root, list);
-  });
+  for (const { i, j } of candidates) {
+    const clusterIId = clusterOf.get(i)!;
+    const clusterJId = clusterOf.get(j)!;
+    if (clusterIId === clusterJId) continue;
 
-  return Array.from(clusters.values());
+    const clusterI = clusters.get(clusterIId)!;
+    const clusterJ = clusters.get(clusterJId)!;
+
+    let canMerge = true;
+    outer:
+    for (const a of clusterI) {
+      for (const b of clusterJ) {
+        if (metersBetween(refs[a].position, refs[b].position) > toleranceMeters) {
+          canMerge = false;
+          break outer;
+        }
+      }
+    }
+    if (!canMerge) continue;
+
+    clusters.set(clusterIId, clusterI.concat(clusterJ));
+    clusters.delete(clusterJId);
+    for (const memberIndex of clusterJ) clusterOf.set(memberIndex, clusterIId);
+  }
+
+  return Array.from(clusters.values()).map((memberIndices) => memberIndices.map((index) => refs[index]));
 }
 
 function pickCanonicalPosition(members: AdjacencyGapVertex[]): Position {
