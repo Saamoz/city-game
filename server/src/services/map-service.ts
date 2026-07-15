@@ -263,15 +263,23 @@ export async function healMapZoneGaps(
     const mapZoneRows = await listMapZones(transactionalDb, mapId);
     const fixes = planAdjacencyGapFixes(mapZoneRows, toleranceMeters);
 
-    // Applied one gap at a time (against the running, already-healed state)
-    // and validated individually: a single fix that would corrupt a zone's
-    // shape is skipped instead of aborting every other legitimate fix in
-    // the batch.
+    // The map-wide "connected, non-overlapping partition" check is a
+    // DEFERRED constraint trigger (checked FOR EACH ROW), so it needs care
+    // here: left fully deferred it only fires once at this transaction's
+    // final commit, meaning one bad gap fix would roll back every other,
+    // otherwise-legitimate fix too. But forcing it IMMEDIATE for the whole
+    // transaction is also wrong -- a gap that moves several zones to a new
+    // shared point writes them one row at a time, and the map can look
+    // transiently disconnected between those individual row writes even
+    // though the final combined result is fine. So each gap below: resets
+    // to DEFERRED, makes all of its writes, then flips to IMMEDIATE once to
+    // force the check against the combined result -- catching only fixes
+    // that are genuinely bad, not ones that are momentarily incomplete.
     const currentGeometries = new Map(mapZoneRows.map((zone) => [zone.id, zone.geometry]));
     let healedGapCount = 0;
     let skippedGapCount = 0;
 
-    for (const fix of fixes) {
+    for (const [index, fix] of fixes.entries()) {
       const touchedZoneIds = Array.from(new Set(fix.edits.map((edit) => edit.zoneId)));
       if (touchedZoneIds.length === 0) continue;
 
@@ -283,39 +291,48 @@ export async function healMapZoneGaps(
         candidateGeometries.set(zoneId, applyAdjacencyGapFix(base, zoneEdits));
       }
 
-      let allValid = true;
+      let shapesValid = true;
       for (const geometry of candidateGeometries.values()) {
         try {
           await validateGeometry(transactionalDb, geometry);
         } catch {
-          allValid = false;
+          shapesValid = false;
           break;
         }
       }
 
-      if (!allValid) {
+      if (!shapesValid) {
         skippedGapCount += 1;
         continue;
       }
 
-      for (const [zoneId, geometry] of candidateGeometries) {
-        currentGeometries.set(zoneId, geometry);
+      const savepoint = `heal_gap_${index}`;
+      await transactionalDb.execute(sql`SET CONSTRAINTS map_zones_connected, zones_connected DEFERRED`);
+      await transactionalDb.execute(sql.raw(`SAVEPOINT ${savepoint}`));
+      try {
+        const updatedAt = new Date();
+        for (const [zoneId, geometry] of candidateGeometries) {
+          await transactionalDb
+            .update(mapZones)
+            .set({
+              geometry: buildGeometrySql(geometry),
+              centroid: buildCentroidSql(geometry),
+              updatedAt,
+            })
+            .where(eq(mapZones.id, zoneId));
+        }
+        // Force the deferred connectivity/overlap check to run now, against
+        // the combined result of every write this gap made.
+        await transactionalDb.execute(sql`SET CONSTRAINTS map_zones_connected, zones_connected IMMEDIATE`);
+        await transactionalDb.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+        for (const [zoneId, geometry] of candidateGeometries) {
+          currentGeometries.set(zoneId, geometry);
+        }
+        healedGapCount += 1;
+      } catch {
+        await transactionalDb.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${savepoint}`));
+        skippedGapCount += 1;
       }
-      healedGapCount += 1;
-    }
-
-    const updatedAt = new Date();
-    for (const zone of mapZoneRows) {
-      const nextGeometry = currentGeometries.get(zone.id);
-      if (!nextGeometry || geometryValuesEqual(nextGeometry, zone.geometry)) continue;
-      await transactionalDb
-        .update(mapZones)
-        .set({
-          geometry: buildGeometrySql(nextGeometry),
-          centroid: buildCentroidSql(nextGeometry),
-          updatedAt,
-        })
-        .where(eq(mapZones.id, zone.id));
     }
 
     return {
@@ -610,10 +627,6 @@ export async function validateGeometry(db: DatabaseClient, geometry: GeoJsonGeom
       details: { reason: result.rows[0]?.reason ?? 'Unknown geometry validation failure.' },
     });
   }
-}
-
-function geometryValuesEqual(left: GeoJsonGeometry, right: GeoJsonGeometry): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function buildGeometrySql(geometry: GeoJsonGeometry) {

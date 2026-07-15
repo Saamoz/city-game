@@ -912,7 +912,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
         parts.push(`Healed ${result.healedGapCount} boundary gap${result.healedGapCount === 1 ? '' : 's'}.`);
       }
       if (result.skippedGapCount > 0) {
-        parts.push(`Skipped ${result.skippedGapCount} gap${result.skippedGapCount === 1 ? '' : 's'} that would have created an invalid shape.`);
+        parts.push(`Skipped ${result.skippedGapCount} gap${result.skippedGapCount === 1 ? '' : 's'} that would have broken zone shapes or overlap rules — these are still listed below for manual fixing.`);
       }
       if (parts.length === 0) {
         parts.push('No gaps found within the current search radius.');
