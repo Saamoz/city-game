@@ -5,8 +5,9 @@ import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import type { Feature, FeatureCollection, GeoJsonProperties, MultiPolygon, Polygon } from 'geojson';
 import { difference as turfDifference, featureCollection, feature as turfFeature } from '@turf/turf';
-import { propagateSharedBoundaryEdit } from '@city-game/shared';
+import { findAdjacencyGaps, propagateSharedBoundaryEdit } from '@city-game/shared';
 import type {
+  AdjacencyGap,
   GeoJsonFeatureCollection,
   GeoJsonGeometry,
   JsonObject,
@@ -21,6 +22,7 @@ import {
   deleteMapDefinition,
   deleteMapZoneDefinition,
   getMap,
+  healMapZoneGaps,
   importMapZoneDefinitions,
   listMaps,
   listMapZones,
@@ -33,6 +35,7 @@ import {
   type MapZoneUpsertInput,
 } from '../../lib/api';
 import { buildRenderedZoneGeometry, collectGeometryPositions, getZoneAnchor } from '../game/mapGeometry';
+import { createEdgeAwareDirectSelectMode } from './edgeDirectSelectMode';
 
 interface AdminZoneEditorProps {
   initialMapId: string | null;
@@ -75,11 +78,16 @@ const PREVIEW_SOURCE_ID = 'admin-maps-preview-source';
 const PREVIEW_FILL_LAYER_ID = 'admin-maps-preview-fill';
 const PREVIEW_LINE_LAYER_ID = 'admin-maps-preview-line';
 const PREVIEW_LABEL_LAYER_ID = 'admin-maps-preview-label';
+const GAP_SOURCE_ID = 'admin-maps-gap-source';
+const GAP_HALO_LAYER_ID = 'admin-maps-gap-halo';
+const GAP_DOT_LAYER_ID = 'admin-maps-gap-dot';
 const NEUTRAL_FILL = '#c8cdc5';
 const NEUTRAL_LINE = '#667076';
 const MERGE_TARGET_FILL = '#7ab0c8';
 const MERGE_TARGET_LINE = '#2a6a8a';
+const GAP_COLOR = '#c0392b';
 const SNAP_THRESHOLD_PX = 18;
+const DEFAULT_GAP_TOLERANCE_METERS = 2;
 
 const VIEW_PRESETS: ViewPreset[] = [
   { id: 'toronto', label: 'Toronto', centerLat: 43.6532, centerLng: -79.3832, defaultZoom: 11 },
@@ -131,6 +139,9 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const [isSplitting, setIsSplitting] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState<string | null>(null);
   const [isMergePickMode, setIsMergePickMode] = useState(false);
+  const [gapToleranceMeters, setGapToleranceMeters] = useState(DEFAULT_GAP_TOLERANCE_METERS);
+  const [isHealingGaps, setIsHealingGaps] = useState(false);
+  const [showGapDetails, setShowGapDetails] = useState(false);
 
   const selectedZone = useMemo(() => zones.find((z) => z.id === selectedZoneId) ?? null, [selectedZoneId, zones]);
   const mergeTargetZone = useMemo(() => zones.find((z) => z.id === mergeTargetId) ?? null, [mergeTargetId, zones]);
@@ -142,6 +153,10 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     [synchronizedGeometryDrafts, zones],
   );
   const hasGeometrySession = Boolean(geometryDraft) || Boolean(editingGeometryZoneId);
+  const gapReport = useMemo(
+    () => findAdjacencyGaps(zones, gapToleranceMeters),
+    [zones, gapToleranceMeters],
+  );
 
   // Sync refs
   useEffect(() => { zonesRef.current = zones; }, [zones]);
@@ -189,8 +204,9 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       mergeTargetId,
       previewCollection,
       new Set(Object.keys(synchronizedGeometryDrafts)),
+      gapReport.gaps,
     );
-  }, [mergeTargetId, previewCollection, renderedZones, selectedZoneId, synchronizedGeometryDrafts]);
+  }, [gapReport, mergeTargetId, previewCollection, renderedZones, selectedZoneId, synchronizedGeometryDrafts]);
 
   const fitMapToCurrentData = useCallback((focusZone?: MapZone | null) => {
     const map = mapRef.current;
@@ -294,7 +310,11 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       attributionControl: false,
     });
 
-    const draw = new MapboxDraw({ displayControlsDefault: false, styles: createDrawStyles() });
+    const draw = new MapboxDraw({
+      displayControlsDefault: false,
+      styles: createDrawStyles(),
+      modes: { ...MapboxDraw.modes, direct_select: createEdgeAwareDirectSelectMode() },
+    });
     mapRef.current = map;
     drawRef.current = draw;
     map.addControl(draw, 'top-right');
@@ -621,7 +641,10 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     setEditingGeometryZoneId(selectedZone.id);
     setGeometryDraft(selectedZone.geometry);
     setSynchronizedGeometryDrafts({});
-    setNotice({ tone: 'info', message: 'Drag vertices to reshape. Shared vertices move adjacent zones automatically. Save when done.' });
+    setNotice({
+      tone: 'info',
+      message: 'Drag an edge to move the whole boundary line, or a dot to move one vertex. Shift-click dots, or shift-drag a box around several, to move a group together. Adjacent zones sharing that boundary update automatically (shown in amber). Save when done.',
+    });
   };
 
   const handleDeleteMap = async () => {
@@ -867,6 +890,26 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     }
   };
 
+  const handleHealGaps = async () => {
+    if (!currentMap) return;
+    setIsHealingGaps(true);
+    setNotice(null);
+    try {
+      const result = await healMapZoneGaps(currentMap.id, gapToleranceMeters);
+      setZones(result.zones);
+      setNotice({
+        tone: 'success',
+        message: result.healedGapCount > 0
+          ? `Healed ${result.healedGapCount} boundary gap${result.healedGapCount === 1 ? '' : 's'}.`
+          : 'No gaps found within the current search radius.',
+      });
+    } catch (error) {
+      setNotice({ tone: 'error', message: getApiErrorMessage(error) });
+    } finally {
+      setIsHealingGaps(false);
+    }
+  };
+
   const selectedAnchor = selectedZone ? getZoneAnchor(selectedZone as unknown as RuntimeZone) : null;
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -968,6 +1011,65 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                 </div>
               </Panel>
 
+              {/* Boundary Health */}
+              {currentMap && zones.length > 0 ? (
+                <Panel title="Boundary Health">
+                  {gapReport.gaps.length === 0 ? (
+                    <div className="flex items-center gap-2 rounded-2xl border border-[#bcd9c2] bg-[#eef7f0] px-3 py-2.5 text-sm text-[#2a6b3f]">
+                      <span aria-hidden="true">✓</span>
+                      <span>No adjacency gaps within {gapToleranceMeters}m.</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 rounded-2xl border border-[#e3b9a8] bg-[#fbf0eb] px-3 py-2.5 text-sm text-[#8a3a24]">
+                      <p className="font-semibold">
+                        {gapReport.gaps.length} boundary gap{gapReport.gaps.length === 1 ? '' : 's'} found
+                      </p>
+                      <p className="text-xs text-[#9a4e35]">
+                        These zones look adjacent but their edges don&apos;t exactly touch — marked with red dots on the map.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowGapDetails((v) => !v)}
+                        className="text-xs font-semibold uppercase tracking-[0.14em] text-[#8a3a24] underline underline-offset-2"
+                      >
+                        {showGapDetails ? 'Hide details' : 'Show details'}
+                      </button>
+                      {showGapDetails ? (
+                        <ul className="max-h-32 space-y-1 overflow-y-auto rounded-xl border border-[#e3b9a8] bg-white px-2.5 py-2 text-xs text-[#5c3224]">
+                          {gapReport.gaps.map((gap) => (
+                            <li key={gap.id}>
+                              {gap.zoneIds.map((id) => zones.find((z) => z.id === id)?.name ?? 'Unknown zone').join(' ↔ ')}
+                              {' — '}{formatGapDistance(gap.gapMeters)}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+                    <Field label="Search radius (m)">
+                      <input
+                        type="number"
+                        min={0.1}
+                        max={20}
+                        step={0.1}
+                        value={gapToleranceMeters}
+                        onChange={(e) => {
+                          const next = Number(e.target.value);
+                          setGapToleranceMeters(Number.isFinite(next) && next > 0 ? next : DEFAULT_GAP_TOLERANCE_METERS);
+                        }}
+                        className="w-full rounded-2xl border border-[#c4cac8] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#8c9997]"
+                      />
+                    </Field>
+                    <ActionButton
+                      onClick={() => void handleHealGaps()}
+                      label={isHealingGaps ? 'Healing…' : 'Heal Gaps'}
+                      disabled={isHealingGaps || gapReport.gaps.length === 0 || hasGeometrySession}
+                    />
+                  </div>
+                </Panel>
+              ) : null}
+
               {/* Drawing Tools */}
               <Panel title="Drawing">
                 <div className="grid grid-cols-3 gap-2">
@@ -982,6 +1084,15 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                 </div>
                 {hasGeometrySession ? (
                   <ActionButton onClick={handleCancelGeometry} label="Cancel" tone="secondary" />
+                ) : null}
+                {editingGeometryZoneId ? (
+                  <ul className="space-y-1 rounded-2xl border border-[#d7ddda] bg-white px-3 py-2.5 text-xs text-[#4a5559]">
+                    <li>· Drag an <strong>edge</strong> to move that whole boundary line.</li>
+                    <li>· Drag a <strong>dot</strong> to move one vertex.</li>
+                    <li>· Shift-click dots, or shift-drag a box from outside the zone, to select several — then drag any of them together.</li>
+                    <li>· Drag the interior to move the whole zone.</li>
+                    <li>· Amber zones share the edge you&apos;re moving and update with it.</li>
+                  </ul>
                 ) : null}
               </Panel>
 
@@ -1384,12 +1495,15 @@ function syncEditorSources(
   mergeTargetId: string | null,
   previewCollection: GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject> | null,
   synchronizedZoneIds: Set<string> = new Set(),
+  gaps: AdjacencyGap[] = [],
 ): void {
   ensureEditorLayers(map);
   (map.getSource(MAP_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined)
     ?.setData(buildZoneCollection(zones, selectedZoneId, mergeTargetId, synchronizedZoneIds));
   (map.getSource(PREVIEW_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined)
     ?.setData(toPreviewFeatureCollection(previewCollection));
+  (map.getSource(GAP_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined)
+    ?.setData(buildGapCollection(gaps));
 }
 
 function ensureEditorLayers(map: mapboxgl.Map): void {
@@ -1398,6 +1512,9 @@ function ensureEditorLayers(map: mapboxgl.Map): void {
   }
   if (!map.getSource(PREVIEW_SOURCE_ID)) {
     map.addSource(PREVIEW_SOURCE_ID, { type: 'geojson', data: emptyFeatureCollection() });
+  }
+  if (!map.getSource(GAP_SOURCE_ID)) {
+    map.addSource(GAP_SOURCE_ID, { type: 'geojson', data: emptyFeatureCollection() });
   }
 
   if (!map.getLayer(MAP_FILL_LAYER_ID)) {
@@ -1460,6 +1577,27 @@ function ensureEditorLayers(map: mapboxgl.Map): void {
         'text-allow-overlap': true, 'text-ignore-placement': true,
       },
       paint: { 'text-color': '#7b561a', 'text-halo-color': 'rgba(248,246,240,0.85)', 'text-halo-width': 1 },
+    });
+  }
+  if (!map.getLayer(GAP_HALO_LAYER_ID)) {
+    map.addLayer({
+      id: GAP_HALO_LAYER_ID, type: 'circle', source: GAP_SOURCE_ID,
+      paint: {
+        'circle-radius': 12,
+        'circle-color': GAP_COLOR,
+        'circle-opacity': 0.22,
+      },
+    });
+  }
+  if (!map.getLayer(GAP_DOT_LAYER_ID)) {
+    map.addLayer({
+      id: GAP_DOT_LAYER_ID, type: 'circle', source: GAP_SOURCE_ID,
+      paint: {
+        'circle-radius': 4.5,
+        'circle-color': GAP_COLOR,
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': 1.5,
+      },
     });
   }
 }
@@ -1549,6 +1687,18 @@ function emptyFeatureCollection(): FeatureCollection<GeoJsonGeometry, GeoJsonPro
   return { type: 'FeatureCollection', features: [] };
 }
 
+function buildGapCollection(gaps: AdjacencyGap[]): FeatureCollection<GeoJsonGeometry, GeoJsonProperties> {
+  return {
+    type: 'FeatureCollection',
+    features: gaps.map((gap) => ({
+      type: 'Feature',
+      id: gap.id,
+      geometry: { type: 'Point', coordinates: gap.suggestedFix } as never,
+      properties: { id: gap.id, zoneIds: gap.zoneIds.join(','), gapMeters: gap.gapMeters },
+    })),
+  };
+}
+
 function buildFormFromMap(map: MapDefinition): MapFormState {
   return { name: map.name, viewPresetId: inferPresetId(map) };
 }
@@ -1627,6 +1777,10 @@ function getApiErrorMessage(error: unknown): string {
 
 function slugify(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'map';
+}
+
+function formatGapDistance(meters: number): string {
+  return meters < 1 ? `${Math.round(meters * 100)}cm` : `${meters.toFixed(1)}m`;
 }
 
 function createDrawStyles(): object[] {

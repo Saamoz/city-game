@@ -243,6 +243,94 @@ describe('map routes', () => {
     ]));
   });
 
+  it('heals a hidden adjacency gap that connectivity validation alone does not catch', async () => {
+    app = await createTestApp({ db: testDatabase.db, pool: testDatabase.pool });
+
+    const mapResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/maps',
+      headers: idempotencyHeaders('create-gap-heal-map'),
+      payload: {
+        name: 'Gap Heal Map',
+        centerLat: 49.8951,
+        centerLng: -97.1384,
+        defaultZoom: 12,
+      },
+    });
+    const mapId = mapResponse.json().map.id as string;
+
+    // A ~1.1 meter latitude offset at this latitude: small enough to look
+    // adjacent on the map and to fall within the default heal tolerance.
+    const gapDegrees = 0.00001;
+
+    const zoneAResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/maps/${mapId}/zones`,
+      headers: idempotencyHeaders('create-gap-heal-zone-a'),
+      payload: { name: 'A', geometry: createRectangle(-97.15, 49.90, -97.13, 49.92) },
+    });
+    expect(zoneAResponse.statusCode).toBe(201);
+    const zoneAId = zoneAResponse.json().zone.id as string;
+
+    const zoneCResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/maps/${mapId}/zones`,
+      headers: idempotencyHeaders('create-gap-heal-zone-c'),
+      payload: { name: 'C', geometry: createRectangle(-97.13, 49.88, -97.11, 49.92) },
+    });
+    expect(zoneCResponse.statusCode).toBe(201);
+
+    // Zone B is shifted north by gapDegrees, so its top edge no longer
+    // exactly meets zone A's bottom edge. It still passes the connectivity
+    // check because it exactly shares its right edge with C, so this gap
+    // against A is the kind that stays hidden until explicitly checked for.
+    const zoneBResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/maps/${mapId}/zones`,
+      headers: idempotencyHeaders('create-gap-heal-zone-b'),
+      payload: {
+        name: 'B',
+        geometry: createRectangle(-97.15, 49.88 + gapDegrees, -97.13, 49.90 + gapDegrees),
+      },
+    });
+    expect(zoneBResponse.statusCode).toBe(201);
+    const zoneBId = zoneBResponse.json().zone.id as string;
+
+    const healResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/maps/${mapId}/zones/heal-gaps`,
+      headers: idempotencyHeaders('heal-gap-a-b'),
+      payload: { toleranceMeters: 3 },
+    });
+
+    expect(healResponse.statusCode).toBe(200);
+    expect(healResponse.json().healedGapCount).toBeGreaterThan(0);
+
+    const healedZones = healResponse.json().zones as Array<{ id: string; geometry: { coordinates: number[][][] } }>;
+    const healedA = healedZones.find((zone) => zone.id === zoneAId)!;
+    const healedB = healedZones.find((zone) => zone.id === zoneBId)!;
+
+    // The near-miss corner near (-97.15, 49.90) should have snapped to the
+    // exact same point in both zones.
+    const healedAVertex = healedA.geometry.coordinates[0].find(
+      ([lng, lat]) => Math.abs(lng - -97.15) < 1e-9 && lat < 49.91,
+    );
+    const healedBVertex = healedB.geometry.coordinates[0].find(
+      ([lng, lat]) => Math.abs(lng - -97.15) < 1e-9 && lat > 49.89,
+    );
+    expect(healedAVertex).toBeDefined();
+    expect(healedBVertex).toEqual(healedAVertex);
+
+    const rehealResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/maps/${mapId}/zones/heal-gaps`,
+      headers: idempotencyHeaders('heal-gap-a-b-again'),
+      payload: { toleranceMeters: 3 },
+    });
+    expect(rehealResponse.statusCode).toBe(200);
+    expect(rehealResponse.json().healedGapCount).toBe(0);
+  });
+
   it('prevents deleting a zone that disconnects the remaining map', async () => {
     app = await createTestApp({ db: testDatabase.db, pool: testDatabase.pool });
 

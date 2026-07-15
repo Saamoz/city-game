@@ -1,5 +1,6 @@
 import { asc, eq, inArray, sql } from 'drizzle-orm';
 import {
+  healAdjacencyGaps,
   propagateSharedBoundaryEdit,
   type GeoJsonGeometry,
   type GeoJsonPoint,
@@ -240,6 +241,42 @@ export async function updateMapZone(
     return {
       zone,
       zones: affectedZones,
+    };
+  });
+}
+
+export interface HealMapZoneGapsResult {
+  zones: MapZone[];
+  healedGapCount: number;
+}
+
+export async function healMapZoneGaps(
+  db: DatabaseClient,
+  mapId: string,
+  toleranceMeters: number,
+): Promise<HealMapZoneGapsResult> {
+  return db.transaction(async (tx) => {
+    const transactionalDb = tx as unknown as DatabaseClient;
+    await getMapByIdOrThrow(transactionalDb, mapId);
+    const mapZoneRows = await listMapZones(transactionalDb, mapId);
+    const { geometries, healedGapCount } = healAdjacencyGaps(mapZoneRows, toleranceMeters);
+
+    const updatedAt = new Date();
+    for (const [zoneId, geometry] of Object.entries(geometries)) {
+      await validateGeometry(transactionalDb, geometry);
+      await transactionalDb
+        .update(mapZones)
+        .set({
+          geometry: buildGeometrySql(geometry),
+          centroid: buildCentroidSql(geometry),
+          updatedAt,
+        })
+        .where(eq(mapZones.id, zoneId));
+    }
+
+    return {
+      zones: await listMapZones(transactionalDb, mapId),
+      healedGapCount,
     };
   });
 }

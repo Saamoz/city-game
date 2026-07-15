@@ -83,6 +83,29 @@ describe('shared zone boundary editing', () => {
     ]));
   });
 
+  it('keeps index correspondence for a large single-vertex move instead of searching for a lower-cost rotation', () => {
+    const left = rectangle(0, 0, 1, 1);
+    const right = rectangle(1, 0, 2, 1);
+    const editedLeft = polygon([
+      [0, 0],
+      [1, 0],
+      [5, 5],
+      [0, 1],
+    ]);
+
+    const result = propagateSharedBoundaryEdit('left', left, editedLeft, [
+      { id: 'left', geometry: left },
+      { id: 'right', geometry: right },
+    ]);
+
+    expect(result.geometries.right).toEqual(polygon([
+      [1, 0],
+      [2, 0],
+      [2, 1],
+      [5, 5],
+    ]));
+  });
+
   it('removes a deleted shared vertex from the adjacent boundary', () => {
     const left = polygon([
       [0, 0],

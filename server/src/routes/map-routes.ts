@@ -10,6 +10,7 @@ import {
   deleteMapZoneById,
   getMapByIdOrThrow,
   getMapZoneById,
+  healMapZoneGaps,
   importMapZones,
   listMaps,
   listMapZones,
@@ -206,6 +207,14 @@ const osmImportBodySchema = {
   additionalProperties: false,
 } as const;
 
+const healGapsBodySchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    toleranceMeters: { type: 'number', minimum: 0.01, maximum: 50 },
+  },
+} as const;
+
 const mapParamsSchema = {
   type: 'object',
   required: ['id'],
@@ -395,6 +404,24 @@ export const mapRoutes: FastifyPluginAsync = async (app) => {
       const map = await getMapByIdOrThrow(app.db, id);
       const featureCollection = await app.osmImportService.previewAdministrativeBoundaries({ placeName: map.name });
       reply.send(featureCollection as GeoJsonFeatureCollection<GeoJsonPolygon, OsmPreviewProperties>);
+    },
+  );
+
+  app.post(
+    '/maps/:id/zones/heal-gaps',
+    {
+      schema: {
+        params: mapParamsSchema,
+        body: {
+          anyOf: [healGapsBodySchema, { type: 'null' }],
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = (request.body ?? {}) as { toleranceMeters?: number };
+      const result = await healMapZoneGaps(app.db, id, body.toleranceMeters ?? 2);
+      reply.send(result);
     },
   );
 

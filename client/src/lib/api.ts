@@ -75,6 +75,7 @@ interface MapZoneResponse { zone: MapZone }
 interface MapZoneUpdateResponse { zone: MapZone; zones: MapZone[] }
 interface ZoneImportResponse { zones: Zone[] }
 interface MapZoneImportResponse { zones: MapZone[] }
+interface HealMapZoneGapsResponse { zones: MapZone[]; healedGapCount: number }
 
 interface PlayerLocationResponse {
   player: Player;
@@ -382,6 +383,13 @@ export async function mergeMapZones(zoneIds: [string, string], name?: string): P
     body: { zoneIds, name: name?.trim() || undefined },
   });
   return response.zone;
+}
+
+export async function healMapZoneGaps(mapId: string, toleranceMeters?: number): Promise<HealMapZoneGapsResponse> {
+  return apiRequest<HealMapZoneGapsResponse>('/maps/' + mapId + '/zones/heal-gaps', {
+    method: 'POST',
+    body: toleranceMeters ? { toleranceMeters } : {},
+  });
 }
 
 export async function getCurrentPlayer(signal?: AbortSignal): Promise<Player> {

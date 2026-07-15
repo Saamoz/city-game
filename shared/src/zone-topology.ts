@@ -118,6 +118,15 @@ function findBestRingEdit(previousRing: Position[], nextRing: Position[]): RingE
     throw new Error('Add or remove one boundary vertex at a time.');
   }
 
+  // Moving one or more vertices in place never changes ring length or vertex
+  // order, so the correspondence is just "same index" — no need to search
+  // for an alignment. Skipping the search here also avoids picking a wrong
+  // (but lower-cost) rotation for symmetric shapes like rectangular blocks,
+  // which would silently corrupt every adjacent zone's boundary.
+  if (previousRing.length === nextRing.length) {
+    return compareRings(previousRing, nextRing);
+  }
+
   let best: RingEdit | null = null;
   const orientations = [nextRing, [...nextRing].reverse()];
 
@@ -347,4 +356,222 @@ function removeConsecutiveDuplicates(ring: Position[]): Position[] {
 
 function copyPosition(position: Position): Position {
   return [position[0], position[1]];
+}
+
+// ── Adjacency gap detection & healing ───────────────────────────────────────
+//
+// Two zones can look adjacent on the map while their boundaries are actually
+// a hair's-width apart — e.g. from manual drawing, or from snapping that
+// landed close but not exact. `propagateSharedBoundaryEdit` only keeps
+// *already-exact* shared vertices in sync; it can't heal a gap that was
+// there from the start. These functions find that class of near-miss vertex
+// clusters and, on request, merge each cluster onto a single shared point.
+
+const METERS_PER_DEGREE_LAT = 111_320;
+
+export interface AdjacencyGapVertex {
+  zoneId: string;
+  ringPath: string;
+  vertexIndex: number;
+  position: Position;
+}
+
+export interface AdjacencyGap {
+  id: string;
+  zoneIds: string[];
+  vertices: AdjacencyGapVertex[];
+  gapMeters: number;
+  suggestedFix: Position;
+}
+
+export interface AdjacencyGapReport {
+  gaps: AdjacencyGap[];
+  toleranceMeters: number;
+}
+
+export interface HealAdjacencyGapsResult {
+  geometries: Record<string, GeoJsonGeometry>;
+  healedGapCount: number;
+}
+
+export function findAdjacencyGaps(zones: BoundaryEditZone[], toleranceMeters: number): AdjacencyGapReport {
+  const refs = zones.flatMap(collectZoneVertexRefs);
+  const clusters = clusterNearbyVertices(refs, toleranceMeters);
+
+  const gaps: AdjacencyGap[] = [];
+  let gapCounter = 0;
+
+  for (const members of clusters) {
+    const zoneIds = Array.from(new Set(members.map((member) => member.zoneId)));
+    if (zoneIds.length < 2) continue;
+
+    const distinctPositions: Position[] = [];
+    for (const member of members) {
+      if (!distinctPositions.some((position) => positionsEqual(position, member.position))) {
+        distinctPositions.push(member.position);
+      }
+    }
+    if (distinctPositions.length <= 1) continue;
+
+    gapCounter += 1;
+    gaps.push({
+      id: `gap-${gapCounter}`,
+      zoneIds,
+      vertices: members,
+      gapMeters: maxPairwiseDistanceMeters(members.map((member) => member.position)),
+      suggestedFix: pickCanonicalPosition(members),
+    });
+  }
+
+  return { gaps, toleranceMeters };
+}
+
+export function healAdjacencyGaps(zones: BoundaryEditZone[], toleranceMeters: number): HealAdjacencyGapsResult {
+  const { gaps } = findAdjacencyGaps(zones, toleranceMeters);
+  if (gaps.length === 0) {
+    return { geometries: {}, healedGapCount: 0 };
+  }
+
+  const editsByZone = new Map<string, Map<string, Map<number, Position>>>();
+  for (const gap of gaps) {
+    for (const vertex of gap.vertices) {
+      if (positionsEqual(vertex.position, gap.suggestedFix)) continue;
+      const byRing = editsByZone.get(vertex.zoneId) ?? new Map<string, Map<number, Position>>();
+      editsByZone.set(vertex.zoneId, byRing);
+      const byVertex = byRing.get(vertex.ringPath) ?? new Map<number, Position>();
+      byRing.set(vertex.ringPath, byVertex);
+      byVertex.set(vertex.vertexIndex, gap.suggestedFix);
+    }
+  }
+
+  const geometries: Record<string, GeoJsonGeometry> = {};
+  for (const zone of zones) {
+    const byRing = editsByZone.get(zone.id);
+    if (!byRing) continue;
+    geometries[zone.id] = applyVertexEdits(zone.geometry, byRing);
+  }
+
+  return { geometries, healedGapCount: gaps.length };
+}
+
+function collectZoneVertexRefs(zone: BoundaryEditZone): AdjacencyGapVertex[] {
+  const refs: AdjacencyGapVertex[] = [];
+  const visitRing = (ring: Position[], ringPath: string) => {
+    stripClosingPosition(ring).forEach((position, vertexIndex) => {
+      refs.push({ zoneId: zone.id, ringPath, vertexIndex, position });
+    });
+  };
+
+  if (zone.geometry.type === 'Polygon') {
+    (zone.geometry.coordinates as Position[][]).forEach((ring, ringIndex) => visitRing(ring, `${ringIndex}`));
+  } else if (zone.geometry.type === 'MultiPolygon') {
+    (zone.geometry.coordinates as Position[][][]).forEach((polygon, polygonIndex) => {
+      polygon.forEach((ring, ringIndex) => visitRing(ring, `${polygonIndex}.${ringIndex}`));
+    });
+  }
+
+  return refs;
+}
+
+function clusterNearbyVertices(refs: AdjacencyGapVertex[], toleranceMeters: number): AdjacencyGapVertex[][] {
+  const parent = refs.map((_ref, index) => index);
+  const find = (index: number): number => {
+    while (parent[index] !== index) {
+      parent[index] = parent[parent[index]];
+      index = parent[index];
+    }
+    return index;
+  };
+  const union = (a: number, b: number) => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) parent[rootA] = rootB;
+  };
+
+  for (let i = 0; i < refs.length; i += 1) {
+    for (let j = i + 1; j < refs.length; j += 1) {
+      if (refs[i].zoneId === refs[j].zoneId) continue;
+      if (metersBetween(refs[i].position, refs[j].position) <= toleranceMeters) {
+        union(i, j);
+      }
+    }
+  }
+
+  const clusters = new Map<number, AdjacencyGapVertex[]>();
+  refs.forEach((ref, index) => {
+    const root = find(index);
+    const list = clusters.get(root) ?? [];
+    list.push(ref);
+    clusters.set(root, list);
+  });
+
+  return Array.from(clusters.values());
+}
+
+function pickCanonicalPosition(members: AdjacencyGapVertex[]): Position {
+  const counts = new Map<string, { count: number; position: Position }>();
+  for (const member of members) {
+    const key = `${member.position[0].toFixed(9)},${member.position[1].toFixed(9)}`;
+    const existing = counts.get(key);
+    if (existing) existing.count += 1;
+    else counts.set(key, { count: 1, position: member.position });
+  }
+
+  let majority: { count: number; position: Position } | null = null;
+  for (const entry of counts.values()) {
+    if (!majority || entry.count > majority.count) majority = entry;
+  }
+  if (majority && majority.count > 1) return majority.position;
+
+  const sum = members.reduce<Position>((acc, member) => [acc[0] + member.position[0], acc[1] + member.position[1]], [0, 0]);
+  return [sum[0] / members.length, sum[1] / members.length];
+}
+
+function applyVertexEdits(geometry: GeoJsonGeometry, byRing: Map<string, Map<number, Position>>): GeoJsonGeometry {
+  if (geometry.type === 'Polygon') {
+    return {
+      ...geometry,
+      coordinates: (geometry.coordinates as Position[][]).map(
+        (ring, ringIndex) => applyRingVertexEdits(ring, byRing.get(`${ringIndex}`)),
+      ),
+    };
+  }
+  if (geometry.type === 'MultiPolygon') {
+    return {
+      ...geometry,
+      coordinates: (geometry.coordinates as Position[][][]).map(
+        (polygon, polygonIndex) => polygon.map(
+          (ring, ringIndex) => applyRingVertexEdits(ring, byRing.get(`${polygonIndex}.${ringIndex}`)),
+        ),
+      ),
+    };
+  }
+  return geometry;
+}
+
+function applyRingVertexEdits(closedRing: Position[], edits: Map<number, Position> | undefined): Position[] {
+  if (!edits) return closedRing.map(copyPosition);
+  const ring = stripClosingPosition(closedRing).map((position, index) => {
+    const replacement = edits.get(index);
+    return replacement ? copyPosition(replacement) : position;
+  });
+  return [...ring, ring[0]];
+}
+
+function maxPairwiseDistanceMeters(positions: Position[]): number {
+  let max = 0;
+  for (let i = 0; i < positions.length; i += 1) {
+    for (let j = i + 1; j < positions.length; j += 1) {
+      max = Math.max(max, metersBetween(positions[i], positions[j]));
+    }
+  }
+  return max;
+}
+
+function metersBetween(a: Position, b: Position): number {
+  const latRad = ((a[1] + b[1]) / 2) * (Math.PI / 180);
+  const metersPerDegreeLng = METERS_PER_DEGREE_LAT * Math.cos(latRad);
+  const dx = (b[0] - a[0]) * metersPerDegreeLng;
+  const dy = (b[1] - a[1]) * METERS_PER_DEGREE_LAT;
+  return Math.hypot(dx, dy);
 }
