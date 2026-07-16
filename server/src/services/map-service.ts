@@ -187,13 +187,36 @@ export async function createMapZone(db: DatabaseClient, input: MapZoneInput): Pr
   return getMapZoneByIdOrThrow(db, inserted.id);
 }
 
+export async function isMapZonePartitionClean(db: DatabaseClient, mapId: string): Promise<boolean> {
+  const result = await db.execute<{ connected: boolean; noOverlaps: boolean }>(sql`
+    SELECT
+      map_zone_graph_connected(${mapId}::uuid) AS "connected",
+      map_zone_partition_has_no_overlaps(${mapId}::uuid) AS "noOverlaps"
+  `);
+  return Boolean(result.rows[0]?.connected) && Boolean(result.rows[0]?.noOverlaps);
+}
+
 export async function updateMapZone(
   db: DatabaseClient,
   mapZoneId: string,
   input: MapZoneUpdateInput,
 ): Promise<MapZoneUpdateResult> {
-  return db.transaction(async (tx) => {
-    const transactionalDb = tx as unknown as DatabaseClient;
+  const existingZone = await getMapZoneByIdOrThrow(db, mapZoneId);
+
+  // Normally the map-wide connected/non-overlapping constraint stays fully
+  // enforced -- that's what protects a clean map from an edit accidentally
+  // breaking it. But if the map is ALREADY dirty (pre-existing gaps/overlaps,
+  // e.g. mid-cleanup with the repair tools), that same constraint blocks
+  // every edit unconditionally, including ones that are perfectly fine or
+  // that are the very fix the admin is trying to make by hand. So: only
+  // suspend the constraint for this edit when the map didn't already satisfy
+  // it before we touched anything.
+  const needsPartitionRepair = Boolean(input.geometry) && !(await isMapZonePartitionClean(db, existingZone.mapId));
+  const runTransaction = needsPartitionRepair
+    ? (fn: (tx: DatabaseClient) => Promise<MapZoneUpdateResult>) => runMapZonePartitionRepair(db, fn)
+    : (fn: (tx: DatabaseClient) => Promise<MapZoneUpdateResult>) => db.transaction((tx) => fn(tx as unknown as DatabaseClient));
+
+  return runTransaction(async (transactionalDb) => {
     const existing = await getMapZoneByIdOrThrow(transactionalDb, mapZoneId);
     const updatedAt = new Date();
     let affectedZoneIds = [mapZoneId];
@@ -237,6 +260,12 @@ export async function updateMapZone(
     const zone = affectedZones.find((entry) => entry.id === mapZoneId);
     if (!zone) {
       throw new AppError(errorCodes.validationError, { message: 'Updated map zone not found.' });
+    }
+
+    if (affectedZoneIds.length > 3) {
+      console.warn('[update-map-zone] propagation touched an unusually large number of zones:', {
+        mapZoneId, mapId: existing.mapId, affectedZoneCount: affectedZoneIds.length,
+      });
     }
 
     return {

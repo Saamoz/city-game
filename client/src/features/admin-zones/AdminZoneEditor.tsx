@@ -508,6 +508,12 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
         const neighborDrafts = { ...propagation.geometries };
         delete neighborDrafts[editingZone.id];
         setSynchronizedGeometryDrafts(neighborDrafts);
+        if (Object.keys(neighborDrafts).length > 3) {
+          console.warn('[edit-vertices] propagation affected an unusually large number of zones:', {
+            editingZoneId: editingZone.id,
+            affectedZoneIds: Object.keys(neighborDrafts),
+          });
+        }
       } catch (error) {
         setSynchronizedGeometryDrafts({});
         setNotice({
