@@ -471,17 +471,51 @@ export async function resolveMapZoneOverlap(
       throw new AppError(errorCodes.validationError, { message: 'Cannot resolve an overlap between a zone and itself.' });
     }
 
+    console.log('[resolve-overlap] request:', {
+      mapId, trimZoneId: trimZone.id, trimZoneName: trimZone.name, keepZoneId: keepZone.id, keepZoneName: keepZone.name,
+    });
+
     const trimGeometrySql = buildGeometrySql(trimZone.geometry);
     const keepGeometrySql = buildGeometrySql(keepZone.geometry);
 
-    const differenceResult = await transactionalDb.execute<{ geometry: GeoJsonGeometry | null; isEmpty: boolean | null }>(sql`
+    // ST_Difference on two polygons can return a GeometryCollection with
+    // degenerate line/point artifacts mixed in alongside the real polygonal
+    // result (the same reason ST_Split's result gets run through
+    // ST_CollectionExtract elsewhere in this file). Extracting just the
+    // polygon parts (type 3) keeps the written geometry a clean
+    // Polygon/MultiPolygon instead of something ST_IsValid or the client's
+    // renderer doesn't expect.
+    const differenceResult = await transactionalDb.execute<{
+      geometry: GeoJsonGeometry | null;
+      isEmpty: boolean | null;
+      geometryType: string | null;
+      areaBefore: number | null;
+      areaAfter: number | null;
+    }>(sql`
+      WITH difference AS (
+        SELECT ST_CollectionExtract(ST_Difference(${trimGeometrySql}, ${keepGeometrySql}), 3) AS geometry
+      )
       SELECT
-        ST_AsGeoJSON(ST_Difference(${trimGeometrySql}, ${keepGeometrySql}))::json AS "geometry",
-        ST_IsEmpty(ST_Difference(${trimGeometrySql}, ${keepGeometrySql})) AS "isEmpty"
+        ST_AsGeoJSON(geometry)::json AS "geometry",
+        ST_IsEmpty(geometry) AS "isEmpty",
+        GeometryType(geometry) AS "geometryType",
+        ST_Area(${trimGeometrySql}::geography) AS "areaBefore",
+        ST_Area(geometry::geography) AS "areaAfter"
+      FROM difference
     `);
 
-    const geometry = differenceResult.rows[0]?.geometry ?? null;
-    if (!geometry || differenceResult.rows[0]?.isEmpty) {
+    const row = differenceResult.rows[0];
+    console.log('[resolve-overlap] ST_Difference result:', {
+      hasGeometry: Boolean(row?.geometry),
+      isEmpty: row?.isEmpty,
+      geometryType: row?.geometryType,
+      areaBeforeSqM: row?.areaBefore,
+      areaAfterSqM: row?.areaAfter,
+    });
+
+    const geometry = row?.geometry ?? null;
+    if (!geometry || row?.isEmpty) {
+      console.warn('[resolve-overlap] rejected: empty or missing difference result', { mapId, trimZoneId: trimZone.id, keepZoneId: keepZone.id });
       throw new AppError(errorCodes.validationError, {
         message: `Trimming "${trimZone.name}" against "${keepZone.name}" would remove the entire zone -- it may sit fully inside the other. Try trimming "${keepZone.name}" instead, or fix this by hand with Edit Vertices.`,
       });
@@ -497,6 +531,8 @@ export async function resolveMapZoneOverlap(
         updatedAt: new Date(),
       })
       .where(eq(mapZones.id, trimZone.id));
+
+    console.log('[resolve-overlap] applied trim', { mapId, trimZoneId: trimZone.id, keepZoneId: keepZone.id });
 
     return {
       zones: await listMapZones(transactionalDb, mapId),

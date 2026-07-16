@@ -59,11 +59,19 @@ export function buildErrorResponse<TCode extends ErrorCode, TDetails = unknown>(
 export function registerAppErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof AppError) {
+      request.log.warn(
+        { method: request.method, url: request.url, code: error.code, message: error.message, details: error.details },
+        'request rejected (app error)',
+      );
       reply.status(error.statusCode).send(error.toResponse());
       return;
     }
 
     if (isFastifyValidationError(error)) {
+      request.log.warn(
+        { method: request.method, url: request.url, body: request.body, issues: error.validation },
+        'request rejected (schema validation)',
+      );
       reply.status(getErrorDefinition(errorCodes.validationError).statusCode).send(
         buildErrorResponse(errorCodes.validationError, {
           message: error.message,
@@ -78,6 +86,10 @@ export function registerAppErrorHandler(app: FastifyInstance): void {
 
     const zoneConnectivityConstraint = getZoneConnectivityConstraint(error);
     if (zoneConnectivityConstraint) {
+      request.log.warn(
+        { method: request.method, url: request.url, constraint: zoneConnectivityConstraint, err: (error as Error).message },
+        'request rejected (zone connectivity constraint)',
+      );
       reply.status(getErrorDefinition(errorCodes.validationError).statusCode).send(
         buildErrorResponse(errorCodes.validationError, {
           message: 'Zones must form one connected partition with shared boundary edges and no overlaps.',
@@ -89,7 +101,7 @@ export function registerAppErrorHandler(app: FastifyInstance): void {
       return;
     }
 
-    request.log.error({ err: error }, 'request failed');
+    request.log.error({ err: error, method: request.method, url: request.url }, 'request failed');
 
     reply.status(getErrorDefinition(errorCodes.internalServerError).statusCode).send(
       buildErrorResponse(errorCodes.internalServerError),
