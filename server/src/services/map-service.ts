@@ -259,45 +259,70 @@ export interface HealMapZoneGapsResult {
   skippedGaps: HealMapZoneGapsSkip[];
 }
 
+/**
+ * Runs a zone repair operation with the map-wide partition constraint trigger
+ * suspended for the duration of the transaction.
+ *
+ * `map_zones_connected` is a DEFERRED constraint trigger: at COMMIT it requires
+ * the ENTIRE map to be one connected, non-overlapping partition. That's the
+ * right guard for normal edits, but it deadlocks *repair* of a map that is
+ * already invalid. If a map has pre-existing overlaps and/or gaps (e.g. data
+ * imported before the constraint existed), the whole-map check fails globally,
+ * so every individual repair write -- trim one overlap, heal one gap -- is
+ * rejected at commit even though it strictly improves the map. And you can't
+ * reach a clean state incrementally, because each incremental step is itself
+ * blocked by the problems it hasn't fixed yet. (Savepoints / SET CONSTRAINTS
+ * IMMEDIATE can't escape this: they still evaluate the whole map, which is
+ * still globally dirty.)
+ *
+ * Disabling the trigger inside the repair transaction lets these operations
+ * make incremental progress. It is safe here because every repair only ever
+ * moves the map toward a valid partition (subtracting overlap area, snapping
+ * gap vertices onto a shared point), and each written geometry is still
+ * individually validated with ST_IsValid so we never persist self-intersecting
+ * garbage. The map may remain globally imperfect between repair steps -- which
+ * is exactly the state the admin is working to clean up. The trigger is
+ * re-enabled before commit (and, on error, the rollback undoes the disable).
+ *
+ * NOTE: this only touches `map_zones` / its `map_zones_connected` trigger; the
+ * runtime `zones` table and its own constraint are untouched.
+ */
+async function runMapZonePartitionRepair<T>(
+  db: DatabaseClient,
+  run: (tx: DatabaseClient) => Promise<T>,
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    const transactionalDb = tx as unknown as DatabaseClient;
+    await transactionalDb.execute(sql`ALTER TABLE map_zones DISABLE TRIGGER map_zones_connected`);
+    const result = await run(transactionalDb);
+    // Only re-enable on the success path. If `run` threw, we never reach here
+    // and the transaction rolls back -- which also undoes the DISABLE -- so we
+    // avoid issuing DDL against a possibly-aborted transaction.
+    await transactionalDb.execute(sql`ALTER TABLE map_zones ENABLE TRIGGER map_zones_connected`);
+    return result;
+  });
+}
+
 export async function healMapZoneGaps(
   db: DatabaseClient,
   mapId: string,
   toleranceMeters: number,
 ): Promise<HealMapZoneGapsResult> {
-  return db.transaction(async (tx) => {
-    const transactionalDb = tx as unknown as DatabaseClient;
+  return runMapZonePartitionRepair(db, async (transactionalDb) => {
     await getMapByIdOrThrow(transactionalDb, mapId);
     const mapZoneRows = await listMapZones(transactionalDb, mapId);
     const zoneNameById = new Map(mapZoneRows.map((zone) => [zone.id, zone.name]));
     const fixes = planAdjacencyGapFixes(mapZoneRows, toleranceMeters);
 
-    // The map-wide "connected, non-overlapping partition" check is a
-    // DEFERRED constraint trigger (checked FOR EACH ROW), so it needs care
-    // here: left fully deferred it only fires once at this transaction's
-    // final commit, meaning one bad gap fix would roll back every other,
-    // otherwise-legitimate fix too. But forcing it IMMEDIATE for the whole
-    // transaction is also wrong -- a gap that moves several zones to a new
-    // shared point writes them one row at a time, and the map can look
-    // transiently disconnected between those individual row writes even
-    // though the final combined result is fine. So each gap below: resets
-    // to DEFERRED, makes all of its writes, then flips to IMMEDIATE once to
-    // force the check against the combined result -- catching only fixes
-    // that are genuinely bad, not ones that are momentarily incomplete.
-    //
-    // Note this check is map-WIDE: if the map already has some unrelated
-    // pre-existing overlap or disconnection elsewhere (e.g. from data that
-    // predates this constraint, or was imported before it was enforced),
-    // EVERY gap fix will fail this check, since it evaluates the whole
-    // map's zones each time, not just the ones this fix touches. That's a
-    // real, separate data problem this function can't fix by itself --
-    // logging the reason below is what makes that visible instead of
-    // silently skipping everything.
+    // With the map-wide constraint suspended by the repair wrapper, the only
+    // reason to skip a gap fix is a genuinely invalid resulting SHAPE (e.g. a
+    // self-intersecting ring) -- which we still catch per zone with ST_IsValid.
     const currentGeometries = new Map(mapZoneRows.map((zone) => [zone.id, zone.geometry]));
     let healedGapCount = 0;
     let skippedGapCount = 0;
     const skippedGaps: HealMapZoneGapsSkip[] = [];
 
-    for (const [index, fix] of fixes.entries()) {
+    for (const fix of fixes) {
       const touchedZoneIds = Array.from(new Set(fix.edits.map((edit) => edit.zoneId)));
       if (touchedZoneIds.length === 0) continue;
       const zoneLabel = fix.gap.zoneIds.map((zoneId) => zoneNameById.get(zoneId) ?? zoneId).join(' <-> ');
@@ -329,36 +354,19 @@ export async function healMapZoneGaps(
         continue;
       }
 
-      const savepoint = `heal_gap_${index}`;
-      await transactionalDb.execute(sql`SET CONSTRAINTS map_zones_connected, zones_connected DEFERRED`);
-      await transactionalDb.execute(sql.raw(`SAVEPOINT ${savepoint}`));
-      try {
-        const updatedAt = new Date();
-        for (const [zoneId, geometry] of candidateGeometries) {
-          await transactionalDb
-            .update(mapZones)
-            .set({
-              geometry: buildGeometrySql(geometry),
-              centroid: buildCentroidSql(geometry),
-              updatedAt,
-            })
-            .where(eq(mapZones.id, zoneId));
-        }
-        // Force the deferred connectivity/overlap check to run now, against
-        // the combined result of every write this gap made.
-        await transactionalDb.execute(sql`SET CONSTRAINTS map_zones_connected, zones_connected IMMEDIATE`);
-        await transactionalDb.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
-        for (const [zoneId, geometry] of candidateGeometries) {
-          currentGeometries.set(zoneId, geometry);
-        }
-        healedGapCount += 1;
-      } catch (error) {
-        await transactionalDb.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${savepoint}`));
-        const reason = error instanceof Error ? error.message : 'unknown map-wide constraint failure';
-        skippedGapCount += 1;
-        skippedGaps.push({ zoneIds: fix.gap.zoneIds, gapMeters: fix.gap.gapMeters, reason });
-        console.warn('[heal-gaps] skipped fix (map-wide constraint):', { mapId, zones: zoneLabel, gapMeters: fix.gap.gapMeters, reason });
+      const updatedAt = new Date();
+      for (const [zoneId, geometry] of candidateGeometries) {
+        await transactionalDb
+          .update(mapZones)
+          .set({
+            geometry: buildGeometrySql(geometry),
+            centroid: buildCentroidSql(geometry),
+            updatedAt,
+          })
+          .where(eq(mapZones.id, zoneId));
+        currentGeometries.set(zoneId, geometry);
       }
+      healedGapCount += 1;
     }
 
     if (skippedGaps.length > 0) {
@@ -458,8 +466,7 @@ export async function resolveMapZoneOverlap(
   mapId: string,
   input: ResolveMapZoneOverlapInput,
 ): Promise<ResolveMapZoneOverlapResult> {
-  return db.transaction(async (tx) => {
-    const transactionalDb = tx as unknown as DatabaseClient;
+  return runMapZonePartitionRepair(db, async (transactionalDb) => {
     await getMapByIdOrThrow(transactionalDb, mapId);
     const trimZone = await getMapZoneByIdOrThrow(transactionalDb, input.trimZoneId);
     const keepZone = await getMapZoneByIdOrThrow(transactionalDb, input.keepZoneId);
