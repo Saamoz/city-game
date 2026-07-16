@@ -715,6 +715,38 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     });
   };
 
+  const handleDeleteSelectedVertex = () => {
+    const draw = drawRef.current;
+    if (!editingGeometryZoneId || !draw) return;
+
+    const selectedPoints = draw.getSelectedPoints().features;
+    if (selectedPoints.length !== 1) {
+      setNotice({
+        tone: 'info',
+        message: selectedPoints.length === 0
+          ? 'Select one vertex dot before deleting it.'
+          : 'Delete one vertex at a time so adjacent boundaries stay synchronized.',
+      });
+      return;
+    }
+
+    const coordPath = selectedPoints[0]?.properties?.coord_path;
+    const ringIndex = typeof coordPath === 'string'
+      ? Number.parseInt(coordPath.split('.')[0] ?? '', 10)
+      : Number.NaN;
+    const editedFeature = draw.get(editingGeometryZoneId);
+    const ring = editedFeature?.geometry.type === 'Polygon' && Number.isInteger(ringIndex)
+      ? editedFeature.geometry.coordinates[ringIndex]
+      : null;
+    if (!ring || ring.length <= 4) {
+      setNotice({ tone: 'error', message: 'A polygon ring must keep at least three vertices.' });
+      return;
+    }
+
+    draw.trash();
+    setNotice({ tone: 'info', message: 'Vertex removed. Review the synchronized boundary, then save the zone.' });
+  };
+
   const handleDeleteMap = async () => {
     if (!currentMap) return;
     if (hasGeometrySession) {
@@ -1250,13 +1282,17 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                   <ActionButton onClick={handleCancelGeometry} label="Cancel" tone="secondary" />
                 ) : null}
                 {editingGeometryZoneId ? (
-                  <ul className="space-y-1 rounded-2xl border border-[#d7ddda] bg-white px-3 py-2.5 text-xs text-[#4a5559]">
-                    <li>· Drag an <strong>edge</strong> to move that whole boundary line.</li>
-                    <li>· Drag a <strong>dot</strong> to move one vertex.</li>
-                    <li>· Shift-click dots, or shift-drag a box from outside the zone, to select several — then drag any of them together.</li>
-                    <li>· Drag the interior to move the whole zone.</li>
-                    <li>· Amber zones share the edge you&apos;re moving and update with it.</li>
-                  </ul>
+                  <div className="space-y-2">
+                    <ul className="space-y-1 rounded-2xl border border-[#d7ddda] bg-white px-3 py-2.5 text-xs text-[#4a5559]">
+                      <li>· Drag an <strong>edge</strong> to move that whole boundary line.</li>
+                      <li>· Drag a <strong>dot</strong> to move one vertex.</li>
+                      <li>· Click one dot, then use <strong>Delete Selected Vertex</strong> to remove it.</li>
+                      <li>· Shift-click dots, or shift-drag a box from outside the zone, to select several — then drag any of them together.</li>
+                      <li>· Drag the interior to move the whole zone.</li>
+                      <li>· Amber zones share the edge you&apos;re moving and update with it.</li>
+                    </ul>
+                    <ActionButton onClick={handleDeleteSelectedVertex} label="Delete Selected Vertex" tone="danger" />
+                  </div>
                 ) : null}
               </Panel>
 

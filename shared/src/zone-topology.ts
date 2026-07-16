@@ -214,7 +214,8 @@ function applyBoundaryEdits(geometry: GeoJsonGeometry, edits: BoundaryEdits): Ge
 }
 
 function applyRingEdits(closedRing: Position[], edits: BoundaryEdits): Position[] {
-  let ring = stripClosingPosition(closedRing);
+  const originalRing = stripClosingPosition(closedRing);
+  let ring = originalRing;
 
   for (const replacement of edits.replacements) {
     ring = insertVertexOnContainingSegment(ring, replacement.from);
@@ -230,9 +231,24 @@ function applyRingEdits(closedRing: Position[], edits: BoundaryEdits): Position[
     const replacement = edits.replacements.find((entry) => positionsEqual(entry.from, position));
     return replacement ? replacement.to : position;
   });
+
+  // Do not normalize a ring merely because it was inspected for a possible
+  // shared-boundary edit. Imported boundary data can legitimately contain
+  // redundant consecutive coordinates. Removing those coordinates from an
+  // unrelated ring makes it look affected, which in turn causes every such
+  // zone to be previewed and persisted even though it shares no edited edge.
+  if (ringsEqual(originalRing, ring)) {
+    return closedRing;
+  }
+
   ring = removeConsecutiveDuplicates(ring);
 
   return ring.length > 0 ? [...ring, ring[0]] : closedRing;
+}
+
+function ringsEqual(left: Position[], right: Position[]): boolean {
+  return left.length === right.length
+    && left.every((position, index) => positionsEqual(position, right[index]));
 }
 
 function insertVertexOnContainingSegment(ring: Position[], point: Position): Position[] {

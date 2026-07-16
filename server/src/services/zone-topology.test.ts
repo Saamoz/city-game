@@ -130,6 +130,40 @@ describe('shared zone boundary editing', () => {
 
     expect(result.geometries.right).toEqual(rectangle(1, 0, 2, 1));
   });
+
+  it('does not normalize or affect unrelated zones with redundant coordinates', () => {
+    const left = rectangle(0, 0, 1, 1);
+    const right = rectangle(1, 0, 2, 1);
+    const unrelated = polygon([
+      [10, 10],
+      [11, 10],
+      [11, 10],
+      [11, 11],
+      [10, 11],
+    ]);
+    const editedLeft = polygon([
+      [0, 0],
+      [1.2, 0],
+      [1.2, 1],
+      [0, 1],
+    ]);
+
+    const result = propagateSharedBoundaryEdit('left', left, editedLeft, [
+      { id: 'left', geometry: left },
+      { id: 'right', geometry: right },
+      { id: 'unrelated', geometry: unrelated },
+    ]);
+
+    expect(result.affectedZoneIds).toEqual(['left', 'right']);
+    expect(result.geometries.unrelated).toBeUndefined();
+    expect(unrelated).toEqual(polygon([
+      [10, 10],
+      [11, 10],
+      [11, 10],
+      [11, 11],
+      [10, 11],
+    ]));
+  });
 });
 
 function rectangle(minLng: number, minLat: number, maxLng: number, maxLat: number): GeoJsonGeometry {
