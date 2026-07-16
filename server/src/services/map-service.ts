@@ -437,6 +437,73 @@ export async function checkMapZonePartition(db: DatabaseClient, mapId: string): 
   };
 }
 
+export interface ResolveMapZoneOverlapInput {
+  trimZoneId: string;
+  keepZoneId: string;
+}
+
+export interface ResolveMapZoneOverlapResult {
+  zones: MapZone[];
+}
+
+/**
+ * Resolves a real zone-vs-zone overlap by subtracting the "keep" zone's
+ * shape from the "trim" zone's -- the trim zone gives up whatever ground it
+ * shared with the other. Unlike a gap fix, there's no single correct answer
+ * here (the disputed area has to go to one side or the other), so this is
+ * an explicit, user-chosen action rather than something automatic.
+ */
+export async function resolveMapZoneOverlap(
+  db: DatabaseClient,
+  mapId: string,
+  input: ResolveMapZoneOverlapInput,
+): Promise<ResolveMapZoneOverlapResult> {
+  return db.transaction(async (tx) => {
+    const transactionalDb = tx as unknown as DatabaseClient;
+    await getMapByIdOrThrow(transactionalDb, mapId);
+    const trimZone = await getMapZoneByIdOrThrow(transactionalDb, input.trimZoneId);
+    const keepZone = await getMapZoneByIdOrThrow(transactionalDb, input.keepZoneId);
+
+    if (trimZone.mapId !== mapId || keepZone.mapId !== mapId) {
+      throw new AppError(errorCodes.validationError, { message: 'Both zones must belong to this map.' });
+    }
+    if (trimZone.id === keepZone.id) {
+      throw new AppError(errorCodes.validationError, { message: 'Cannot resolve an overlap between a zone and itself.' });
+    }
+
+    const trimGeometrySql = buildGeometrySql(trimZone.geometry);
+    const keepGeometrySql = buildGeometrySql(keepZone.geometry);
+
+    const differenceResult = await transactionalDb.execute<{ geometry: GeoJsonGeometry | null; isEmpty: boolean | null }>(sql`
+      SELECT
+        ST_AsGeoJSON(ST_Difference(${trimGeometrySql}, ${keepGeometrySql}))::json AS "geometry",
+        ST_IsEmpty(ST_Difference(${trimGeometrySql}, ${keepGeometrySql})) AS "isEmpty"
+    `);
+
+    const geometry = differenceResult.rows[0]?.geometry ?? null;
+    if (!geometry || differenceResult.rows[0]?.isEmpty) {
+      throw new AppError(errorCodes.validationError, {
+        message: `Trimming "${trimZone.name}" against "${keepZone.name}" would remove the entire zone -- it may sit fully inside the other. Try trimming "${keepZone.name}" instead, or fix this by hand with Edit Vertices.`,
+      });
+    }
+
+    await validateGeometry(transactionalDb, geometry);
+
+    await transactionalDb
+      .update(mapZones)
+      .set({
+        geometry: buildGeometrySql(geometry),
+        centroid: buildCentroidSql(geometry),
+        updatedAt: new Date(),
+      })
+      .where(eq(mapZones.id, trimZone.id));
+
+    return {
+      zones: await listMapZones(transactionalDb, mapId),
+    };
+  });
+}
+
 export async function deleteMapZoneById(db: DatabaseClient, mapZoneId: string): Promise<boolean> {
   const [deleted] = await db.delete(mapZones).where(eq(mapZones.id, mapZoneId)).returning({ id: mapZones.id });
   return Boolean(deleted);

@@ -16,6 +16,7 @@ import {
   listMaps,
   listMapZones,
   mergeMapZonesById,
+  resolveMapZoneOverlap,
   splitMapZoneById,
   updateMap,
   updateMapZone,
@@ -232,6 +233,16 @@ const mapZoneParamsSchema = {
   },
 } as const;
 
+const resolveOverlapBodySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['trimZoneId', 'keepZoneId'],
+  properties: {
+    trimZoneId: { type: 'string', format: 'uuid' },
+    keepZoneId: { type: 'string', format: 'uuid' },
+  },
+} as const;
+
 const mergeMapZonesBodySchema = {
   type: 'object',
   additionalProperties: false,
@@ -437,6 +448,22 @@ export const mapRoutes: FastifyPluginAsync = async (app) => {
       const { id } = request.params as { id: string };
       const report = await checkMapZonePartition(app.db, id);
       reply.send(report);
+    },
+  );
+
+  app.post(
+    '/maps/:id/zones/resolve-overlap',
+    {
+      schema: {
+        params: mapParamsSchema,
+        body: resolveOverlapBodySchema,
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as { trimZoneId: string; keepZoneId: string };
+      const result = await resolveMapZoneOverlap(app.db, id, body);
+      reply.send(result);
     },
   );
 

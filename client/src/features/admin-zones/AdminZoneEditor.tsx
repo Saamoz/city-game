@@ -4,7 +4,7 @@ import mapboxgl from 'mapbox-gl';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import type { Feature, FeatureCollection, GeoJsonProperties, MultiPolygon, Polygon } from 'geojson';
-import { difference as turfDifference, featureCollection, feature as turfFeature } from '@turf/turf';
+import { difference as turfDifference, featureCollection, feature as turfFeature, intersect as turfIntersect } from '@turf/turf';
 import { findAdjacencyGaps, propagateSharedBoundaryEdit } from '@city-game/shared';
 import type {
   AdjacencyGap,
@@ -29,6 +29,7 @@ import {
   listMapZones,
   mergeMapZones,
   previewOsmMapZones,
+  resolveMapZoneOverlap,
   splitMapZone,
   updateMapDefinition,
   updateMapZoneDefinition,
@@ -84,11 +85,15 @@ const PREVIEW_LABEL_LAYER_ID = 'admin-maps-preview-label';
 const GAP_SOURCE_ID = 'admin-maps-gap-source';
 const GAP_HALO_LAYER_ID = 'admin-maps-gap-halo';
 const GAP_DOT_LAYER_ID = 'admin-maps-gap-dot';
+const OVERLAP_SOURCE_ID = 'admin-maps-overlap-source';
+const OVERLAP_FILL_LAYER_ID = 'admin-maps-overlap-fill';
+const OVERLAP_LINE_LAYER_ID = 'admin-maps-overlap-line';
 const NEUTRAL_FILL = '#c8cdc5';
 const NEUTRAL_LINE = '#667076';
 const MERGE_TARGET_FILL = '#7ab0c8';
 const MERGE_TARGET_LINE = '#2a6a8a';
 const GAP_COLOR = '#c0392b';
+const OVERLAP_COLOR = '#a83232';
 const SNAP_THRESHOLD_PX = 18;
 const DEFAULT_GAP_TOLERANCE_METERS = 2;
 
@@ -109,6 +114,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const didFitBoundsRef = useRef(false);
   const zonesRef = useRef<MapZone[]>([]);
   const gapsRef = useRef<AdjacencyGap[]>([]);
+  const overlapRegionsRef = useRef<GeoJsonGeometry[]>([]);
   const selectedZoneIdRef = useRef<string | null>(null);
   const previewCollectionRef = useRef<GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject> | null>(null);
   const modeRef = useRef<EditorMode>('select');
@@ -150,6 +156,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const [isCheckingPartition, setIsCheckingPartition] = useState(false);
   const [lastHealSkips, setLastHealSkips] = useState<HealMapZoneGapsSkip[]>([]);
   const [showSkipDetails, setShowSkipDetails] = useState(false);
+  const [resolvingOverlapKey, setResolvingOverlapKey] = useState<string | null>(null);
 
   const selectedZone = useMemo(() => zones.find((z) => z.id === selectedZoneId) ?? null, [selectedZoneId, zones]);
   const mergeTargetZone = useMemo(() => zones.find((z) => z.id === mergeTargetId) ?? null, [mergeTargetId, zones]);
@@ -165,10 +172,31 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     () => findAdjacencyGaps(zones, gapToleranceMeters),
     [zones, gapToleranceMeters],
   );
+  const overlapRegions = useMemo(() => {
+    if (!partitionReport || partitionReport.overlaps.length === 0) return [];
+    const zoneById = new Map(zones.map((zone) => [zone.id, zone]));
+    const regions: GeoJsonGeometry[] = [];
+    for (const overlap of partitionReport.overlaps) {
+      const zoneA = zoneById.get(overlap.zoneAId);
+      const zoneB = zoneById.get(overlap.zoneBId);
+      if (!zoneA || !zoneB) continue;
+      try {
+        const intersection = turfIntersect(featureCollection([
+          turfFeature(zoneA.geometry as Polygon | MultiPolygon),
+          turfFeature(zoneB.geometry as Polygon | MultiPolygon),
+        ]));
+        if (intersection) regions.push(intersection.geometry as GeoJsonGeometry);
+      } catch {
+        // Skip pairs turf can't intersect cleanly -- the sidebar list still shows them.
+      }
+    }
+    return regions;
+  }, [zones, partitionReport]);
 
   // Sync refs
   useEffect(() => { zonesRef.current = zones; }, [zones]);
   useEffect(() => { gapsRef.current = gapReport.gaps; }, [gapReport]);
+  useEffect(() => { overlapRegionsRef.current = overlapRegions; }, [overlapRegions]);
   useEffect(() => { selectedZoneIdRef.current = selectedZoneId; }, [selectedZoneId]);
   useEffect(() => { previewCollectionRef.current = previewCollection; }, [previewCollection]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
@@ -214,8 +242,9 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       previewCollection,
       new Set(Object.keys(synchronizedGeometryDrafts)),
       gapReport.gaps,
+      overlapRegions,
     );
-  }, [gapReport, mergeTargetId, previewCollection, renderedZones, selectedZoneId, synchronizedGeometryDrafts]);
+  }, [gapReport, mergeTargetId, overlapRegions, previewCollection, renderedZones, selectedZoneId, synchronizedGeometryDrafts]);
 
   const fitMapToCurrentData = useCallback((focusZone?: MapZone | null) => {
     const map = mapRef.current;
@@ -535,6 +564,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
         previewCollectionRef.current,
         new Set(),
         gapsRef.current,
+        overlapRegionsRef.current,
       );
     };
 
@@ -952,6 +982,25 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     }
   };
 
+  const handleResolveOverlap = async (trimZoneId: string, keepZoneId: string) => {
+    if (!currentMap) return;
+    const overlapKey = `${trimZoneId}-${keepZoneId}`;
+    const trimZoneName = zones.find((z) => z.id === trimZoneId)?.name ?? 'zone';
+    const keepZoneName = zones.find((z) => z.id === keepZoneId)?.name ?? 'the other zone';
+    setResolvingOverlapKey(overlapKey);
+    setNotice(null);
+    try {
+      const nextZones = await resolveMapZoneOverlap(currentMap.id, trimZoneId, keepZoneId);
+      setZones(nextZones);
+      void refreshPartitionStatus(currentMap.id);
+      setNotice({ tone: 'success', message: `Trimmed "${trimZoneName}" back from "${keepZoneName}".` });
+    } catch (error) {
+      setNotice({ tone: 'error', message: getApiErrorMessage(error) });
+    } finally {
+      setResolvingOverlapKey(null);
+    }
+  };
+
   const selectedAnchor = selectedZone ? getZoneAnchor(selectedZone as unknown as RuntimeZone) : null;
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1140,14 +1189,37 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                         {partitionReport.overlaps.length} zone pair{partitionReport.overlaps.length === 1 ? '' : 's'} actually overlap
                       </p>
                       <p className="text-xs text-[#8f5f1c]">
-                        This is different from a boundary gap — these zones physically overlap each other, which is very likely why gap fixes involving them get skipped. Fixing this requires manually reshaping one of each pair (Edit Vertices), not a gap heal.
+                        Different from a boundary gap — these zones physically cover the same ground (shaded on the map), which is very likely why gap fixes involving them get skipped. Pick which zone gives up the shared area.
                       </p>
-                      <ul className="max-h-32 space-y-1 overflow-y-auto rounded-xl border border-[#c98d3a] bg-white px-2.5 py-2 text-xs text-[#5c3f14]">
-                        {partitionReport.overlaps.map((overlap) => (
-                          <li key={`${overlap.zoneAId}-${overlap.zoneBId}`}>
-                            {overlap.zoneAName} ↔ {overlap.zoneBName} — {formatOverlapArea(overlap.overlapAreaSqMeters)}
-                          </li>
-                        ))}
+                      <ul className="max-h-56 space-y-2 overflow-y-auto rounded-xl border border-[#c98d3a] bg-white px-2.5 py-2 text-xs text-[#5c3f14]">
+                        {partitionReport.overlaps.map((overlap) => {
+                          const trimAKey = `${overlap.zoneAId}-${overlap.zoneBId}`;
+                          const trimBKey = `${overlap.zoneBId}-${overlap.zoneAId}`;
+                          const isResolving = resolvingOverlapKey === trimAKey || resolvingOverlapKey === trimBKey;
+                          return (
+                            <li key={trimAKey} className="space-y-1.5 border-b border-[#f0ddb8] pb-1.5 last:border-b-0 last:pb-0">
+                              <p>{overlap.zoneAName} ↔ {overlap.zoneBName} — {formatOverlapArea(overlap.overlapAreaSqMeters)}</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleResolveOverlap(overlap.zoneAId, overlap.zoneBId)}
+                                  disabled={isResolving}
+                                  className="rounded-full border border-[#c98d3a] bg-[#fdf3e2] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#7a4a10] transition hover:bg-[#f7e6c4] disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {resolvingOverlapKey === trimAKey ? 'Trimming…' : `Trim ${overlap.zoneAName}`}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleResolveOverlap(overlap.zoneBId, overlap.zoneAId)}
+                                  disabled={isResolving}
+                                  className="rounded-full border border-[#c98d3a] bg-[#fdf3e2] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#7a4a10] transition hover:bg-[#f7e6c4] disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {resolvingOverlapKey === trimBKey ? 'Trimming…' : `Trim ${overlap.zoneBName}`}
+                                </button>
+                              </div>
+                            </li>
+                          );
+                        })}
                       </ul>
                     </div>
                   ) : null}
@@ -1582,6 +1654,7 @@ function syncEditorSources(
   previewCollection: GeoJsonFeatureCollection<GeoJsonGeometry, JsonObject> | null,
   synchronizedZoneIds: Set<string> = new Set(),
   gaps: AdjacencyGap[] = [],
+  overlapRegions: GeoJsonGeometry[] = [],
 ): void {
   ensureEditorLayers(map);
   (map.getSource(MAP_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined)
@@ -1590,6 +1663,8 @@ function syncEditorSources(
     ?.setData(toPreviewFeatureCollection(previewCollection));
   (map.getSource(GAP_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined)
     ?.setData(buildGapCollection(gaps));
+  (map.getSource(OVERLAP_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined)
+    ?.setData(buildOverlapCollection(overlapRegions));
 }
 
 function ensureEditorLayers(map: mapboxgl.Map): void {
@@ -1601,6 +1676,9 @@ function ensureEditorLayers(map: mapboxgl.Map): void {
   }
   if (!map.getSource(GAP_SOURCE_ID)) {
     map.addSource(GAP_SOURCE_ID, { type: 'geojson', data: emptyFeatureCollection() });
+  }
+  if (!map.getSource(OVERLAP_SOURCE_ID)) {
+    map.addSource(OVERLAP_SOURCE_ID, { type: 'geojson', data: emptyFeatureCollection() });
   }
 
   if (!map.getLayer(MAP_FILL_LAYER_ID)) {
@@ -1663,6 +1741,22 @@ function ensureEditorLayers(map: mapboxgl.Map): void {
         'text-allow-overlap': true, 'text-ignore-placement': true,
       },
       paint: { 'text-color': '#7b561a', 'text-halo-color': 'rgba(248,246,240,0.85)', 'text-halo-width': 1 },
+    });
+  }
+  if (!map.getLayer(OVERLAP_FILL_LAYER_ID)) {
+    map.addLayer({
+      id: OVERLAP_FILL_LAYER_ID, type: 'fill', source: OVERLAP_SOURCE_ID,
+      paint: {
+        'fill-color': OVERLAP_COLOR,
+        'fill-opacity': 0.35,
+        'fill-outline-color': OVERLAP_COLOR,
+      },
+    });
+  }
+  if (!map.getLayer(OVERLAP_LINE_LAYER_ID)) {
+    map.addLayer({
+      id: OVERLAP_LINE_LAYER_ID, type: 'line', source: OVERLAP_SOURCE_ID,
+      paint: { 'line-color': OVERLAP_COLOR, 'line-width': 2, 'line-dasharray': [1, 1] },
     });
   }
   if (!map.getLayer(GAP_HALO_LAYER_ID)) {
@@ -1781,6 +1875,18 @@ function buildGapCollection(gaps: AdjacencyGap[]): FeatureCollection<GeoJsonGeom
       id: gap.id,
       geometry: { type: 'Point', coordinates: gap.suggestedFix } as never,
       properties: { id: gap.id, zoneIds: gap.zoneIds.join(','), gapMeters: gap.gapMeters },
+    })),
+  };
+}
+
+function buildOverlapCollection(regions: GeoJsonGeometry[]): FeatureCollection<GeoJsonGeometry, GeoJsonProperties> {
+  return {
+    type: 'FeatureCollection',
+    features: regions.map((geometry, index) => ({
+      type: 'Feature',
+      id: index,
+      geometry: geometry as never,
+      properties: {},
     })),
   };
 }

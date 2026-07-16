@@ -414,6 +414,14 @@ export async function getMapZonePartitionStatus(mapId: string): Promise<MapZoneP
   return apiRequest<MapZonePartitionReport>('/maps/' + mapId + '/zones/partition-status');
 }
 
+export async function resolveMapZoneOverlap(mapId: string, trimZoneId: string, keepZoneId: string): Promise<MapZone[]> {
+  const response = await apiRequest<{ zones: MapZone[] }>('/maps/' + mapId + '/zones/resolve-overlap', {
+    method: 'POST',
+    body: { trimZoneId, keepZoneId },
+  });
+  return response.zones;
+}
+
 export async function getCurrentPlayer(signal?: AbortSignal): Promise<Player> {
   const response = await apiRequest<PlayerResponse>('/players/me', { signal });
   return response.player;
