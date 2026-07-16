@@ -11,10 +11,10 @@ import type mapboxgl from 'mapbox-gl';
  *    than on a vertex handle) selects both of that segment's endpoints and
  *    starts the same drag the built-in mode already uses for multi-vertex
  *    selections.
- *  - Box select: shift-dragging from empty space (outside the edited zone)
- *    draws a marquee and adds every vertex inside it to the selection, which
- *    can then be dragged as a group. Plain (non-shift) drags from empty
- *    space are left alone so the map still pans normally.
+ *  - Box select: dragging from the zone interior draws a marquee around the
+ *    vertices to select. A plain drag replaces the current selection, while
+ *    Shift-drag adds to it. Shift-dragging from empty space also starts an
+ *    additive box selection; plain drags from empty space still pan the map.
  *
  * This relies on `direct_select`'s internal helpers (startDragging,
  * pathsToCoordinates, onVertex, ...), which exist at runtime but aren't part
@@ -33,6 +33,7 @@ interface DirectSelectFeature {
 
 interface BoxSelectSession {
   active: boolean;
+  additive: boolean;
   startPoint: { x: number; y: number };
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
   element: HTMLDivElement;
@@ -85,7 +86,7 @@ export function createEdgeAwareDirectSelectMode(): MapboxDraw.DrawCustomMode {
       this.startDragging(state, e);
       return;
     }
-    base.onFeature.call(this, state, e);
+    startBoxSelect(this, state, e);
   };
 
   const onPointerDown = function onPointerDown(this: DirectSelectModeThis, state: DirectSelectState, e: DrawMouseEvent) {
@@ -187,6 +188,7 @@ function startBoxSelect(mode: DirectSelectModeThis, state: DirectSelectState, e:
 
   state.boxSelect = {
     active: true,
+    additive: isShiftDown(e),
     startPoint: { x: e.point.x, y: e.point.y },
     bounds: { minX: e.point.x, minY: e.point.y, maxX: e.point.x, maxY: e.point.y },
     element,
@@ -220,11 +222,10 @@ function finishBoxSelect(mode: DirectSelectModeThis, state: DirectSelectState): 
   const matched = collectVertexPathsInBox(mode.map, state.feature, box.bounds);
   teardownBoxSelect(mode, state);
 
-  if (matched.length > 0) {
-    const nextPaths = new Set([...state.selectedCoordPaths, ...matched]);
-    state.selectedCoordPaths = Array.from(nextPaths);
-    mode.setSelectedCoordinates(mode.pathsToCoordinates(state.featureId, state.selectedCoordPaths));
-  }
+  state.selectedCoordPaths = box.additive
+    ? Array.from(new Set([...state.selectedCoordPaths, ...matched]))
+    : matched;
+  mode.setSelectedCoordinates(mode.pathsToCoordinates(state.featureId, state.selectedCoordPaths));
 }
 
 function cancelBoxSelect(mode: DirectSelectModeThis, state: DirectSelectState): void {
