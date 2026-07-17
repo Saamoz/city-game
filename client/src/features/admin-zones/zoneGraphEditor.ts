@@ -26,6 +26,7 @@ export interface ZoneGraphEditorState {
   changedZoneIds: string[];
   canUndo: boolean;
   canRedo: boolean;
+  hasSelfIntersections: boolean;
 }
 
 export interface ZoneGraphEditorCallbacks {
@@ -37,11 +38,18 @@ export interface ZoneGraphEditorCallbacks {
 
 const NODE_SOURCE = 'zone-graph-node-source';
 const MIDPOINT_SOURCE = 'zone-graph-midpoint-source';
+const TRACE_SOURCE = 'zone-graph-trace-source';
+const INTERSECTION_SOURCE = 'zone-graph-intersection-source';
 const NODE_HALO_LAYER = 'zone-graph-node-halo';
 const NODE_LAYER = 'zone-graph-node';
 const MIDPOINT_LAYER = 'zone-graph-midpoint';
+const TRACE_LINE_LAYER = 'zone-graph-trace-line';
+const INTERSECTION_HALO_LAYER = 'zone-graph-intersection-halo';
+const INTERSECTION_DOT_LAYER = 'zone-graph-intersection-dot';
 const HIT_RADIUS_PX = 7;
 const SNAP_RADIUS_PX = 14;
+const TRACE_COLOR = '#e0821e';
+const INTERSECTION_COLOR = '#d81e1e';
 
 interface DragSession {
   kind: 'nodes';
@@ -74,6 +82,13 @@ interface MarqueeSession {
  *  - click/drag a small hollow dot (edge midpoint): insert a node there
  *  - drag a node onto another node or edge: weld boundaries together
  *  - Delete: remove selected nodes · Ctrl+Z / Ctrl+Y: undo / redo · Esc: clear selection
+ *
+ * Selecting a node traces every ring that owns it as a dashed orange line —
+ * the only way to tell which zone's boundary a shared dot belongs to, since
+ * several zones' rings can pass through the exact same point. Any point
+ * where a traced ring now crosses itself is marked with a red dot; a save
+ * with self-intersections still present is refused client-side, since
+ * PostGIS would reject it anyway (`ST_IsValid` requires simple rings).
  */
 export class ZoneGraphEditor {
   private readonly map: mapboxgl.Map;
@@ -98,6 +113,7 @@ export class ZoneGraphEditor {
 
   private cachedNodeIds: number[] | null = null;
   private cachedEdges: ZoneGraphEdge[] | null = null;
+  private hasSelfIntersections = false;
 
   private readonly onMouseDown = (event: mapboxgl.MapMouseEvent) => this.handleMouseDown(event);
   private readonly onHoverMove = (event: mapboxgl.MapMouseEvent) => this.handleHoverMove(event);
@@ -158,10 +174,13 @@ export class ZoneGraphEditor {
     window.removeEventListener('mouseup', this.onWindowMouseUp);
     window.removeEventListener('keydown', this.onKeyDown);
     this.snapMarker.remove();
-    for (const layerId of [MIDPOINT_LAYER, NODE_LAYER, NODE_HALO_LAYER]) {
+    for (const layerId of [
+      INTERSECTION_DOT_LAYER, INTERSECTION_HALO_LAYER,
+      MIDPOINT_LAYER, NODE_LAYER, NODE_HALO_LAYER, TRACE_LINE_LAYER,
+    ]) {
       if (this.map.getLayer(layerId)) this.map.removeLayer(layerId);
     }
-    for (const sourceId of [NODE_SOURCE, MIDPOINT_SOURCE]) {
+    for (const sourceId of [NODE_SOURCE, MIDPOINT_SOURCE, TRACE_SOURCE, INTERSECTION_SOURCE]) {
       if (this.map.getSource(sourceId)) this.map.removeSource(sourceId);
     }
     if (this.boxZoomWasEnabled) this.map.boxZoom.enable();
@@ -566,6 +585,25 @@ export class ZoneGraphEditor {
     if (!this.map.getSource(MIDPOINT_SOURCE)) {
       this.map.addSource(MIDPOINT_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     }
+    if (!this.map.getSource(TRACE_SOURCE)) {
+      this.map.addSource(TRACE_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!this.map.getSource(INTERSECTION_SOURCE)) {
+      this.map.addSource(INTERSECTION_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!this.map.getLayer(TRACE_LINE_LAYER)) {
+      this.map.addLayer({
+        id: TRACE_LINE_LAYER,
+        type: 'line',
+        source: TRACE_SOURCE,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': TRACE_COLOR,
+          'line-width': 3,
+          'line-dasharray': [1.6, 1.3],
+        },
+      });
+    }
     if (!this.map.getLayer(MIDPOINT_LAYER)) {
       this.map.addLayer({
         id: MIDPOINT_LAYER,
@@ -605,6 +643,27 @@ export class ZoneGraphEditor {
         },
       });
     }
+    if (!this.map.getLayer(INTERSECTION_HALO_LAYER)) {
+      this.map.addLayer({
+        id: INTERSECTION_HALO_LAYER,
+        type: 'circle',
+        source: INTERSECTION_SOURCE,
+        paint: { 'circle-radius': 13, 'circle-color': INTERSECTION_COLOR, 'circle-opacity': 0.28 },
+      });
+    }
+    if (!this.map.getLayer(INTERSECTION_DOT_LAYER)) {
+      this.map.addLayer({
+        id: INTERSECTION_DOT_LAYER,
+        type: 'circle',
+        source: INTERSECTION_SOURCE,
+        paint: {
+          'circle-radius': 5.5,
+          'circle-color': INTERSECTION_COLOR,
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 1.5,
+        },
+      });
+    }
   }
 
   private refreshSources(): void {
@@ -629,6 +688,90 @@ export class ZoneGraphEditor {
     });
     (this.map.getSource(MIDPOINT_SOURCE) as mapboxgl.GeoJSONSource | undefined)
       ?.setData({ type: 'FeatureCollection', features: midpointFeatures });
+
+    this.refreshTrace();
+  }
+
+  /**
+   * Traces the ring(s) that own the currently selected node(s) as a dashed
+   * line, and flags any point where the ring now crosses itself. Solves two
+   * problems at once: at a shared node several zones' boundaries overlap at
+   * the same dot, so there's no way to see "whose edge is this" just by
+   * looking at it — the trace shows the specific ring you're touching. And a
+   * self-intersection (the #1 cause of a rejected save) becomes visible
+   * immediately instead of only at save time.
+   *
+   * Only checks edges touching a selected node against the rest of the same
+   * ring (adjacent edges skipped, since they legitimately share an endpoint).
+   * That keeps this cheap enough to run on every mousemove even for a
+   * 1000+ vertex ring — only the moved edges can have newly started crossing
+   * anything, so there's no need to check the whole ring pairwise.
+   */
+  private refreshTrace(): void {
+    const traced = this.computeTracedRings();
+
+    const lineFeatures = traced.map((entry, index) => ({
+      type: 'Feature' as const,
+      id: index,
+      geometry: { type: 'LineString' as const, coordinates: closeRing(entry.ring.map((nodeId) => this.graph.positions[nodeId])) },
+      properties: { zoneId: entry.zoneId },
+    }));
+    (this.map.getSource(TRACE_SOURCE) as mapboxgl.GeoJSONSource | undefined)
+      ?.setData({ type: 'FeatureCollection', features: lineFeatures });
+
+    const intersections = dedupePositions(traced.flatMap((entry) => this.findRingSelfIntersections(entry.ring)));
+    const intersectionFeatures = intersections.map((point, index) => ({
+      type: 'Feature' as const,
+      id: index,
+      geometry: { type: 'Point' as const, coordinates: point },
+      properties: {},
+    }));
+    (this.map.getSource(INTERSECTION_SOURCE) as mapboxgl.GeoJSONSource | undefined)
+      ?.setData({ type: 'FeatureCollection', features: intersectionFeatures });
+
+    this.hasSelfIntersections = intersections.length > 0;
+  }
+
+  /** Every ring, across every zone, that contains at least one selected node. */
+  private computeTracedRings(): Array<{ zoneId: string; ring: number[] }> {
+    if (this.selection.size === 0) return [];
+    const traced: Array<{ zoneId: string; ring: number[] }> = [];
+    for (const zone of this.graph.zones) {
+      for (const polygon of zone.polygons) {
+        for (const ring of polygon) {
+          if (ring.some((nodeId) => this.selection.has(nodeId))) {
+            traced.push({ zoneId: zone.zoneId, ring });
+          }
+        }
+      }
+    }
+    return traced;
+  }
+
+  /** Proper crossings between edges touching a selected node and the rest of the same ring. */
+  private findRingSelfIntersections(ring: number[]): Position[] {
+    const n = ring.length;
+    if (n < 4) return [];
+
+    const changedEdgeIndices: number[] = [];
+    for (let i = 0; i < n; i += 1) {
+      if (this.selection.has(ring[i]) || this.selection.has(ring[(i + 1) % n])) changedEdgeIndices.push(i);
+    }
+
+    const points: Position[] = [];
+    for (const i of changedEdgeIndices) {
+      const a1 = this.graph.positions[ring[i]];
+      const a2 = this.graph.positions[ring[(i + 1) % n]];
+      for (let j = 0; j < n; j += 1) {
+        if (j === i) continue;
+        if (j === (i + 1) % n || (j + 1) % n === i) continue; // shares an endpoint — not a crossing
+        const b1 = this.graph.positions[ring[j]];
+        const b2 = this.graph.positions[ring[(j + 1) % n]];
+        const point = properSegmentIntersection(a1, a2, b1, b2);
+        if (point) points.push(point);
+      }
+    }
+    return points;
   }
 
   private schedulePreview(): void {
@@ -660,6 +803,7 @@ export class ZoneGraphEditor {
       changedZoneIds: changedZoneIds ?? this.getChangedGeometries().map((entry) => entry.zoneId),
       canUndo: this.historyIndex > 0,
       canRedo: this.historyIndex < this.history.length - 1,
+      hasSelfIntersections: this.hasSelfIntersections,
     });
   }
 
@@ -683,4 +827,36 @@ export class ZoneGraphEditor {
     if (this.drag?.kind === 'marquee') this.drag.element.remove();
     this.drag = null;
   }
+}
+
+function closeRing(positions: Position[]): Position[] {
+  return positions.length > 0 ? [...positions, positions[0]] : positions;
+}
+
+/** Strict interior crossing of two segments — endpoints and shared-vertex touches don't count. */
+function properSegmentIntersection(a1: Position, a2: Position, b1: Position, b2: Position): Position | null {
+  const d1x = a2[0] - a1[0];
+  const d1y = a2[1] - a1[1];
+  const d2x = b2[0] - b1[0];
+  const d2y = b2[1] - b1[1];
+  const denominator = (d1x * d2y) - (d1y * d2x);
+  if (Math.abs(denominator) < 1e-15) return null; // parallel (or degenerate)
+
+  const dx = b1[0] - a1[0];
+  const dy = b1[1] - a1[1];
+  const t = ((dx * d2y) - (dy * d2x)) / denominator;
+  const u = ((dx * d1y) - (dy * d1x)) / denominator;
+  const EPSILON = 1e-9;
+  if (t <= EPSILON || t >= 1 - EPSILON || u <= EPSILON || u >= 1 - EPSILON) return null;
+
+  return [a1[0] + (t * d1x), a1[1] + (t * d1y)];
+}
+
+function dedupePositions(positions: Position[]): Position[] {
+  const seen = new Map<string, Position>();
+  for (const position of positions) {
+    const key = `${position[0].toFixed(9)},${position[1].toFixed(9)}`;
+    if (!seen.has(key)) seen.set(key, position);
+  }
+  return Array.from(seen.values());
 }

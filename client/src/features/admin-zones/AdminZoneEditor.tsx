@@ -152,6 +152,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const [boundarySelectedCount, setBoundarySelectedCount] = useState(0);
   const [boundaryCanUndo, setBoundaryCanUndo] = useState(false);
   const [boundaryCanRedo, setBoundaryCanRedo] = useState(false);
+  const [boundaryHasSelfIntersections, setBoundaryHasSelfIntersections] = useState(false);
   const [isSavingBoundaries, setIsSavingBoundaries] = useState(false);
   const [isSavingMap, setIsSavingMap] = useState(false);
   const [isDeleteMapArmed, setIsDeleteMapArmed] = useState(false);
@@ -247,6 +248,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     setBoundarySelectedCount(0);
     setBoundaryCanUndo(false);
     setBoundaryCanRedo(false);
+    setBoundaryHasSelfIntersections(false);
     setMode('select');
     splitZoneIdRef.current = null;
     suppressZoneSelectionUntilRef.current = 0;
@@ -702,6 +704,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
           setBoundarySelectedCount(state.selectedCount);
           setBoundaryCanUndo(state.canUndo);
           setBoundaryCanRedo(state.canRedo);
+          setBoundaryHasSelfIntersections(state.hasSelfIntersections);
         },
         onNotice: (tone, message) => setNotice({ tone, message }),
       },
@@ -720,6 +723,10 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const handleSaveBoundaryEdit = async () => {
     const editor = graphEditorRef.current;
     if (!editor || !currentMap) return;
+    if (boundaryHasSelfIntersections) {
+      setNotice({ tone: 'error', message: 'Fix the red crossing point(s) before saving — a boundary can\'t cross itself.' });
+      return;
+    }
     const changed = editor.getChangedGeometries();
     if (changed.length === 0) {
       clearGeometrySession();
@@ -1299,7 +1306,13 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                       <li>· Drop a dot onto another dot or edge to <strong>weld</strong> boundaries together.</li>
                       <li>· <strong>Delete</strong> removes selected corners · <strong>Ctrl+Z / Ctrl+Y</strong> undo &amp; redo · <strong>Esc</strong> clears the selection.</li>
                       <li>· Amber zones have unsaved boundary changes.</li>
+                      <li>· Selecting a dot traces its <strong className="text-[#b3541e]">orange dashed</strong> boundary — since several zones can share one dot, this shows exactly whose edge you&apos;re moving.</li>
                     </ul>
+                    {boundaryHasSelfIntersections ? (
+                      <div className="rounded-2xl border border-[#d19c91] bg-[rgba(252,241,239,0.95)] px-3 py-2.5 text-xs text-[#6d3027]">
+                        <span aria-hidden="true">●</span> This boundary now crosses itself (marked in red on the map). Undo or drag the corner back until the red dot disappears — a self-crossing shape can&apos;t be saved.
+                      </div>
+                    ) : null}
                     <div className="grid grid-cols-2 gap-2">
                       <ActionButton
                         onClick={() => void handleSaveBoundaryEdit()}
@@ -1308,7 +1321,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                           : boundaryChangedZoneIds.length > 0
                             ? `Save (${boundaryChangedZoneIds.length} zone${boundaryChangedZoneIds.length === 1 ? '' : 's'})`
                             : 'Save'}
-                        disabled={isSavingBoundaries}
+                        disabled={isSavingBoundaries || boundaryHasSelfIntersections}
                       />
                       <ActionButton onClick={handleCancelGeometry} label="Discard" tone="secondary" disabled={isSavingBoundaries} />
                     </div>
