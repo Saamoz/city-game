@@ -418,16 +418,13 @@ export interface CreateMapZoneCarveResult {
   zone: MapZone;
   zones: MapZone[];
   trimmedZoneIds: string[];
-  creationMode: 'extend' | 'carve';
+  creationMode: 'uncovered';
 }
 
 /**
- * Creates a zone from a drawn polygon while preserving the map partition.
- * A polygon that crosses an outer map edge becomes an extension: only its
- * area outside existing coverage is kept, so its shared side is constructed
- * directly from the existing boundary. A polygon wholly inside the current
- * map retains carve behavior and takes its area from the zones it overlaps.
- * Refuses to swallow an existing zone whole.
+ * Creates a zone from the portion of a drawn polygon not already covered by
+ * existing zones. Existing zone geometries are never changed: drawing widely
+ * across them simply masks those overlaps out of the new zone.
  */
 export async function createMapZoneCarve(db: DatabaseClient, input: MapZoneInput): Promise<CreateMapZoneCarveResult> {
   await getMapByIdOrThrow(db, input.mapId);
@@ -447,82 +444,36 @@ async function carveMapZoneInner(db: DatabaseClient, input: MapZoneInput): Promi
   return runMapZoneWrite(db, input.mapId, async (tx, { enforced }) => {
     const newGeometrySql = buildGeometrySql(input.geometry);
 
-    const extensionResult = await tx.execute<{
+    const uncoveredResult = await tx.execute<{
       geometry: GeoJsonGeometry | null;
-      hasExistingOverlap: boolean;
-      hasOutsideArea: boolean;
+      hasUncoveredArea: boolean;
     }>(sql`
       WITH coverage AS (
         SELECT ST_UnaryUnion(ST_Collect(geometry)) AS geometry
         FROM ${mapZones}
         WHERE map_id = ${input.mapId}
       ), candidate AS (
-        SELECT
-          geometry AS existing_geometry,
-          CASE
-            WHEN geometry IS NULL THEN NULL
-            ELSE ST_CollectionExtract(ST_Difference(${newGeometrySql}, geometry), 3)
-          END AS outside_geometry
+        SELECT CASE
+          WHEN geometry IS NULL THEN ${newGeometrySql}
+          ELSE ST_CollectionExtract(ST_Difference(${newGeometrySql}, geometry), 3)
+        END AS uncovered_geometry
         FROM coverage
       )
       SELECT
-        ST_AsGeoJSON(outside_geometry)::json AS "geometry",
-        COALESCE(
-          ST_Area(ST_Intersection(${newGeometrySql}, existing_geometry)) > 0.000000000001,
-          false
-        ) AS "hasExistingOverlap",
-        COALESCE(NOT ST_IsEmpty(outside_geometry), false) AS "hasOutsideArea"
+        ST_AsGeoJSON(uncovered_geometry)::json AS "geometry",
+        COALESCE(ST_Area(uncovered_geometry) > 0.000000000001, false) AS "hasUncoveredArea"
       FROM candidate
     `);
-    const extension = extensionResult.rows[0];
+    const uncovered = uncoveredResult.rows[0];
 
-    const overlapping = await tx.execute<{
-      id: string;
-      name: string;
-      remainder: GeoJsonGeometry | null;
-      remainderEmpty: boolean | null;
-    }>(sql`
-      SELECT
-        id,
-        name,
-        ST_AsGeoJSON(ST_CollectionExtract(ST_Difference(geometry, ${newGeometrySql}), 3))::json AS "remainder",
-        ST_IsEmpty(ST_CollectionExtract(ST_Difference(geometry, ${newGeometrySql}), 3)) AS "remainderEmpty"
-      FROM ${mapZones}
-      WHERE map_id = ${input.mapId}
-        AND ST_Area(ST_Intersection(geometry, ${newGeometrySql})) > 0.000000000001
-    `);
-
-    const swallowed = overlapping.rows.filter((row) => !row.remainder || row.remainderEmpty);
-    if (swallowed.length > 0) {
-      const names = swallowed.map((row) => `"${row.name}"`).join(', ');
+    if (!uncovered?.geometry || !uncovered.hasUncoveredArea) {
       throw new AppError(errorCodes.validationError, {
-        message: `The drawn zone would completely cover ${names}. Delete that zone first, or draw a smaller shape.`,
+        message: 'The drawn zone is completely covered by existing zones. Extend it into uncovered area and try again.',
       });
     }
 
-    if (extension?.geometry && extension.hasExistingOverlap && extension.hasOutsideArea) {
-      await validateGeometry(tx, extension.geometry, { name: input.name });
-      const zone = await createMapZone(tx, { ...input, geometry: extension.geometry });
-      if (enforced) await assertMapPartitionValid(tx, input.mapId);
-      return {
-        zone,
-        zones: await listMapZones(tx, input.mapId),
-        trimmedZoneIds: [],
-        creationMode: 'extend' as const,
-      };
-    }
-
-    const updatedAt = new Date();
-    for (const row of overlapping.rows) {
-      await validateGeometry(tx, row.remainder as GeoJsonGeometry, { id: row.id, name: row.name });
-      await tx.update(mapZones).set({
-        geometry: buildGeometrySql(row.remainder as GeoJsonGeometry),
-        centroid: buildCentroidSql(row.remainder as GeoJsonGeometry),
-        updatedAt,
-      }).where(eq(mapZones.id, row.id));
-    }
-
-    const zone = await createMapZone(tx, input);
+    await validateGeometry(tx, uncovered.geometry, { name: input.name });
+    const zone = await createMapZone(tx, { ...input, geometry: uncovered.geometry });
 
     if (enforced) {
       await assertMapPartitionValid(tx, input.mapId);
@@ -531,8 +482,8 @@ async function carveMapZoneInner(db: DatabaseClient, input: MapZoneInput): Promi
     return {
       zone,
       zones: await listMapZones(tx, input.mapId),
-      trimmedZoneIds: overlapping.rows.map((row) => row.id),
-      creationMode: 'carve' as const,
+      trimmedZoneIds: [],
+      creationMode: 'uncovered' as const,
     };
   });
 }

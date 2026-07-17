@@ -108,34 +108,47 @@ describe('map zone boundary editing routes', () => {
     expect(left?.geometry.coordinates[0]).toEqual(expect.arrayContaining([[-97.14, 49.88]]));
   });
 
-  it('creates a carve zone that takes territory from the zones it overlaps', async () => {
+  it('creates a zone only from uncovered area and leaves existing zones unchanged', async () => {
     const { mapId, leftId, rightId } = await createMapWithTwoZones();
 
-    // A new zone straddling the shared boundary, overlapping both.
+    // The drawing overlaps both existing zones and extends beyond their north
+    // edge. Only that uncovered strip should become the new zone.
     const response = await app.inject({
       method: 'POST',
       url: `/api/v1/maps/${mapId}/zones`,
-      headers: idempotencyHeaders('editing-carve-create'),
+      headers: idempotencyHeaders('editing-uncovered-create'),
       payload: {
-        name: 'Center',
+        name: 'North Extension',
         carve: true,
-        geometry: createRectangle(-97.15, 49.885, -97.13, 49.895),
+        geometry: createRectangle(-97.15, 49.885, -97.13, 49.905),
       },
     });
 
     expect(response.statusCode).toBe(201);
     const body = response.json() as {
-      zone: { id: string; name: string };
-      zones: Array<{ id: string }>;
+      zone: { name: string; geometry: { coordinates: number[][][] } };
+      zones: Array<{ id: string; geometry: { coordinates: number[][][] } }>;
       trimmedZoneIds: string[];
-      creationMode: 'extend' | 'carve';
+      creationMode: 'uncovered';
     };
-    expect(body.zone.name).toBe('Center');
-    expect(body.creationMode).toBe('carve');
+    expect(body.zone.name).toBe('North Extension');
+    expect(body.creationMode).toBe('uncovered');
+    expect(body.trimmedZoneIds).toEqual([]);
     expect(body.zones).toHaveLength(3);
-    expect(body.trimmedZoneIds.sort()).toEqual([leftId, rightId].sort());
 
-    // The map is still a clean partition.
+    const newRing = body.zone.geometry.coordinates[0];
+    expect(Math.min(...newRing.map(([, lat]) => lat))).toBeCloseTo(49.90, 8);
+    expect(Math.max(...newRing.map(([, lat]) => lat))).toBeCloseTo(49.905, 8);
+
+    const unchangedLeft = body.zones.find((zone) => zone.id === leftId);
+    expect(unchangedLeft?.geometry.coordinates[0]).toEqual(
+      expect.arrayContaining([[-97.16, 49.88], [-97.14, 49.90]]),
+    );
+    const unchangedRight = body.zones.find((zone) => zone.id === rightId);
+    expect(unchangedRight?.geometry.coordinates[0]).toEqual(
+      expect.arrayContaining([[-97.14, 49.88], [-97.12, 49.90]]),
+    );
+
     const statusResponse = await app.inject({ method: 'GET', url: `/api/v1/maps/${mapId}/zones/partition-status` });
     expect(statusResponse.json()).toMatchObject({ isConnected: true, hasNoOverlaps: true });
   });
@@ -162,9 +175,9 @@ describe('map zone boundary editing routes', () => {
       zone: { name: string; geometry: { coordinates: number[][][] } };
       zones: Array<{ id: string; geometry: { coordinates: number[][][] } }>;
       trimmedZoneIds: string[];
-      creationMode: 'extend' | 'carve';
+      creationMode: 'uncovered';
     };
-    expect(body.creationMode).toBe('extend');
+    expect(body.creationMode).toBe('uncovered');
     expect(body.trimmedZoneIds).toEqual([]);
 
     const extensionRing = body.zone.geometry.coordinates[0];
@@ -180,22 +193,22 @@ describe('map zone boundary editing routes', () => {
     expect(statusResponse.json()).toMatchObject({ isConnected: true, hasNoOverlaps: true });
   });
 
-  it('refuses to carve a zone that would swallow an existing zone whole', async () => {
+  it('rejects a drawing with no uncovered area', async () => {
     const { mapId } = await createMapWithTwoZones();
 
     const response = await app.inject({
       method: 'POST',
       url: `/api/v1/maps/${mapId}/zones`,
-      headers: idempotencyHeaders('editing-carve-swallow'),
+      headers: idempotencyHeaders('editing-fully-covered-create'),
       payload: {
-        name: 'Everything',
+        name: 'Covered',
         carve: true,
-        geometry: createRectangle(-97.17, 49.87, -97.11, 49.91),
+        geometry: createRectangle(-97.15, 49.885, -97.13, 49.895),
       },
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json().error.message).toContain('completely cover');
+    expect(response.json().error.message).toContain('completely covered');
   });
 
   it('still allows edits when the map is already dirty', async () => {

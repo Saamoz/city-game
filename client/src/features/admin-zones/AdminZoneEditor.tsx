@@ -473,10 +473,8 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
         return;
       }
 
-      // Draw mode: new polygon → snap nearby vertices. When the polygon crosses
-      // an outer map edge, the server keeps only the outside portion so the new
-      // zone traces that existing edge exactly. Polygons wholly inside the map
-      // retain carve behavior.
+      // Draw mode: new polygon → snap nearby vertices. The server subtracts all
+      // existing zone coverage, so only uncovered area becomes the new zone.
       modeRef.current = 'select';
       setMode('select');
       setSelectedZoneId(null);
@@ -667,7 +665,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     modeRef.current = 'draw';
     draftActiveRef.current = false;
     setMode('draw');
-    setNotice({ tone: 'info', message: 'Click to place vertices; double-click to close. Drawing clicks will not select or zoom zones. Extend slightly across an outside boundary so the new zone can follow it exactly; after closing, you can edit the draft vertices before confirming.' });
+    setNotice({ tone: 'info', message: 'Click to place vertices; double-click to close. Drawing clicks will not select or zoom zones. Draw generously across existing zones; only uncovered area will become part of the new zone. After closing, you can edit the draft vertices before confirming.' });
     setSelectedZoneId(null);
     setIsDeleteArmed(false);
     setPreviewCollection(null);
@@ -849,8 +847,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     setNotice(null);
     try {
       if (geometryDraft && !selectedZone) {
-        // Outer-edge drawings extend the map along its exact boundary;
-        // drawings wholly inside existing coverage retain carve behavior.
+        // Existing zones win every overlap; only uncovered draft area is created.
         const result = await createMapZoneCarving(currentMap.id, { ...payload, geometry: geometryDraft });
         setZones(result.zones);
         setSelectedZoneId(result.zone.id);
@@ -860,11 +857,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
         void refreshPartitionStatus(currentMap.id);
         setNotice({
           tone: 'success',
-          message: result.creationMode === 'extend'
-            ? 'Zone created — its shared side follows the existing map boundary.'
-            : result.trimmedZoneIds.length > 0
-              ? `Zone created — took territory from ${result.trimmedZoneIds.length} neighbouring zone${result.trimmedZoneIds.length === 1 ? '' : 's'}.`
-              : 'Zone created.',
+          message: 'Zone created from uncovered area; existing zones were left unchanged.',
         });
         return;
       }

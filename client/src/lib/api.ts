@@ -352,10 +352,10 @@ export interface CreateMapZoneCarveResponse {
   zone: MapZone;
   zones: MapZone[];
   trimmedZoneIds: string[];
-  creationMode: 'extend' | 'carve';
+  creationMode: 'uncovered';
 }
 
-/** Creates an outer extension by tracing map coverage, or carves when drawn wholly inside the map. */
+/** Creates a zone from the drawn area not already covered by existing zones. */
 export async function createMapZoneCarving(mapId: string, input: MapZoneUpsertInput): Promise<CreateMapZoneCarveResponse> {
   return apiRequest<CreateMapZoneCarveResponse>('/maps/' + mapId + '/zones', {
     method: 'POST',
