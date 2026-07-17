@@ -1,5 +1,6 @@
 node_modules/
 dist/
+zone-edit-logs/
 *.tsbuildinfo
 coverage/
 .turbo/

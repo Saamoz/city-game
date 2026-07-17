@@ -182,3 +182,13 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Drawing a zone now **carves**: the new zone keeps its drawn shape and takes the overlapped ground from existing zones (`POST /maps/:id/zones` with `carve: true` → `createMapZoneCarve`; refuses to swallow a zone whole). Client-side auto-clip removed.
 - All map-zone writes (create/update/delete/split/merge/import/bulk) now go through `runMapZoneWrite`: constraint enforced when the map was clean before the edit, suspended when it was already dirty — so a dirty map no longer bricks the editor. Violations return actionable messages (`assertMapPartitionValid` names the overlapping zone pairs) instead of the raw trigger error.
 - `PATCH /map-zones/:id` with geometry (and its server-side propagation) is kept for API compatibility; the editor no longer sends geometry through it.
+
+## Zone Edit Repro Logging Rule (2026-07-17)
+
+**Rule: every zone-geometry write from the map editor is logged on the server with enough detail to reproduce it exactly — always on, no flag.**
+
+- `server/src/lib/zone-edit-repro.ts` (`recordZoneEdit`) writes a self-contained JSON file per edit to `server/zone-edit-logs/` (gitignored, capped at 200 newest). Each file has the exact `updates` (zoneId, name, the written geometry, and the previous geometry) plus the outcome. Both successes (`-ok-`) and failures (`-FAIL-`) are recorded.
+- A one-line summary prints to the server console on every save: `console.log` for OK, `console.error` for FAIL. The FAIL line includes the failing zone, the PostGIS `ST_IsValidReason`, and the ready-to-run replay command.
+- `server/src/db/scripts/replay-zone-edit.ts <file> [--apply]` replays a logged edit: by default it re-runs `ST_IsValid`/`ST_IsValidReason` on each written geometry (deterministic, no side effects); `--apply` re-runs the full `updateMapZoneGeometries` transaction against the still-existing map.
+- Wired into `updateMapZoneGeometries` (boundary "move" saves) and `createMapZoneCarve` (draw). `validateGeometry` now takes an optional `{ id, name }` and puts the zone name + reason into both the client-facing message ("Zone \"X\" has an invalid shape after this edit: Self-intersection[…]. Nothing was saved.") and the repro `details`.
+- Note: free-hand node dragging can still produce a self-intersecting ring (dragging a corner across the polygon's own edges) — PostGIS rejects it and nothing is saved. The logging rule exists so any such failing move can be handed over and reproduced deterministically rather than re-enacted by hand.

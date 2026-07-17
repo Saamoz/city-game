@@ -13,6 +13,7 @@ import { errorCodes } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { games, mapZones, maps, zones } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
+import { recordZoneEdit, reproOutcomeFromError, type ZoneEditReproUpdate } from '../lib/zone-edit-repro.js';
 
 interface MapRow {
   id: string;
@@ -367,30 +368,50 @@ export async function updateMapZoneGeometries(
 ): Promise<MapZone[]> {
   await getMapByIdOrThrow(db, mapId);
 
-  return runMapZoneWrite(db, mapId, async (tx, { enforced }) => {
-    const updatedAt = new Date();
+  // Snapshot the "before" geometry of every touched zone up front so the repro
+  // log (written below, success or failure) is fully self-contained.
+  const reproUpdates: ZoneEditReproUpdate[] = [];
+  for (const update of updates) {
+    const existing = await getMapZoneById(db, update.zoneId);
+    reproUpdates.push({
+      zoneId: update.zoneId,
+      zoneName: existing?.name,
+      geometry: update.geometry,
+      previousGeometry: existing?.geometry,
+    });
+  }
 
-    for (const update of updates) {
-      const zone = await getMapZoneByIdOrThrow(tx, update.zoneId);
-      if (zone.mapId !== mapId) {
-        throw new AppError(errorCodes.validationError, {
-          message: `Zone "${zone.name}" does not belong to this map.`,
-        });
+  try {
+    const result = await runMapZoneWrite(db, mapId, async (tx, { enforced }) => {
+      const updatedAt = new Date();
+
+      for (const update of updates) {
+        const zone = await getMapZoneByIdOrThrow(tx, update.zoneId);
+        if (zone.mapId !== mapId) {
+          throw new AppError(errorCodes.validationError, {
+            message: `Zone "${zone.name}" does not belong to this map.`,
+          });
+        }
+        await validateGeometry(tx, update.geometry, { id: zone.id, name: zone.name });
+        await tx.update(mapZones).set({
+          geometry: buildGeometrySql(update.geometry),
+          centroid: buildCentroidSql(update.geometry),
+          updatedAt,
+        }).where(eq(mapZones.id, update.zoneId));
       }
-      await validateGeometry(tx, update.geometry);
-      await tx.update(mapZones).set({
-        geometry: buildGeometrySql(update.geometry),
-        centroid: buildCentroidSql(update.geometry),
-        updatedAt,
-      }).where(eq(mapZones.id, update.zoneId));
-    }
 
-    if (enforced) {
-      await assertMapPartitionValid(tx, mapId);
-    }
+      if (enforced) {
+        await assertMapPartitionValid(tx, mapId);
+      }
 
-    return listMapZones(tx, mapId);
-  });
+      return listMapZones(tx, mapId);
+    });
+    recordZoneEdit({ kind: 'geometry-save', mapId, updates: reproUpdates, outcome: { ok: true } });
+    return result;
+  } catch (error) {
+    recordZoneEdit({ kind: 'geometry-save', mapId, updates: reproUpdates, outcome: reproOutcomeFromError(error) });
+    throw error;
+  }
 }
 
 export interface CreateMapZoneCarveResult {
@@ -409,8 +430,19 @@ export interface CreateMapZoneCarveResult {
  */
 export async function createMapZoneCarve(db: DatabaseClient, input: MapZoneInput): Promise<CreateMapZoneCarveResult> {
   await getMapByIdOrThrow(db, input.mapId);
-  await validateGeometry(db, input.geometry);
+  const reproUpdates: ZoneEditReproUpdate[] = [{ zoneId: 'new', zoneName: input.name, geometry: input.geometry }];
+  try {
+    await validateGeometry(db, input.geometry, { name: input.name });
+    const result = await carveMapZoneInner(db, input);
+    recordZoneEdit({ kind: 'carve-create', mapId: input.mapId, updates: reproUpdates, outcome: { ok: true } });
+    return result;
+  } catch (error) {
+    recordZoneEdit({ kind: 'carve-create', mapId: input.mapId, updates: reproUpdates, outcome: reproOutcomeFromError(error, { name: input.name }) });
+    throw error;
+  }
+}
 
+async function carveMapZoneInner(db: DatabaseClient, input: MapZoneInput): Promise<CreateMapZoneCarveResult> {
   return runMapZoneWrite(db, input.mapId, async (tx, { enforced }) => {
     const newGeometrySql = buildGeometrySql(input.geometry);
     const overlapping = await tx.execute<{
@@ -439,7 +471,7 @@ export async function createMapZoneCarve(db: DatabaseClient, input: MapZoneInput
 
     const updatedAt = new Date();
     for (const row of overlapping.rows) {
-      await validateGeometry(tx, row.remainder as GeoJsonGeometry);
+      await validateGeometry(tx, row.remainder as GeoJsonGeometry, { id: row.id, name: row.name });
       await tx.update(mapZones).set({
         geometry: buildGeometrySql(row.remainder as GeoJsonGeometry),
         centroid: buildCentroidSql(row.remainder as GeoJsonGeometry),
@@ -1039,16 +1071,25 @@ export async function applyMapDefaultsToGame(db: DatabaseClient, mapId: string) 
   };
 }
 
-export async function validateGeometry(db: DatabaseClient, geometry: GeoJsonGeometry): Promise<void> {
+export async function validateGeometry(
+  db: DatabaseClient,
+  geometry: GeoJsonGeometry,
+  zone?: { id?: string; name?: string },
+): Promise<void> {
   const geometrySql = buildGeometrySql(geometry);
   const result = await db.execute<{ isValid: boolean; reason: string }>(sql`
     SELECT ST_IsValid(${geometrySql}) AS "isValid", ST_IsValidReason(${geometrySql}) AS "reason"
   `);
 
   if (!result.rows[0]?.isValid) {
+    const reason = result.rows[0]?.reason ?? 'Unknown geometry validation failure.';
+    // Surface the specific PostGIS reason (e.g. "Self-intersection[lng lat]") and
+    // the zone name in the message so the editor can show why a save failed,
+    // and stash them in details for the repro log.
+    const label = zone?.name ? `Zone "${zone.name}"` : 'This zone';
     throw new AppError(errorCodes.validationError, {
-      message: 'Zone geometry is invalid.',
-      details: { reason: result.rows[0]?.reason ?? 'Unknown geometry validation failure.' },
+      message: `${label} has an invalid shape after this edit: ${reason}. Nothing was saved.`,
+      details: { reason, zoneId: zone?.id, zoneName: zone?.name },
     });
   }
 }
