@@ -348,6 +348,34 @@ export async function createMapZoneDefinition(mapId: string, input: MapZoneUpser
   return response.zone;
 }
 
+export interface CreateMapZoneCarveResponse {
+  zone: MapZone;
+  zones: MapZone[];
+  trimmedZoneIds: string[];
+}
+
+/** Creates a zone that keeps its drawn shape and trims every existing zone it overlaps. */
+export async function createMapZoneCarving(mapId: string, input: MapZoneUpsertInput): Promise<CreateMapZoneCarveResponse> {
+  return apiRequest<CreateMapZoneCarveResponse>('/maps/' + mapId + '/zones', {
+    method: 'POST',
+    body: { ...input, carve: true },
+  });
+}
+
+export interface MapZoneGeometryUpdate {
+  zoneId: string;
+  geometry: GeoJsonGeometry;
+}
+
+/** Atomically saves the geometries of every zone touched by a boundary-editing session. */
+export async function updateMapZoneGeometries(mapId: string, updates: MapZoneGeometryUpdate[]): Promise<MapZone[]> {
+  const response = await apiRequest<MapZonesResponse>('/maps/' + mapId + '/zones/geometries', {
+    method: 'POST',
+    body: { updates },
+  });
+  return response.zones;
+}
+
 export async function updateMapZoneDefinition(
   mapZoneId: string,
   input: Partial<MapZoneUpsertInput>,

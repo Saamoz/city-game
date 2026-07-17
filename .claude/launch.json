@@ -3,9 +3,15 @@
   "configurations": [
     {
       "name": "client",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "client", "run", "dev"],
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": ["-e", "bash", "-lc", "cd '/mnt/e/city game' && pnpm dev:client"],
       "port": 5173
+    },
+    {
+      "name": "server",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": ["-e", "bash", "-lc", "cd '/mnt/e/city game' && pnpm dev:server"],
+      "port": 3000
     }
   ]
 }

@@ -187,6 +187,12 @@ export async function createMapZone(db: DatabaseClient, input: MapZoneInput): Pr
   return getMapZoneByIdOrThrow(db, inserted.id);
 }
 
+/** Standalone create used by the API route — gated so creating on an already-dirty map still works. */
+export async function createMapZoneChecked(db: DatabaseClient, input: MapZoneInput): Promise<MapZone> {
+  await getMapByIdOrThrow(db, input.mapId);
+  return runMapZoneWrite(db, input.mapId, (tx) => createMapZone(tx, input));
+}
+
 export async function isMapZonePartitionClean(db: DatabaseClient, mapId: string): Promise<boolean> {
   const result = await db.execute<{ connected: boolean; noOverlaps: boolean }>(sql`
     SELECT
@@ -203,20 +209,7 @@ export async function updateMapZone(
 ): Promise<MapZoneUpdateResult> {
   const existingZone = await getMapZoneByIdOrThrow(db, mapZoneId);
 
-  // Normally the map-wide connected/non-overlapping constraint stays fully
-  // enforced -- that's what protects a clean map from an edit accidentally
-  // breaking it. But if the map is ALREADY dirty (pre-existing gaps/overlaps,
-  // e.g. mid-cleanup with the repair tools), that same constraint blocks
-  // every edit unconditionally, including ones that are perfectly fine or
-  // that are the very fix the admin is trying to make by hand. So: only
-  // suspend the constraint for this edit when the map didn't already satisfy
-  // it before we touched anything.
-  const needsPartitionRepair = Boolean(input.geometry) && !(await isMapZonePartitionClean(db, existingZone.mapId));
-  const runTransaction = needsPartitionRepair
-    ? (fn: (tx: DatabaseClient) => Promise<MapZoneUpdateResult>) => runMapZonePartitionRepair(db, fn)
-    : (fn: (tx: DatabaseClient) => Promise<MapZoneUpdateResult>) => db.transaction((tx) => fn(tx as unknown as DatabaseClient));
-
-  return runTransaction(async (transactionalDb) => {
+  return runMapZoneWrite(db, existingZone.mapId, async (transactionalDb, { enforced }) => {
     const existing = await getMapZoneByIdOrThrow(transactionalDb, mapZoneId);
     const updatedAt = new Date();
     let affectedZoneIds = [mapZoneId];
@@ -268,9 +261,202 @@ export async function updateMapZone(
       });
     }
 
+    if (enforced && input.geometry) {
+      await assertMapPartitionValid(transactionalDb, existing.mapId);
+    }
+
     return {
       zone,
       zones: affectedZones,
+    };
+  });
+}
+
+/**
+ * Runs a write to this map's zones with the map-wide partition constraint in
+ * the right posture:
+ *
+ *  - Map currently clean → normal transaction; the deferred
+ *    `map_zones_connected` constraint trigger verifies the whole map again at
+ *    COMMIT, so a bad edit can never dirty a clean map.
+ *  - Map already dirty (pre-existing gaps/overlaps, e.g. imported data or a
+ *    cleanup in progress) → the constraint is suspended for this transaction.
+ *    Otherwise every operation on the map — including the ones fixing it —
+ *    is rejected for problems it didn't cause.
+ *
+ * Constraint violations surface as friendly validation errors instead of a
+ * raw database exception.
+ */
+async function runMapZoneWrite<T>(
+  db: DatabaseClient,
+  mapId: string,
+  run: (tx: DatabaseClient, options: { enforced: boolean }) => Promise<T>,
+): Promise<T> {
+  const clean = await isMapZonePartitionClean(db, mapId);
+  try {
+    if (clean) {
+      return await db.transaction((tx) => run(tx as unknown as DatabaseClient, { enforced: true }));
+    }
+    return await runMapZonePartitionRepair(db, (tx) => run(tx, { enforced: false }));
+  } catch (error) {
+    throw translatePartitionConstraintError(error);
+  }
+}
+
+function translatePartitionConstraintError(error: unknown): unknown {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current && typeof current === 'object'; depth += 1) {
+    const candidate = current as { constraint?: string; message?: string; cause?: unknown };
+    if (
+      candidate.constraint === 'map_zones_connected'
+      || (typeof candidate.message === 'string' && candidate.message.includes('connected, non-overlapping partition'))
+    ) {
+      return new AppError(errorCodes.validationError, {
+        message: 'This change would break the map: zones must not overlap, and every zone must share a border with the rest. Nothing was saved.',
+        details: { constraint: 'map_zones_connected' },
+      });
+    }
+    current = candidate.cause;
+  }
+  return error;
+}
+
+/**
+ * Re-checks the partition inside a transaction and throws a validation error
+ * that names the offending zones — far more actionable than the constraint
+ * trigger's generic COMMIT-time failure, which can't say what went wrong.
+ */
+async function assertMapPartitionValid(tx: DatabaseClient, mapId: string): Promise<void> {
+  const report = await checkMapZonePartition(tx, mapId);
+  if (report.hasNoOverlaps && report.isConnected) return;
+
+  if (!report.hasNoOverlaps) {
+    const pairs = report.overlaps
+      .slice(0, 3)
+      .map((overlap) => `"${overlap.zoneAName}" ↔ "${overlap.zoneBName}" (${Math.round(overlap.overlapAreaSqMeters)} m²)`)
+      .join(', ');
+    const suffix = report.overlaps.length > 3 ? ` and ${report.overlaps.length - 3} more` : '';
+    throw new AppError(errorCodes.validationError, {
+      message: `This change would make zones overlap: ${pairs}${suffix}. Nothing was saved.`,
+      details: { constraint: 'map_zones_connected' },
+    });
+  }
+
+  throw new AppError(errorCodes.validationError, {
+    message: 'This change would cut a zone off from the rest of the map — every zone must share a border with at least one other. Nothing was saved.',
+    details: { constraint: 'map_zones_connected' },
+  });
+}
+
+export interface MapZoneGeometryUpdate {
+  zoneId: string;
+  geometry: GeoJsonGeometry;
+}
+
+/**
+ * Saves a batch of zone geometries atomically. This is the save path for the
+ * shared-boundary ("topology") editing session in the admin editor: the
+ * client computes the final geometry of every zone touched by an edit (they
+ * share boundary nodes, so one drag can reshape several zones), and the whole
+ * set is validated and written together — either every zone updates or none.
+ */
+export async function updateMapZoneGeometries(
+  db: DatabaseClient,
+  mapId: string,
+  updates: MapZoneGeometryUpdate[],
+): Promise<MapZone[]> {
+  await getMapByIdOrThrow(db, mapId);
+
+  return runMapZoneWrite(db, mapId, async (tx, { enforced }) => {
+    const updatedAt = new Date();
+
+    for (const update of updates) {
+      const zone = await getMapZoneByIdOrThrow(tx, update.zoneId);
+      if (zone.mapId !== mapId) {
+        throw new AppError(errorCodes.validationError, {
+          message: `Zone "${zone.name}" does not belong to this map.`,
+        });
+      }
+      await validateGeometry(tx, update.geometry);
+      await tx.update(mapZones).set({
+        geometry: buildGeometrySql(update.geometry),
+        centroid: buildCentroidSql(update.geometry),
+        updatedAt,
+      }).where(eq(mapZones.id, update.zoneId));
+    }
+
+    if (enforced) {
+      await assertMapPartitionValid(tx, mapId);
+    }
+
+    return listMapZones(tx, mapId);
+  });
+}
+
+export interface CreateMapZoneCarveResult {
+  zone: MapZone;
+  zones: MapZone[];
+  trimmedZoneIds: string[];
+}
+
+/**
+ * Creates a zone that "eats into" whatever it overlaps: the new zone keeps
+ * its drawn shape, and every existing zone it intersects gives up the shared
+ * ground (ST_Difference). Because the neighbours are trimmed with the new
+ * zone's exact boundary, the resulting borders are shared precisely — no
+ * gaps, no overlaps — which is what makes free-hand drawing over an existing
+ * map safe. Refuses to swallow a zone whole.
+ */
+export async function createMapZoneCarve(db: DatabaseClient, input: MapZoneInput): Promise<CreateMapZoneCarveResult> {
+  await getMapByIdOrThrow(db, input.mapId);
+  await validateGeometry(db, input.geometry);
+
+  return runMapZoneWrite(db, input.mapId, async (tx, { enforced }) => {
+    const newGeometrySql = buildGeometrySql(input.geometry);
+    const overlapping = await tx.execute<{
+      id: string;
+      name: string;
+      remainder: GeoJsonGeometry | null;
+      remainderEmpty: boolean | null;
+    }>(sql`
+      SELECT
+        id,
+        name,
+        ST_AsGeoJSON(ST_CollectionExtract(ST_Difference(geometry, ${newGeometrySql}), 3))::json AS "remainder",
+        ST_IsEmpty(ST_CollectionExtract(ST_Difference(geometry, ${newGeometrySql}), 3)) AS "remainderEmpty"
+      FROM ${mapZones}
+      WHERE map_id = ${input.mapId}
+        AND ST_Area(ST_Intersection(geometry, ${newGeometrySql})) > 0.000000000001
+    `);
+
+    const swallowed = overlapping.rows.filter((row) => !row.remainder || row.remainderEmpty);
+    if (swallowed.length > 0) {
+      const names = swallowed.map((row) => `"${row.name}"`).join(', ');
+      throw new AppError(errorCodes.validationError, {
+        message: `The drawn zone would completely cover ${names}. Delete that zone first, or draw a smaller shape.`,
+      });
+    }
+
+    const updatedAt = new Date();
+    for (const row of overlapping.rows) {
+      await validateGeometry(tx, row.remainder as GeoJsonGeometry);
+      await tx.update(mapZones).set({
+        geometry: buildGeometrySql(row.remainder as GeoJsonGeometry),
+        centroid: buildCentroidSql(row.remainder as GeoJsonGeometry),
+        updatedAt,
+      }).where(eq(mapZones.id, row.id));
+    }
+
+    const zone = await createMapZone(tx, input);
+
+    if (enforced) {
+      await assertMapPartitionValid(tx, input.mapId);
+    }
+
+    return {
+      zone,
+      zones: await listMapZones(tx, input.mapId),
+      trimmedZoneIds: overlapping.rows.map((row) => row.id),
     };
   });
 }
@@ -577,8 +763,13 @@ export async function resolveMapZoneOverlap(
 }
 
 export async function deleteMapZoneById(db: DatabaseClient, mapZoneId: string): Promise<boolean> {
-  const [deleted] = await db.delete(mapZones).where(eq(mapZones.id, mapZoneId)).returning({ id: mapZones.id });
-  return Boolean(deleted);
+  const zone = await getMapZoneById(db, mapZoneId);
+  if (!zone) return false;
+
+  return runMapZoneWrite(db, zone.mapId, async (tx) => {
+    const [deleted] = await tx.delete(mapZones).where(eq(mapZones.id, mapZoneId)).returning({ id: mapZones.id });
+    return Boolean(deleted);
+  });
 }
 
 export async function importMapZones(
@@ -596,8 +787,7 @@ export async function importMapZones(
     };
   }>,
 ): Promise<MapZone[]> {
-  return db.transaction(async (tx) => {
-    const transactionalDb = tx as unknown as DatabaseClient;
+  return runMapZoneWrite(db, mapId, async (transactionalDb) => {
     const created: MapZone[] = [];
 
     for (const [index, feature] of features.entries()) {
@@ -622,8 +812,9 @@ export async function splitMapZoneById(
   mapZoneId: string,
   options?: { splitLine?: GeoJsonGeometry | null },
 ): Promise<[MapZone, MapZone]> {
-  return db.transaction(async (tx) => splitMapZoneInTransaction(
-    tx as unknown as DatabaseClient,
+  const zone = await getMapZoneByIdOrThrow(db, mapZoneId);
+  return runMapZoneWrite(db, zone.mapId, async (tx) => splitMapZoneInTransaction(
+    tx,
     mapZoneId,
     options,
   ));
@@ -634,9 +825,8 @@ async function splitMapZoneInTransaction(
   mapZoneId: string,
   options?: { splitLine?: GeoJsonGeometry | null },
 ): Promise<[MapZone, MapZone]> {
-  try {
-    const zone = await getMapZoneByIdOrThrow(db, mapZoneId);
-    const splitLine = options?.splitLine ?? null;
+  const zone = await getMapZoneByIdOrThrow(db, mapZoneId);
+  const splitLine = options?.splitLine ?? null;
 
     const cutterCte = splitLine
       ? sql`cutter AS (
@@ -736,11 +926,8 @@ async function splitMapZoneInTransaction(
     metadata: zone.metadata,
   });
 
-    const updated = await getMapZoneByIdOrThrow(db, zone.id);
-    return [updated, created];
-  } catch (error) {
-    throw error;
-  }
+  const updated = await getMapZoneByIdOrThrow(db, zone.id);
+  return [updated, created];
 }
 
 export async function mergeMapZonesById(
@@ -748,8 +935,12 @@ export async function mergeMapZonesById(
   zoneIds: [string, string],
   input: { name?: string } = {},
 ): Promise<MapZone> {
-  return db.transaction(async (tx) => mergeMapZonesInTransaction(
-    tx as unknown as DatabaseClient,
+  const anchorZone = await getMapZoneById(db, zoneIds[0]);
+  if (!anchorZone) {
+    throw new AppError(errorCodes.validationError, { message: 'Two authored zones are required to merge.' });
+  }
+  return runMapZoneWrite(db, anchorZone.mapId, async (tx) => mergeMapZonesInTransaction(
+    tx,
     zoneIds,
     input,
   ));

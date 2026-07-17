@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Territory</title>
+    <script>
+      // Test-harness support: in a hidden/headless tab requestAnimationFrame
+      // never fires, which stalls mapbox-gl entirely. ?headlessFrames=1 swaps
+      // in a timer-based rAF so automated checks can drive the map.
+      if (new URLSearchParams(location.search).has('headlessFrames')) {
+        window.requestAnimationFrame = function (cb) { return setTimeout(function () { cb(performance.now()); }, 33); };
+        window.cancelAnimationFrame = clearTimeout;
+      }
+    </script>
   </head>
   <body class="bg-ink">
     <div id="root"></div>

@@ -4,8 +4,8 @@ import mapboxgl from 'mapbox-gl';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import type { Feature, FeatureCollection, GeoJsonProperties, MultiPolygon, Polygon } from 'geojson';
-import { difference as turfDifference, featureCollection, feature as turfFeature, intersect as turfIntersect } from '@turf/turf';
-import { findAdjacencyGaps, propagateSharedBoundaryEdit } from '@city-game/shared';
+import { featureCollection, feature as turfFeature, intersect as turfIntersect } from '@turf/turf';
+import { findAdjacencyGaps } from '@city-game/shared';
 import type {
   AdjacencyGap,
   GeoJsonFeatureCollection,
@@ -18,7 +18,7 @@ import type {
 import {
   ApiError,
   createMapDefinition,
-  createMapZoneDefinition,
+  createMapZoneCarving,
   deleteMapDefinition,
   deleteMapZoneDefinition,
   getMap,
@@ -33,19 +33,20 @@ import {
   splitMapZone,
   updateMapDefinition,
   updateMapZoneDefinition,
+  updateMapZoneGeometries,
   type HealMapZoneGapsSkip,
   type MapUpsertInput,
   type MapZonePartitionReport,
   type MapZoneUpsertInput,
 } from '../../lib/api';
 import { buildRenderedZoneGeometry, collectGeometryPositions, getZoneAnchor } from '../game/mapGeometry';
-import { createEdgeAwareDirectSelectMode } from './edgeDirectSelectMode';
+import { ZoneGraphEditor } from './zoneGraphEditor';
 
 interface AdminZoneEditorProps {
   initialMapId: string | null;
 }
 
-type EditorMode = 'select' | 'draw' | 'split';
+type EditorMode = 'select' | 'draw' | 'split' | 'boundaries';
 type NoticeTone = 'info' | 'success' | 'error';
 type ViewPresetId = 'toronto' | 'chicago' | 'custom';
 
@@ -73,6 +74,16 @@ interface ViewPreset {
 
 const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env.MAPBOX_ACCESS_TOKEN ?? '').trim();
 const MAP_STYLE = 'mapbox://styles/saamoz/cmng3j80c004001s831aw5e3b';
+// ?blankBasemap=1 renders zones on a plain background without contacting the
+// Mapbox APIs — useful offline and in sandboxed test browsers.
+const useBlankBasemap = typeof window !== 'undefined'
+  && new URLSearchParams(window.location.search).has('blankBasemap');
+const BLANK_STYLE: mapboxgl.StyleSpecification = {
+  version: 8,
+  glyphs: 'mapbox://fonts/mapbox/{fontstack}/{range}.pbf',
+  sources: {},
+  layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#dfe5e2' } }],
+};
 const MAP_SOURCE_ID = 'admin-maps-source';
 const MAP_FILL_LAYER_ID = 'admin-maps-fill';
 const MAP_LINE_LAYER_ID = 'admin-maps-line';
@@ -122,8 +133,8 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const suppressZoneSelectionUntilRef = useRef(0);
   const mergeTargetIdRef = useRef<string | null>(null);
   const mergePickModeRef = useRef(false);
-  const editSessionRef = useRef<{ editingZoneId: string | null; draftActive: boolean }>({ editingZoneId: null, draftActive: false });
-  const geometryHistoryRef = useRef<GeoJsonGeometry[]>([]);
+  const draftActiveRef = useRef(false);
+  const graphEditorRef = useRef<ZoneGraphEditor | null>(null);
 
   const [maps, setMaps] = useState<MapDefinition[]>([]);
   const [currentMap, setCurrentMap] = useState<MapDefinition | null>(null);
@@ -136,8 +147,12 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [zoneForm, setZoneForm] = useState<ZoneFormState>(INITIAL_ZONE_FORM);
   const [geometryDraft, setGeometryDraft] = useState<GeoJsonGeometry | null>(null);
-  const [synchronizedGeometryDrafts, setSynchronizedGeometryDrafts] = useState<Record<string, GeoJsonGeometry>>({});
-  const [editingGeometryZoneId, setEditingGeometryZoneId] = useState<string | null>(null);
+  const [boundaryPreview, setBoundaryPreview] = useState<Record<string, GeoJsonGeometry>>({});
+  const [boundaryChangedZoneIds, setBoundaryChangedZoneIds] = useState<string[]>([]);
+  const [boundarySelectedCount, setBoundarySelectedCount] = useState(0);
+  const [boundaryCanUndo, setBoundaryCanUndo] = useState(false);
+  const [boundaryCanRedo, setBoundaryCanRedo] = useState(false);
+  const [isSavingBoundaries, setIsSavingBoundaries] = useState(false);
   const [isSavingMap, setIsSavingMap] = useState(false);
   const [isDeleteMapArmed, setIsDeleteMapArmed] = useState(false);
   const [isSavingZone, setIsSavingZone] = useState(false);
@@ -164,11 +179,11 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   const renderedZones = useMemo(
     () => zones.map((zone) => ({
       ...zone,
-      geometry: synchronizedGeometryDrafts[zone.id] ?? zone.geometry,
+      geometry: boundaryPreview[zone.id] ?? zone.geometry,
     })),
-    [synchronizedGeometryDrafts, zones],
+    [boundaryPreview, zones],
   );
-  const hasGeometrySession = Boolean(geometryDraft) || Boolean(editingGeometryZoneId);
+  const hasGeometrySession = Boolean(geometryDraft) || mode === 'boundaries';
   const gapReport = useMemo(
     () => findAdjacencyGaps(zones, gapToleranceMeters),
     [zones, gapToleranceMeters],
@@ -203,9 +218,9 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { mergeTargetIdRef.current = mergeTargetId; }, [mergeTargetId]);
   useEffect(() => { mergePickModeRef.current = isMergePickMode; }, [isMergePickMode]);
-  useEffect(() => {
-    editSessionRef.current = { editingZoneId: editingGeometryZoneId, draftActive: Boolean(geometryDraft) };
-  }, [editingGeometryZoneId, geometryDraft]);
+  useEffect(() => { draftActiveRef.current = Boolean(geometryDraft); }, [geometryDraft]);
+  // Tear down a live boundary-editing session if the component unmounts.
+  useEffect(() => () => { graphEditorRef.current?.destroy(); graphEditorRef.current = null; }, []);
 
   useEffect(() => {
     if (!currentMap) return;
@@ -224,49 +239,17 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
 
   const clearGeometrySession = useCallback(() => {
     drawRef.current?.deleteAll();
-    geometryHistoryRef.current = [];
+    graphEditorRef.current?.destroy();
+    graphEditorRef.current = null;
     setGeometryDraft(null);
-    setSynchronizedGeometryDrafts({});
-    setEditingGeometryZoneId(null);
+    setBoundaryPreview({});
+    setBoundaryChangedZoneIds([]);
+    setBoundarySelectedCount(0);
+    setBoundaryCanUndo(false);
+    setBoundaryCanRedo(false);
     setMode('select');
     splitZoneIdRef.current = null;
     suppressZoneSelectionUntilRef.current = 0;
-  }, []);
-
-  const applyEditedGeometryDraft = useCallback((editingZoneId: string | null, nextGeometry: GeoJsonGeometry) => {
-    setGeometryDraft(nextGeometry);
-
-    const editingZone = editingZoneId
-      ? zonesRef.current.find((zone) => zone.id === editingZoneId) ?? null
-      : null;
-    if (!editingZone) {
-      setSynchronizedGeometryDrafts({});
-      return;
-    }
-
-    try {
-      const propagation = propagateSharedBoundaryEdit(
-        editingZone.id,
-        editingZone.geometry,
-        nextGeometry,
-        zonesRef.current,
-      );
-      const neighborDrafts = { ...propagation.geometries };
-      delete neighborDrafts[editingZone.id];
-      setSynchronizedGeometryDrafts(neighborDrafts);
-      if (Object.keys(neighborDrafts).length > 3) {
-        console.warn('[edit-vertices] propagation affected an unusually large number of zones:', {
-          editingZoneId: editingZone.id,
-          affectedZoneIds: Object.keys(neighborDrafts),
-        });
-      }
-    } catch (error) {
-      setSynchronizedGeometryDrafts({});
-      setNotice({
-        tone: 'error',
-        message: error instanceof Error ? error.message : 'Unable to synchronize adjacent zone boundaries.',
-      });
-    }
   }, []);
 
   const syncMapSources = useCallback(() => {
@@ -278,11 +261,11 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       selectedZoneId,
       mergeTargetId,
       previewCollection,
-      new Set(Object.keys(synchronizedGeometryDrafts)),
+      new Set(boundaryChangedZoneIds),
       gapReport.gaps,
       overlapRegions,
     );
-  }, [gapReport, mergeTargetId, overlapRegions, previewCollection, renderedZones, selectedZoneId, synchronizedGeometryDrafts]);
+  }, [boundaryChangedZoneIds, gapReport, mergeTargetId, overlapRegions, previewCollection, renderedZones, selectedZoneId]);
 
   const fitMapToCurrentData = useCallback((focusZone?: MapZone | null) => {
     const map = mapRef.current;
@@ -394,7 +377,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
       accessToken: mapboxToken,
-      style: MAP_STYLE,
+      style: useBlankBasemap ? BLANK_STYLE : MAP_STYLE,
       center: initialCenter,
       zoom: currentMap?.defaultZoom ?? preset?.defaultZoom ?? 11,
       performanceMetricsCollection: false,
@@ -404,10 +387,12 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     const draw = new MapboxDraw({
       displayControlsDefault: false,
       styles: createDrawStyles(),
-      modes: { ...MapboxDraw.modes, direct_select: createEdgeAwareDirectSelectMode() },
     });
     mapRef.current = map;
     drawRef.current = draw;
+    if (import.meta.env.DEV) {
+      (window as unknown as { __adminMap?: mapboxgl.Map }).__adminMap = map;
+    }
     map.addControl(draw, 'top-right');
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
     map.addControl(new mapboxgl.ScaleControl({ unit: 'metric', maxWidth: 120 }), 'bottom-right');
@@ -428,11 +413,11 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     snapMarkerRef.current = snapMarker;
 
     const handleMapClick = (event: mapboxgl.MapMouseEvent) => {
-      if (modeRef.current === 'split' || Date.now() < suppressZoneSelectionUntilRef.current) {
+      if (modeRef.current === 'split' || modeRef.current === 'boundaries' || Date.now() < suppressZoneSelectionUntilRef.current) {
         return;
       }
 
-      if (editSessionRef.current.draftActive || editSessionRef.current.editingZoneId || !map.isStyleLoaded()) return;
+      if (draftActiveRef.current || !map.isStyleLoaded()) return;
 
       const feature = map.queryRenderedFeatures(event.point, {
         layers: [MAP_FILL_LAYER_ID, MAP_LINE_LAYER_ID, MAP_LABEL_LAYER_ID],
@@ -475,6 +460,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
             setZones((prev) => [...prev.filter((z) => z.id !== zoneId), ...splitZones]);
             setSelectedZoneId(splitZones[0]?.id ?? null);
             if (splitZones[0]) setZoneForm(buildFormFromZone(splitZones[0]));
+            if (splitZones[0]) void refreshPartitionStatus(splitZones[0].mapId);
             setNotice({ tone: 'success', message: `Zone split into ${splitZones.length} parts.` });
           })
           .catch((error: unknown) => {
@@ -484,61 +470,38 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
         return;
       }
 
-      // Draw mode: new polygon → snap + clip
+      // Draw mode: new polygon → snap to existing boundaries. The zone keeps
+      // its drawn shape and, on save, carves that shape out of any zones it
+      // overlaps — so drawing over the existing map is the normal way to add
+      // a zone that takes territory from its neighbours.
       setMode('select');
       setSelectedZoneId(null);
-      setEditingGeometryZoneId(null);
 
       let geometry = feature.geometry as GeoJsonGeometry;
-
-      // Snap drawn vertices to nearby existing zone boundaries
       if (geometry.type === 'Polygon') {
         geometry = snapPolygonVertices(geometry, zonesRef.current, map, SNAP_THRESHOLD_PX);
       }
 
-      // Auto-clip against existing zones (prevent overlap)
-      if ((geometry.type === 'Polygon' || geometry.type === 'MultiPolygon') && zonesRef.current.length > 0) {
-        try {
-          const drawn = turfFeature(geometry as Polygon | MultiPolygon);
-          const clipped = autoClipAgainstZones(drawn, zonesRef.current);
-          if (clipped === null) {
-            setNotice({ tone: 'error', message: 'The drawn area is fully covered by existing zones.' });
-            drawRef.current?.deleteAll();
-            return;
-          }
-          geometry = clipped.geometry as GeoJsonGeometry;
-        } catch {
-          // use unclipped geometry if turf fails
-        }
-      }
-
-      // Show the (possibly modified) geometry in the draw tool
       drawRef.current?.deleteAll();
       drawRef.current?.add({ type: 'Feature', id: 'draft-zone', properties: {}, geometry: geometry as never });
 
       setGeometryDraft(geometry);
       setZoneForm({ ...INITIAL_ZONE_FORM });
-      setNotice({ tone: 'info', message: 'Polygon ready — enter a name and click Create Zone.' });
+      setNotice({
+        tone: 'info',
+        message: 'Polygon ready — name it and click Create Zone. Any overlap with existing zones will be taken from them.',
+      });
     };
 
     const handleDrawUpdate = (event: { features: Array<Feature> }) => {
       const feature = event.features[0];
-      if (!feature?.geometry) return;
-      const nextGeometry = feature.geometry as GeoJsonGeometry;
-      const editingZoneId = editSessionRef.current.editingZoneId;
-      if (editingZoneId) {
-        const history = geometryHistoryRef.current;
-        const previousGeometry = history[history.length - 1];
-        if (!previousGeometry || !geometriesEqual(previousGeometry, nextGeometry)) {
-          history.push(cloneGeometry(nextGeometry));
-        }
-      }
-
-      applyEditedGeometryDraft(editingZoneId, nextGeometry);
+      if (!feature?.geometry || feature.id !== 'draft-zone') return;
+      setGeometryDraft(feature.geometry as GeoJsonGeometry);
     };
 
     const handleMouseMove = (event: mapboxgl.MapMouseEvent) => {
       if (!map.isStyleLoaded()) { map.getCanvas().style.cursor = ''; return; }
+      if (modeRef.current === 'boundaries') return; // the boundary editor owns the cursor
 
       const isDrawing = modeRef.current === 'draw' || modeRef.current === 'split';
       const isMergePick = mergePickModeRef.current;
@@ -608,7 +571,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       mapRef.current = null;
       map.remove();
     };
-  }, [applyEditedGeometryDraft, currentMap, focusZone, mapForm.viewPresetId]);
+  }, [currentMap, focusZone, mapForm.viewPresetId]);
 
   useEffect(() => { syncMapSources(); }, [syncMapSources]);
 
@@ -677,23 +640,23 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       setNotice({ tone: 'info', message: 'Create a map before drawing zones.' });
       return;
     }
+    clearGeometrySession();
     setMode('draw');
-    setNotice({ tone: 'info', message: 'Click to place vertices. Double-click to close the polygon. Amber dots indicate snap points on existing zone edges.' });
+    setNotice({ tone: 'info', message: 'Click to place vertices; double-click to close. Amber dots snap to existing zone edges. Overlapping area is taken from existing zones.' });
     setSelectedZoneId(null);
     setIsDeleteArmed(false);
     setPreviewCollection(null);
     setPreviewOrigin(null);
     setMergeTargetId(null);
     setIsMergePickMode(false);
-    drawRef.current.deleteAll();
-    geometryHistoryRef.current = [];
+    drawRef.current?.deleteAll();
     setGeometryDraft(null);
-    setEditingGeometryZoneId(null);
-    drawRef.current.changeMode('draw_polygon');
+    drawRef.current?.changeMode('draw_polygon');
   };
 
   const handleStartSplit = () => {
     if (!selectedZone || !drawRef.current) return;
+    clearGeometrySession();
     splitZoneIdRef.current = selectedZone.id;
     suppressZoneSelectionUntilRef.current = Number.POSITIVE_INFINITY;
     setMode('split');
@@ -701,7 +664,6 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     setIsMergePickMode(false);
     setIsDeleteArmed(false);
     drawRef.current.deleteAll();
-    geometryHistoryRef.current = [];
     drawRef.current.changeMode('draw_line_string');
     setNotice({ tone: 'info', message: `Draw a line through "${selectedZone.name}" where you want it split. Double-click to finish.` });
   };
@@ -711,100 +673,72 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     setNotice(null);
   };
 
-  const handleBeginEditGeometry = () => {
-    if (!selectedZone || !drawRef.current) return;
+  const handleStartBoundaryEdit = () => {
+    const map = mapRef.current;
+    if (!map || zones.length === 0) return;
+    // isStyleLoaded() flickers false whenever tiles are pending; the editor
+    // only needs the style object to exist so it can add its own layers.
+    if (!map.getSource(MAP_SOURCE_ID)) {
+      setNotice({ tone: 'info', message: 'The map is still loading — try again in a moment.' });
+      return;
+    }
     clearGeometrySession();
-    const featureId = drawRef.current.add({
-      type: 'Feature',
-      id: selectedZone.id,
-      properties: {},
-      geometry: selectedZone.geometry as never,
-    });
-    const drawFeatureId = Array.isArray(featureId) ? featureId[0] : featureId;
-    drawRef.current.changeMode('direct_select', { featureId: drawFeatureId });
-    setEditingGeometryZoneId(selectedZone.id);
-    setGeometryDraft(selectedZone.geometry);
-    geometryHistoryRef.current = [cloneGeometry(selectedZone.geometry)];
-    setSynchronizedGeometryDrafts({});
+    setMode('boundaries');
+    setIsDeleteArmed(false);
+    setMergeTargetId(null);
+    setIsMergePickMode(false);
+    setPreviewCollection(null);
+    setPreviewOrigin(null);
+
+    const editor = new ZoneGraphEditor(
+      map,
+      zonesRef.current.map((zone) => ({ id: zone.id, name: zone.name, geometry: zone.geometry })),
+      {
+        onPreview: (geometries, changedZoneIds) => {
+          setBoundaryPreview(geometries);
+          setBoundaryChangedZoneIds(changedZoneIds);
+        },
+        onState: (state) => {
+          setBoundarySelectedCount(state.selectedCount);
+          setBoundaryCanUndo(state.canUndo);
+          setBoundaryCanRedo(state.canRedo);
+        },
+        onNotice: (tone, message) => setNotice({ tone, message }),
+      },
+    );
+    graphEditorRef.current = editor;
+
+    const skipped = editor.skippedZoneIds.length;
     setNotice({
       tone: 'info',
-      message: 'Drag an edge to move the whole boundary line, or a dot to move one vertex. Drag from the zone interior to box-select vertices; hold Shift to add to the selection. Press Ctrl+Z to undo geometry edits. Adjacent zones sharing that boundary update automatically (shown in amber). Save when done.',
+      message: 'Boundary editing: every corner on the map is now a dot you can drag — shared corners move all their zones together, so no gaps can open. '
+        + (skipped > 0 ? `${skipped} point zone${skipped === 1 ? '' : 's'} are not part of boundary editing. ` : '')
+        + 'Save when you’re happy with the shape.',
     });
   };
 
-  const handleUndoGeometry = useCallback(() => {
-    const editingZoneId = editSessionRef.current.editingZoneId;
-    const draw = drawRef.current;
-    const history = geometryHistoryRef.current;
-    if (!editingZoneId || !draw) return;
-    if (history.length <= 1) {
-      setNotice({ tone: 'info', message: 'There are no more geometry edits to undo.' });
+  const handleSaveBoundaryEdit = async () => {
+    const editor = graphEditorRef.current;
+    if (!editor || !currentMap) return;
+    const changed = editor.getChangedGeometries();
+    if (changed.length === 0) {
+      clearGeometrySession();
+      setNotice({ tone: 'info', message: 'No boundary changes to save.' });
       return;
     }
-
-    history.pop();
-    const previousGeometry = cloneGeometry(history[history.length - 1]);
-    draw.add({
-      type: 'Feature',
-      id: editingZoneId,
-      properties: {},
-      geometry: previousGeometry as never,
-    });
-    draw.changeMode('simple_select', { featureIds: [editingZoneId] });
-    draw.changeMode('direct_select', { featureId: editingZoneId });
-    applyEditedGeometryDraft(editingZoneId, previousGeometry);
-    setNotice({ tone: 'info', message: 'Last geometry edit undone.' });
-  }, [applyEditedGeometryDraft]);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return;
-      const target = event.target;
-      if (
-        target instanceof HTMLElement
-        && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
-      ) return;
-      if (!editSessionRef.current.editingZoneId) return;
-
-      event.preventDefault();
-      handleUndoGeometry();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndoGeometry]);
-
-  const handleDeleteSelectedVertex = () => {
-    const draw = drawRef.current;
-    if (!editingGeometryZoneId || !draw) return;
-
-    const selectedPoints = draw.getSelectedPoints().features;
-    if (selectedPoints.length !== 1) {
-      setNotice({
-        tone: 'info',
-        message: selectedPoints.length === 0
-          ? 'Select one vertex dot before deleting it.'
-          : 'Delete one vertex at a time so adjacent boundaries stay synchronized.',
-      });
-      return;
+    setIsSavingBoundaries(true);
+    try {
+      const nextZones = await updateMapZoneGeometries(currentMap.id, changed);
+      setZones(nextZones);
+      clearGeometrySession();
+      void refreshPartitionStatus(currentMap.id);
+      setNotice({ tone: 'success', message: `Saved boundary changes across ${changed.length} zone${changed.length === 1 ? '' : 's'}.` });
+    } catch (error) {
+      // Keep the session alive so the admin can fix the reported problem.
+      setNotice({ tone: 'error', message: getApiErrorMessage(error) });
+    } finally {
+      setIsSavingBoundaries(false);
     }
-
-    const selectedPosition = selectedPoints[0]?.geometry.type === 'Point'
-      ? selectedPoints[0].geometry.coordinates
-      : null;
-    const editedFeature = draw.get(editingGeometryZoneId);
-    const ring = editedFeature?.geometry.type === 'Polygon' && selectedPosition
-      ? editedFeature.geometry.coordinates.find((candidate) =>
-          candidate.some((position) => positionsMatch(position, selectedPosition)),
-        )
-      : null;
-    if (!ring || ring.length <= 4) {
-      setNotice({ tone: 'error', message: 'A polygon ring must keep at least three vertices.' });
-      return;
-    }
-
-    draw.trash();
-    setNotice({ tone: 'info', message: 'Vertex removed. Review the synchronized boundary, then save the zone.' });
   };
 
   const handleDeleteMap = async () => {
@@ -885,31 +819,33 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     setNotice(null);
     try {
       if (geometryDraft && !selectedZone) {
-        // Create new zone
-        const createdZone = await createMapZoneDefinition(currentMap.id, { ...payload, geometry: geometryDraft });
-        setZones((prev) => [...prev, createdZone]);
-        setSelectedZoneId(createdZone.id);
-        setZoneForm(buildFormFromZone(createdZone));
+        // Create new zone — it keeps its drawn shape and carves that area out
+        // of any zones it overlaps.
+        const result = await createMapZoneCarving(currentMap.id, { ...payload, geometry: geometryDraft });
+        setZones(result.zones);
+        setSelectedZoneId(result.zone.id);
+        setZoneForm(buildFormFromZone(result.zone));
         clearGeometrySession();
-        fitMapToCurrentData(createdZone);
-        setNotice({ tone: 'success', message: 'Zone created.' });
+        fitMapToCurrentData(result.zone);
+        void refreshPartitionStatus(currentMap.id);
+        setNotice({
+          tone: 'success',
+          message: result.trimmedZoneIds.length > 0
+            ? `Zone created — took territory from ${result.trimmedZoneIds.length} neighbouring zone${result.trimmedZoneIds.length === 1 ? '' : 's'}.`
+            : 'Zone created.',
+        });
         return;
       }
       if (!selectedZone) {
         setNotice({ tone: 'error', message: 'Select a zone or draw a polygon first.' });
         return;
       }
-      // Update existing zone
-      const nextGeometry = editingGeometryZoneId === selectedZone.id && geometryDraft ? geometryDraft : undefined;
-      const result = await updateMapZoneDefinition(selectedZone.id, {
-        ...payload,
-        geometry: nextGeometry,
-      });
+      // Update existing zone details (geometry changes go through boundary editing)
+      const result = await updateMapZoneDefinition(selectedZone.id, payload);
       const updatedZoneById = new Map(result.zones.map((zone) => [zone.id, zone]));
       setZones((prev) => prev.map((zone) => updatedZoneById.get(zone.id) ?? zone));
       const updatedZone = result.zone;
       setZoneForm(buildFormFromZone(updatedZone));
-      clearGeometrySession();
       setNotice({ tone: 'success', message: 'Zone saved.' });
     } catch (error) {
       setNotice({ tone: 'error', message: getApiErrorMessage(error) });
@@ -934,7 +870,13 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       clearGeometrySession();
       setMergeTargetId(null);
       setIsMergePickMode(false);
-      setNotice({ tone: 'success', message: 'Zone deleted.' });
+      if (currentMap) void refreshPartitionStatus(currentMap.id);
+      setNotice({
+        tone: 'success',
+        message: nextZones.length > 0
+          ? 'Zone deleted. Its ground is unassigned now — use Edit Boundaries or Merge to give it to a neighbour.'
+          : 'Zone deleted.',
+      });
     } catch (error) {
       setNotice({ tone: 'error', message: getApiErrorMessage(error) });
     } finally {
@@ -1042,6 +984,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       setZoneForm(buildFormFromZone(mergedZone));
       setMergeTargetId(null);
       setIsMergePickMode(false);
+      void refreshPartitionStatus(currentMap.id);
       setNotice({ tone: 'success', message: 'Zones merged.' });
     } catch (error) {
       setNotice({ tone: 'error', message: getApiErrorMessage(error) });
@@ -1327,31 +1270,58 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
               ) : null}
 
               {/* Drawing Tools */}
-              <Panel title="Drawing">
-                <div className="grid grid-cols-3 gap-2">
+              <Panel title="Tools">
+                <div className="grid grid-cols-2 gap-2">
                   <ToolButton active={mode === 'select'} label="Select" onClick={() => { clearGeometrySession(); setNotice(null); }} />
                   <ToolButton active={mode === 'draw'} label="Draw Zone" onClick={handleStartDraw} />
                   <ToolButton
+                    active={mode === 'boundaries'}
+                    label="Edit Boundaries"
+                    onClick={handleStartBoundaryEdit}
+                    disabled={zones.length === 0 || Boolean(geometryDraft)}
+                  />
+                  <ToolButton
                     active={mode === 'split'}
-                    label={isSplitting ? 'Splitting…' : 'Split Line'}
+                    label={isSplitting ? 'Splitting…' : 'Split Zone'}
                     onClick={handleStartSplit}
                     disabled={!selectedZone || isSplitting || hasGeometrySession}
                   />
                 </div>
-                {hasGeometrySession ? (
+                {hasGeometrySession && mode !== 'boundaries' ? (
                   <ActionButton onClick={handleCancelGeometry} label="Cancel" tone="secondary" />
                 ) : null}
-                {editingGeometryZoneId ? (
+                {mode === 'boundaries' ? (
                   <div className="space-y-2">
                     <ul className="space-y-1 rounded-2xl border border-[#d7ddda] bg-white px-3 py-2.5 text-xs text-[#4a5559]">
-                      <li>· Drag an <strong>edge</strong> to move that whole boundary line.</li>
-                      <li>· Drag a <strong>dot</strong> to move one vertex.</li>
-                      <li>· Click one dot, then use <strong>Delete Selected Vertex</strong> to remove it.</li>
-                      <li>· Drag from the <strong>interior</strong> to box-select vertices, then drag a selected dot to move the group.</li>
-                      <li>· Hold Shift to add to the selection. Press <strong>Ctrl+Z</strong> to undo a geometry edit.</li>
-                      <li>· Amber zones share the edge you&apos;re moving and update with it.</li>
+                      <li>· Drag a <strong>dot</strong> to move a corner — zones sharing it move together.</li>
+                      <li>· <strong>Shift+drag</strong> the map to box-select dots, then drag one to move them all.</li>
+                      <li>· Click a small <strong>hollow dot</strong> on an edge to add a corner there (both sides at once).</li>
+                      <li>· Drop a dot onto another dot or edge to <strong>weld</strong> boundaries together.</li>
+                      <li>· <strong>Delete</strong> removes selected corners · <strong>Ctrl+Z / Ctrl+Y</strong> undo &amp; redo · <strong>Esc</strong> clears the selection.</li>
+                      <li>· Amber zones have unsaved boundary changes.</li>
                     </ul>
-                    <ActionButton onClick={handleDeleteSelectedVertex} label="Delete Selected Vertex" tone="danger" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <ActionButton
+                        onClick={() => void handleSaveBoundaryEdit()}
+                        label={isSavingBoundaries
+                          ? 'Saving…'
+                          : boundaryChangedZoneIds.length > 0
+                            ? `Save (${boundaryChangedZoneIds.length} zone${boundaryChangedZoneIds.length === 1 ? '' : 's'})`
+                            : 'Save'}
+                        disabled={isSavingBoundaries}
+                      />
+                      <ActionButton onClick={handleCancelGeometry} label="Discard" tone="secondary" disabled={isSavingBoundaries} />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <ActionButton onClick={() => graphEditorRef.current?.undo()} label="Undo" tone="secondary" disabled={!boundaryCanUndo} />
+                      <ActionButton onClick={() => graphEditorRef.current?.redo()} label="Redo" tone="secondary" disabled={!boundaryCanRedo} />
+                      <ActionButton
+                        onClick={() => graphEditorRef.current?.deleteSelection()}
+                        label={boundarySelectedCount > 0 ? `Delete (${boundarySelectedCount})` : 'Delete'}
+                        tone="danger"
+                        disabled={boundarySelectedCount === 0}
+                      />
+                    </div>
                   </div>
                 ) : null}
               </Panel>
@@ -1388,12 +1358,12 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                   <ActionButton
                     onClick={() => void handleSaveZone()}
                     label={isSavingZone ? 'Saving…' : (geometryDraft && !selectedZone ? 'Create Zone' : 'Save Zone')}
-                    disabled={isSavingZone || (!selectedZone && !geometryDraft)}
+                    disabled={isSavingZone || (!selectedZone && !geometryDraft) || mode === 'boundaries'}
                   />
                   <ActionButton
                     onClick={() => void handleDeleteZone()}
                     label={isDeleteArmed ? 'Confirm Delete' : 'Delete'}
-                    disabled={!selectedZone || isSavingZone}
+                    disabled={!selectedZone || isSavingZone || mode === 'boundaries'}
                     tone="danger"
                   />
                 </div>
@@ -1401,8 +1371,8 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                 {selectedZone ? (
                   <div className="grid grid-cols-2 gap-2">
                     <ActionButton
-                      onClick={handleBeginEditGeometry}
-                      label="Edit Vertices"
+                      onClick={handleStartBoundaryEdit}
+                      label="Edit Boundaries"
                       disabled={hasGeometrySession}
                       tone="secondary"
                     />
@@ -1551,6 +1521,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
                   {currentMap ? currentMap.name : 'Map Editor'}
                   {mode === 'draw' ? <span className="ml-2 text-[#8e6b2d]">· Drawing</span> : null}
                   {mode === 'split' ? <span className="ml-2 text-[#3d7a8a]">· Split Line</span> : null}
+                  {mode === 'boundaries' ? <span className="ml-2 text-[#8e6b2d]">· Editing boundaries{boundaryChangedZoneIds.length > 0 ? ` (${boundaryChangedZoneIds.length} changed)` : ''}</span> : null}
                   {isMergePickMode ? <span className="ml-2 text-[#2a5870]">· Pick merge target</span> : null}
                 </div>
                 {notice ? (
@@ -1723,27 +1694,6 @@ function collectBoundaryRings(geometry: GeoJsonGeometry): Array<Array<[number, n
     return geometry.coordinates.flat() as Array<Array<[number, number]>>;
   }
   return [];
-}
-
-function autoClipAgainstZones(
-  drawnFeature: Feature<Polygon | MultiPolygon>,
-  existingZones: MapZone[],
-): Feature<Polygon | MultiPolygon> | null {
-  let result: Feature<Polygon | MultiPolygon> = drawnFeature;
-  for (const zone of existingZones) {
-    if (zone.geometry.type !== 'Polygon' && zone.geometry.type !== 'MultiPolygon') continue;
-    try {
-      const clipped = turfDifference(featureCollection([
-        result,
-        turfFeature(zone.geometry as Polygon | MultiPolygon),
-      ]));
-      if (clipped === null) return null;
-      result = clipped as Feature<Polygon | MultiPolygon>;
-    } catch {
-      // skip zones with invalid geometry
-    }
-  }
-  return result;
 }
 
 // ── Map layer management ──────────────────────────────────────────────────────
@@ -2039,18 +1989,6 @@ function validateFeatureCollection(value: unknown): asserts value is GeoJsonFeat
   if (!Array.isArray(features) || features.length === 0) {
     throw new Error('FeatureCollection must contain at least one feature.');
   }
-}
-
-function cloneGeometry(geometry: GeoJsonGeometry): GeoJsonGeometry {
-  return JSON.parse(JSON.stringify(geometry)) as GeoJsonGeometry;
-}
-
-function geometriesEqual(left: GeoJsonGeometry, right: GeoJsonGeometry): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function positionsMatch(left: number[], right: number[]): boolean {
-  return left[0] === right[0] && left[1] === right[1];
 }
 
 function fitMapToPositions(map: mapboxgl.Map | null, positions: Array<[number, number]>, padding: number, maxZoom = 15.8): void {

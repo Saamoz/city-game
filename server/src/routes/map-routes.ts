@@ -6,7 +6,8 @@ import type { OsmPreviewProperties } from '../services/osm-import-service.js';
 import {
   checkMapZonePartition,
   createMap,
-  createMapZone,
+  createMapZoneCarve,
+  createMapZoneChecked,
   deleteMapById,
   deleteMapZoneById,
   getMapByIdOrThrow,
@@ -20,6 +21,7 @@ import {
   splitMapZoneById,
   updateMap,
   updateMapZone,
+  updateMapZoneGeometries,
 } from '../services/map-service.js';
 
 const pointPositionSchema = {
@@ -138,6 +140,7 @@ const mapZoneBodySchema = {
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 255 },
     geometry: geometrySchema,
+    carve: { type: 'boolean' },
     pointValue: { type: 'integer', minimum: 1 },
     claimRadiusMeters: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
     maxGpsErrorMeters: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
@@ -365,6 +368,7 @@ export const mapRoutes: FastifyPluginAsync = async (app) => {
       const body = request.body as {
         name: string;
         geometry: GeoJsonGeometry;
+        carve?: boolean;
         pointValue?: number;
         claimRadiusMeters?: number | null;
         maxGpsErrorMeters?: number | null;
@@ -372,12 +376,52 @@ export const mapRoutes: FastifyPluginAsync = async (app) => {
         metadata?: JsonObject;
       };
 
-      const zone = await createMapZone(app.db, {
-        mapId: id,
-        ...body,
-      });
+      const { carve, ...zoneInput } = body;
 
+      if (carve) {
+        const result = await createMapZoneCarve(app.db, { mapId: id, ...zoneInput });
+        reply.status(201).send(result);
+        return;
+      }
+
+      const zone = await createMapZoneChecked(app.db, { mapId: id, ...zoneInput });
       reply.status(201).send({ zone });
+    },
+  );
+
+  app.post(
+    '/maps/:id/zones/geometries',
+    {
+      schema: {
+        params: mapParamsSchema,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['updates'],
+          properties: {
+            updates: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 500,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['zoneId', 'geometry'],
+                properties: {
+                  zoneId: { type: 'string', format: 'uuid' },
+                  geometry: { oneOf: [polygonSchema, multiPolygonSchema] },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as { updates: Array<{ zoneId: string; geometry: GeoJsonGeometry }> };
+      const zones = await updateMapZoneGeometries(app.db, id, body.updates);
+      reply.send({ zones });
     },
   );
 

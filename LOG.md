@@ -168,3 +168,17 @@ Significant mobile game view UX overhaul shipped before backend Phase 39 (rate l
 - Admin game setup now includes `broadcast_team_locations`. When enabled, active players receive live team markers; spectator view still fetches team locations from the public spectator route by design.
 - Validation completed: server TypeScript, client TypeScript, and client production build all passed.
 - DB-backed realtime test remains environment-gated in WSL until Postgres is reachable on `127.0.0.1:5432`.
+
+## Zone Editor Rework Notes (2026-07-16)
+
+The admin map editor's geometry editing was rebuilt around a **shared-node topology session** instead of per-zone polygon editing with diff-based propagation.
+
+**Why:** `propagateSharedBoundaryEdit` inferred edits by diffing old/new polygons and re-finding shared vertices by exact coordinate match — fragile (one vertex per edit, wrong alignments on symmetric rings, missed near-identical coordinates → gaps → gap-healing machinery). T-junctions were unrepresentable, and the deferred `map_zones_connected` constraint rejected edits at COMMIT with an opaque error; a dirty map blocked all writes including fixes.
+
+**New model:**
+- `shared/src/zone-graph.ts` — builds a shared-node graph from all zone polygons: vertices within 10cm weld into single nodes; vertices lying on another zone's segment become true shared T-junction nodes. Rings are node-id sequences, so shared boundaries are shared by construction; extraction rebuilds polygons. Ops: move/delete/insert-on-edge/weld-node/weld-into-edge. Pure + unit-tested (`server/src/services/zone-graph.test.ts`).
+- `client .../zoneGraphEditor.ts` — map-wide "Edit Boundaries" mode: every corner is a draggable dot (dragging a T-junction reshapes all 3 zones), shift+drag marquee, group drag, midpoint dots insert vertices on both sides of an edge, drag-onto-node/edge welds boundaries, Delete/undo/redo. Replaces mapbox-draw `direct_select` + the custom edge-drag mode (`edgeDirectSelectMode.ts` deleted; edge-drag dropped intentionally).
+- Save is atomic: `POST /maps/:id/zones/geometries` writes every changed zone in one transaction (`updateMapZoneGeometries`).
+- Drawing a zone now **carves**: the new zone keeps its drawn shape and takes the overlapped ground from existing zones (`POST /maps/:id/zones` with `carve: true` → `createMapZoneCarve`; refuses to swallow a zone whole). Client-side auto-clip removed.
+- All map-zone writes (create/update/delete/split/merge/import/bulk) now go through `runMapZoneWrite`: constraint enforced when the map was clean before the edit, suspended when it was already dirty — so a dirty map no longer bricks the editor. Violations return actionable messages (`assertMapPartitionValid` names the overlapping zone pairs) instead of the raw trigger error.
+- `PATCH /map-zones/:id` with geometry (and its server-side propagation) is kept for API compatibility; the editor no longer sends geometry through it.
