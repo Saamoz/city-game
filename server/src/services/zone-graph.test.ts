@@ -3,6 +3,7 @@ import {
   buildZoneGraph,
   deleteGraphNodes,
   extractZoneGeometries,
+  graphSnapCreatesIntersections,
   insertGraphNodeOnEdge,
   listGraphEdges,
   listGraphNodeIds,
@@ -217,6 +218,56 @@ describe('graph editing operations', () => {
     const welded = leftRing.find(([lng, lat]) => lat === 0.5 && lng === 1);
     expect(welded).toBeDefined();
     expect(rightRing.some(([lng, lat]) => lng === welded![0] && lat === welded![1])).toBe(true);
+  });
+
+  it('allows a clean edge snap but blocks one that crosses a wavy boundary nearby', () => {
+    const movingZone = polygon([
+      [-2, -1],
+      [-0.1, 0],
+      [-2, 1],
+    ]);
+
+    const { graph: cleanGraph } = buildZoneGraph([
+      { id: 'moving', geometry: movingZone },
+      { id: 'target', geometry: rectangle(0, -1, 2, 1) },
+    ]);
+    const cleanDragged = findNode(cleanGraph.positions, -0.1, 0);
+    const cleanBottom = findNode(cleanGraph.positions, 0, -1);
+    const cleanTop = findNode(cleanGraph.positions, 0, 1);
+
+    expect(graphSnapCreatesIntersections(
+      cleanGraph,
+      cleanDragged,
+      [0, 0],
+      { type: 'edge', edge: { a: cleanBottom, b: cleanTop } },
+    )).toBe(false);
+
+    const { graph: wavyGraph } = buildZoneGraph([
+      { id: 'moving', geometry: movingZone },
+      {
+        id: 'target',
+        geometry: polygon([
+          [0, -1],
+          [2, -1],
+          [2, 1],
+          [0, 1],
+          [-0.5, 0.1],
+          [0, 0.2],
+          [0, -0.2],
+          [-0.5, -0.1],
+        ]),
+      },
+    ]);
+    const wavyDragged = findNode(wavyGraph.positions, -0.1, 0);
+    const wavyBottom = findNode(wavyGraph.positions, 0, -0.2);
+    const wavyTop = findNode(wavyGraph.positions, 0, 0.2);
+
+    expect(graphSnapCreatesIntersections(
+      wavyGraph,
+      wavyDragged,
+      [0, 0],
+      { type: 'edge', edge: { a: wavyBottom, b: wavyTop } },
+    )).toBe(true);
   });
 
   it('lists unique undirected edges', () => {

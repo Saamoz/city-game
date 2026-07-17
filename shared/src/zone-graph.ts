@@ -39,6 +39,10 @@ export interface ZoneGraphEdge {
   b: number;
 }
 
+export type ZoneGraphSnapTarget =
+  | { type: 'node'; nodeId: number }
+  | { type: 'edge'; edge: ZoneGraphEdge };
+
 export interface GraphZoneInput {
   id: string;
   geometry: GeoJsonGeometry;
@@ -290,6 +294,44 @@ export function moveGraphNodes(graph: ZoneGraph, updates: Map<number, Position>)
   }
 }
 
+/**
+ * Returns true when moving `nodeId` to a proposed snap point would make one
+ * of its incident boundary segments touch or cross any non-adjacent boundary.
+ * The intended node/edge target is exempt because that contact is the weld.
+ *
+ * This is deliberately checked before a snap is applied. On a slightly wavy
+ * boundary, the two segments leading into the dragged node can otherwise cut
+ * across nearby segments and create several tiny loops/intersections at once.
+ */
+export function graphSnapCreatesIntersections(
+  graph: ZoneGraph,
+  nodeId: number,
+  nextPosition: Position,
+  target: ZoneGraphSnapTarget,
+): boolean {
+  const neighbors = graphNodeNeighbors(graph, nodeId);
+  const edges = listGraphEdges(graph);
+
+  for (const neighborId of neighbors) {
+    const start = graph.positions[neighborId];
+    if (!start) continue;
+
+    for (const edge of edges) {
+      // Existing incident edges are the segments being replaced, and edges
+      // at the stationary neighbor share a legitimate endpoint.
+      if (edge.a === nodeId || edge.b === nodeId || edge.a === neighborId || edge.b === neighborId) continue;
+      if (target.type === 'node' && (edge.a === target.nodeId || edge.b === target.nodeId)) continue;
+      if (target.type === 'edge' && sameUndirectedEdge(edge, target.edge)) continue;
+
+      const edgeStart = graph.positions[edge.a];
+      const edgeEnd = graph.positions[edge.b];
+      if (edgeStart && edgeEnd && segmentsIntersect(start, nextPosition, edgeStart, edgeEnd)) return true;
+    }
+  }
+
+  return false;
+}
+
 export interface DeleteNodesResult {
   ok: boolean;
   /** Zones whose rings would drop below three nodes. */
@@ -500,6 +542,55 @@ export function cloneZoneGraph(graph: ZoneGraph): ZoneGraph {
 }
 
 // ── Internals ────────────────────────────────────────────────────────────────
+
+function graphNodeNeighbors(graph: ZoneGraph, nodeId: number): Set<number> {
+  const neighbors = new Set<number>();
+  for (const zone of graph.zones) {
+    for (const polygon of zone.polygons) {
+      for (const ring of polygon) {
+        for (let index = 0; index < ring.length; index += 1) {
+          if (ring[index] !== nodeId) continue;
+          neighbors.add(ring[(index - 1 + ring.length) % ring.length]);
+          neighbors.add(ring[(index + 1) % ring.length]);
+        }
+      }
+    }
+  }
+  neighbors.delete(nodeId);
+  return neighbors;
+}
+
+function sameUndirectedEdge(left: ZoneGraphEdge, right: ZoneGraphEdge): boolean {
+  return (left.a === right.a && left.b === right.b) || (left.a === right.b && left.b === right.a);
+}
+
+function segmentsIntersect(a1: Position, a2: Position, b1: Position, b2: Position): boolean {
+  const o1 = orientation(a1, a2, b1);
+  const o2 = orientation(a1, a2, b2);
+  const o3 = orientation(b1, b2, a1);
+  const o4 = orientation(b1, b2, a2);
+  const epsilon = 1e-14;
+
+  if (((o1 > epsilon && o2 < -epsilon) || (o1 < -epsilon && o2 > epsilon))
+    && ((o3 > epsilon && o4 < -epsilon) || (o3 < -epsilon && o4 > epsilon))) return true;
+
+  return (Math.abs(o1) <= epsilon && pointWithinSegment(b1, a1, a2))
+    || (Math.abs(o2) <= epsilon && pointWithinSegment(b2, a1, a2))
+    || (Math.abs(o3) <= epsilon && pointWithinSegment(a1, b1, b2))
+    || (Math.abs(o4) <= epsilon && pointWithinSegment(a2, b1, b2));
+}
+
+function orientation(a: Position, b: Position, c: Position): number {
+  return ((b[0] - a[0]) * (c[1] - a[1])) - ((b[1] - a[1]) * (c[0] - a[0]));
+}
+
+function pointWithinSegment(point: Position, start: Position, end: Position): boolean {
+  const epsilon = 1e-12;
+  return point[0] >= Math.min(start[0], end[0]) - epsilon
+    && point[0] <= Math.max(start[0], end[0]) + epsilon
+    && point[1] >= Math.min(start[1], end[1]) - epsilon
+    && point[1] <= Math.max(start[1], end[1]) + epsilon;
+}
 
 function stripClosingPosition(ring: Position[] | number[][]): Position[] {
   const typed = ring as Position[];

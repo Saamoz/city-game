@@ -4,6 +4,7 @@ import {
   cloneZoneGraph,
   deleteGraphNodes,
   extractZoneGeometries,
+  graphSnapCreatesIntersections,
   insertGraphNodeOnEdge,
   listGraphEdges,
   listGraphNodeIds,
@@ -58,6 +59,7 @@ interface DragSession {
   moved: boolean;
   mutated: boolean;
   snap: { type: 'node'; nodeId: number } | { type: 'edge'; edge: ZoneGraphEdge } | null;
+  snapBlocked: boolean;
 }
 
 interface MarqueeSession {
@@ -303,6 +305,7 @@ export class ZoneGraphEditor {
       moved: false,
       mutated,
       snap: null,
+      snapBlocked: false,
     };
     this.map.getCanvas().style.cursor = 'grabbing';
   }
@@ -369,16 +372,23 @@ export class ZoneGraphEditor {
 
     // Single-node drags can snap onto (and weld with) other nodes and edges.
     this.drag.snap = null;
+    this.drag.snapBlocked = false;
     this.snapMarkerElement.style.display = 'none';
     if (this.drag.startPositions.size === 1) {
       const [draggedId] = this.drag.startPositions.keys();
       const draggedTo = updates.get(draggedId)!;
-      const snap = this.findSnapTarget(draggedId, draggedTo);
+      const { snap, blocked } = this.findSnapTarget(draggedId, draggedTo);
       if (snap) {
         this.drag.snap = snap.target;
         updates.set(draggedId, snap.position);
         this.snapMarkerElement.style.display = 'block';
         this.snapMarker.setLngLat(snap.position).addTo(this.map);
+      } else if (blocked) {
+        // Keep the last safe position rather than applying the almost-snapped
+        // point that would introduce tiny crossings near a wavy boundary.
+        this.drag.snapBlocked = true;
+        const current = this.graph.positions[draggedId];
+        updates.set(draggedId, [current[0], current[1]]);
       }
     }
 
@@ -417,10 +427,18 @@ export class ZoneGraphEditor {
       return;
     }
 
-    const { moved, mutated, snap, startPositions } = this.drag;
+    const { mutated, snap, snapBlocked, startPositions } = this.drag;
     this.drag = null;
     this.snapMarkerElement.style.display = 'none';
     this.map.getCanvas().style.cursor = '';
+    let shouldRecord = mutated || Array.from(startPositions).some(([nodeId, start]) => {
+      const current = this.graph.positions[nodeId];
+      return current && (current[0] !== start[0] || current[1] !== start[1]);
+    });
+
+    if (snapBlocked) {
+      this.callbacks.onNotice('error', 'Snap skipped — that connection would make boundary segments cross. The corner stayed at its last safe position.');
+    }
 
     if (snap && startPositions.size === 1) {
       const [draggedId] = startPositions.keys();
@@ -434,11 +452,13 @@ export class ZoneGraphEditor {
           ? 'Corners welded — they now move together.'
           : 'Corner welded into the boundary — the edge is now shared.');
       } else {
+        moveGraphNodes(this.graph, startPositions);
+        shouldRecord = mutated;
         this.callbacks.onNotice('error', result.reason ?? 'Could not weld those boundaries.');
       }
     }
 
-    if (moved || mutated) {
+    if (shouldRecord) {
       this.pushHistory();
       this.refreshSources();
       this.schedulePreview();
@@ -525,7 +545,10 @@ export class ZoneGraphEditor {
   private findSnapTarget(
     draggedId: number,
     draggedTo: Position,
-  ): { target: NonNullable<DragSession['snap']>; position: Position } | null {
+  ): {
+    snap: { target: NonNullable<DragSession['snap']>; position: Position } | null;
+    blocked: boolean;
+  } {
     const draggedPoint = this.map.project([draggedTo[0], draggedTo[1]]);
 
     let bestNode: number | null = null;
@@ -542,7 +565,11 @@ export class ZoneGraphEditor {
     }
     if (bestNode !== null) {
       const position = this.graph.positions[bestNode];
-      return { target: { type: 'node', nodeId: bestNode }, position: [position[0], position[1]] };
+      const target = { type: 'node' as const, nodeId: bestNode };
+      const snapPosition: Position = [position[0], position[1]];
+      return graphSnapCreatesIntersections(this.graph, draggedId, snapPosition, target)
+        ? { snap: null, blocked: true }
+        : { snap: { target, position: snapPosition }, blocked: false };
     }
 
     let bestEdge: ZoneGraphEdge | null = null;
@@ -571,9 +598,12 @@ export class ZoneGraphEditor {
       }
     }
     if (bestEdge && bestEdgePosition) {
-      return { target: { type: 'edge', edge: bestEdge }, position: bestEdgePosition };
+      const target = { type: 'edge' as const, edge: bestEdge };
+      return graphSnapCreatesIntersections(this.graph, draggedId, bestEdgePosition, target)
+        ? { snap: null, blocked: true }
+        : { snap: { target, position: bestEdgePosition }, blocked: false };
     }
-    return null;
+    return { snap: null, blocked: false };
   }
 
   // ── Rendering & state ─────────────────────────────────────────────────────
