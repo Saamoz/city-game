@@ -352,9 +352,10 @@ export interface CreateMapZoneCarveResponse {
   zone: MapZone;
   zones: MapZone[];
   trimmedZoneIds: string[];
+  creationMode: 'extend' | 'carve';
 }
 
-/** Creates a zone that keeps its drawn shape and trims every existing zone it overlaps. */
+/** Creates an outer extension by tracing map coverage, or carves when drawn wholly inside the map. */
 export async function createMapZoneCarving(mapId: string, input: MapZoneUpsertInput): Promise<CreateMapZoneCarveResponse> {
   return apiRequest<CreateMapZoneCarveResponse>('/maps/' + mapId + '/zones', {
     method: 'POST',

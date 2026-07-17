@@ -472,10 +472,10 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
         return;
       }
 
-      // Draw mode: new polygon → snap to existing boundaries. The zone keeps
-      // its drawn shape and, on save, carves that shape out of any zones it
-      // overlaps — so drawing over the existing map is the normal way to add
-      // a zone that takes territory from its neighbours.
+      // Draw mode: new polygon → snap nearby vertices. When the polygon crosses
+      // an outer map edge, the server keeps only the outside portion so the new
+      // zone traces that existing edge exactly. Polygons wholly inside the map
+      // retain carve behavior.
       setMode('select');
       setSelectedZoneId(null);
 
@@ -491,7 +491,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       setZoneForm({ ...INITIAL_ZONE_FORM });
       setNotice({
         tone: 'info',
-        message: 'Polygon ready — name it and click Create Zone. Any overlap with existing zones will be taken from them.',
+        message: 'Polygon ready. To extend the map, draw slightly across an outer edge — the new zone will follow that existing boundary exactly.',
       });
     };
 
@@ -826,8 +826,8 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     setNotice(null);
     try {
       if (geometryDraft && !selectedZone) {
-        // Create new zone — it keeps its drawn shape and carves that area out
-        // of any zones it overlaps.
+        // Outer-edge drawings extend the map along its exact boundary;
+        // drawings wholly inside existing coverage retain carve behavior.
         const result = await createMapZoneCarving(currentMap.id, { ...payload, geometry: geometryDraft });
         setZones(result.zones);
         setSelectedZoneId(result.zone.id);
@@ -837,9 +837,11 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
         void refreshPartitionStatus(currentMap.id);
         setNotice({
           tone: 'success',
-          message: result.trimmedZoneIds.length > 0
-            ? `Zone created — took territory from ${result.trimmedZoneIds.length} neighbouring zone${result.trimmedZoneIds.length === 1 ? '' : 's'}.`
-            : 'Zone created.',
+          message: result.creationMode === 'extend'
+            ? 'Zone created — its shared side follows the existing map boundary.'
+            : result.trimmedZoneIds.length > 0
+              ? `Zone created — took territory from ${result.trimmedZoneIds.length} neighbouring zone${result.trimmedZoneIds.length === 1 ? '' : 's'}.`
+              : 'Zone created.',
         });
         return;
       }

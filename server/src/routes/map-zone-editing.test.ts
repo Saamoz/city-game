@@ -128,12 +128,54 @@ describe('map zone boundary editing routes', () => {
       zone: { id: string; name: string };
       zones: Array<{ id: string }>;
       trimmedZoneIds: string[];
+      creationMode: 'extend' | 'carve';
     };
     expect(body.zone.name).toBe('Center');
+    expect(body.creationMode).toBe('carve');
     expect(body.zones).toHaveLength(3);
     expect(body.trimmedZoneIds.sort()).toEqual([leftId, rightId].sort());
 
     // The map is still a clean partition.
+    const statusResponse = await app.inject({ method: 'GET', url: `/api/v1/maps/${mapId}/zones/partition-status` });
+    expect(statusResponse.json()).toMatchObject({ isConnected: true, hasNoOverlaps: true });
+  });
+
+  it('creates an outer extension whose shared side follows the existing map edge', async () => {
+    const { mapId, leftId } = await createMapWithTwoZones();
+
+    // Most of this polygon is outside the map, but it deliberately crosses
+    // the west edge. The created zone should keep only the outside portion,
+    // using the existing edge at -97.16 as its exact eastern boundary.
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/maps/${mapId}/zones`,
+      headers: idempotencyHeaders('editing-extend-create'),
+      payload: {
+        name: 'West Extension',
+        carve: true,
+        geometry: createRectangle(-97.17, 49.885, -97.15, 49.895),
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json() as {
+      zone: { name: string; geometry: { coordinates: number[][][] } };
+      zones: Array<{ id: string; geometry: { coordinates: number[][][] } }>;
+      trimmedZoneIds: string[];
+      creationMode: 'extend' | 'carve';
+    };
+    expect(body.creationMode).toBe('extend');
+    expect(body.trimmedZoneIds).toEqual([]);
+
+    const extensionRing = body.zone.geometry.coordinates[0];
+    expect(Math.max(...extensionRing.map(([lng]) => lng))).toBeCloseTo(-97.16, 8);
+    expect(extensionRing).toEqual(expect.arrayContaining([[-97.16, 49.885], [-97.16, 49.895]]));
+
+    const unchangedLeft = body.zones.find((zone) => zone.id === leftId);
+    expect(unchangedLeft?.geometry.coordinates[0]).toEqual(
+      expect.arrayContaining([[-97.16, 49.88], [-97.14, 49.90]]),
+    );
+
     const statusResponse = await app.inject({ method: 'GET', url: `/api/v1/maps/${mapId}/zones/partition-status` });
     expect(statusResponse.json()).toMatchObject({ isConnected: true, hasNoOverlaps: true });
   });
