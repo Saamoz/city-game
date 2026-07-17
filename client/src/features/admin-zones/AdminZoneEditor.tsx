@@ -239,6 +239,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
   }, [hasGeometrySession, selectedZone]);
 
   const clearGeometrySession = useCallback(() => {
+    draftActiveRef.current = false;
     drawRef.current?.deleteAll();
     graphEditorRef.current?.destroy();
     graphEditorRef.current = null;
@@ -415,7 +416,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     snapMarkerRef.current = snapMarker;
 
     const handleMapClick = (event: mapboxgl.MapMouseEvent) => {
-      if (modeRef.current === 'split' || modeRef.current === 'boundaries' || Date.now() < suppressZoneSelectionUntilRef.current) {
+      if (modeRef.current === 'draw' || modeRef.current === 'split' || modeRef.current === 'boundaries' || Date.now() < suppressZoneSelectionUntilRef.current) {
         return;
       }
 
@@ -476,6 +477,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       // an outer map edge, the server keeps only the outside portion so the new
       // zone traces that existing edge exactly. Polygons wholly inside the map
       // retain carve behavior.
+      modeRef.current = 'select';
       setMode('select');
       setSelectedZoneId(null);
 
@@ -485,13 +487,22 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       }
 
       drawRef.current?.deleteAll();
-      drawRef.current?.add({ type: 'Feature', id: 'draft-zone', properties: {}, geometry: geometry as never });
+      const [draftFeatureId] = drawRef.current?.add({
+        type: 'Feature',
+        id: 'draft-zone',
+        properties: {},
+        geometry: geometry as never,
+      }) ?? [];
 
+      draftActiveRef.current = true;
       setGeometryDraft(geometry);
       setZoneForm({ ...INITIAL_ZONE_FORM });
+      if (draftFeatureId) {
+        drawRef.current?.changeMode('direct_select', { featureId: String(draftFeatureId) });
+      }
       setNotice({
         tone: 'info',
-        message: 'Polygon ready. To extend the map, draw slightly across an outer edge — the new zone will follow that existing boundary exactly.',
+        message: 'Polygon ready. Drag vertices to reshape it, drag an amber midpoint to add a vertex, or select a vertex and press Delete/Backspace. Confirm when the outline is ready.',
       });
     };
 
@@ -499,6 +510,14 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       const feature = event.features[0];
       if (!feature?.geometry || feature.id !== 'draft-zone') return;
       setGeometryDraft(feature.geometry as GeoJsonGeometry);
+    };
+
+    const handleDrawDelete = (event: { features: Array<Feature> }) => {
+      if (!draftActiveRef.current || !event.features.some((feature) => feature.id === 'draft-zone')) return;
+      draftActiveRef.current = false;
+      setGeometryDraft(null);
+      setZoneForm({ ...INITIAL_ZONE_FORM });
+      setNotice({ tone: 'info', message: 'Draft deleted. Choose Draw zone to start again.' });
     };
 
     const handleMouseMove = (event: mapboxgl.MapMouseEvent) => {
@@ -559,6 +578,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
     map.on('mouseleave', handleMouseLeave);
     map.on('draw.create', handleDrawCreate);
     map.on('draw.update', handleDrawUpdate);
+    map.on('draw.delete', handleDrawDelete);
 
     return () => {
       map.off('load', handleLoad);
@@ -567,6 +587,7 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       map.off('mouseleave', handleMouseLeave);
       map.off('draw.create', handleDrawCreate);
       map.off('draw.update', handleDrawUpdate);
+      map.off('draw.delete', handleDrawDelete);
       snapMarker.remove();
       snapMarkerRef.current = null;
       drawRef.current = null;
@@ -643,8 +664,10 @@ export function AdminZoneEditor({ initialMapId }: AdminZoneEditorProps) {
       return;
     }
     clearGeometrySession();
+    modeRef.current = 'draw';
+    draftActiveRef.current = false;
     setMode('draw');
-    setNotice({ tone: 'info', message: 'Click to place vertices; double-click to close. Amber dots snap to existing zone edges. Overlapping area is taken from existing zones.' });
+    setNotice({ tone: 'info', message: 'Click to place vertices; double-click to close. Drawing clicks will not select or zoom zones. Extend slightly across an outside boundary so the new zone can follow it exactly; after closing, you can edit the draft vertices before confirming.' });
     setSelectedZoneId(null);
     setIsDeleteArmed(false);
     setPreviewCollection(null);
