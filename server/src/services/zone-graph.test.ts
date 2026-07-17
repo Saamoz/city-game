@@ -220,7 +220,7 @@ describe('graph editing operations', () => {
     expect(rightRing.some(([lng, lat]) => lng === welded![0] && lat === welded![1])).toBe(true);
   });
 
-  it('allows a clean edge snap but blocks one that crosses a wavy boundary nearby', () => {
+  it('detects when a straight edge snap would cross a wavy boundary nearby', () => {
     const movingZone = polygon([
       [-2, -1],
       [-0.1, 0],
@@ -270,6 +270,79 @@ describe('graph editing operations', () => {
     )).toBe(true);
   });
 
+  it('heals a folded three-zone junction by following the captured Chicago boundary', () => {
+    const boundary: Array<[number, number]> = [
+      [-87.633889, 41.903862],
+      [-87.633648, 41.903866],
+      [-87.633181, 41.903873],
+      [-87.633002, 41.903877],
+      [-87.632921, 41.903878],
+      [-87.632847, 41.90388],
+      [-87.632635, 41.903884],
+      [-87.632196, 41.903889],
+      [-87.631957, 41.903892],
+      [-87.631445, 41.903901],
+    ];
+    const targetStart = boundary[0];
+    const targetEnd = boundary[1];
+    const oldJunction = boundary[boundary.length - 1];
+    const lowerJunction: [number, number] = [oldJunction[0], 41.901];
+
+    const { graph } = buildZoneGraph([
+      {
+        id: 'old-town',
+        geometry: polygon([
+          targetStart,
+          [targetStart[0], 41.905],
+          [oldJunction[0], 41.905],
+          oldJunction,
+          ...boundary.slice(1, -1).reverse(),
+        ]),
+      },
+      {
+        id: 'river-north',
+        geometry: polygon([...boundary, lowerJunction, [targetStart[0], lowerJunction[1]]]),
+      },
+      {
+        id: 'rush-division',
+        geometry: polygon([
+          oldJunction,
+          [-87.6295, oldJunction[1]],
+          [-87.6295, lowerJunction[1]],
+          lowerJunction,
+        ]),
+      },
+    ]);
+
+    const oldJunctionId = findNode(graph.positions, ...oldJunction);
+    const lowerJunctionId = findNode(graph.positions, ...lowerJunction);
+    const targetStartId = findNode(graph.positions, ...targetStart);
+    const targetEndId = findNode(graph.positions, ...targetEnd);
+    const movingId = insertGraphNodeOnEdge(graph, oldJunctionId, lowerJunctionId, [oldJunction[0], 41.9035])!;
+    const failedSnapPoint: [number, number] = [-87.63382360229195, 41.903863768400754];
+    moveGraphNodes(graph, new Map([[movingId, failedSnapPoint]]));
+
+    expect(graphSnapCreatesIntersections(
+      graph,
+      movingId,
+      failedSnapPoint,
+      { type: 'edge', edge: { a: targetStartId, b: targetEndId } },
+    )).toBe(true);
+
+    expect(weldGraphNodeIntoEdge(graph, movingId, targetStartId, targetEndId)).toMatchObject({
+      ok: true,
+      healedRingCount: 1,
+    });
+    expect(edgeUseCount(graph, targetStartId, movingId)).toBe(2);
+    expect(edgeUseCount(graph, movingId, targetEndId)).toBe(2);
+    expect(edgeUseCount(graph, movingId, lowerJunctionId)).toBe(2);
+
+    const healed = extractZoneGeometries(graph);
+    expect(ringOf(healed['river-north'])).not.toContainEqual(oldJunction);
+    expect(ringOf(healed['rush-division'])).toContainEqual(targetEnd);
+    expect(ringOf(healed['old-town'])).toContainEqual(graph.positions[movingId]);
+  });
+
   it('lists unique undirected edges', () => {
     const { graph } = buildZoneGraph([
       { id: 'left', geometry: rectangle(0, 0, 1, 1) },
@@ -284,4 +357,24 @@ function findNode(positions: Array<[number, number]>, lng: number, lat: number):
   const index = positions.findIndex((position) => position !== undefined && position[0] === lng && position[1] === lat);
   if (index < 0) throw new Error(`no node at ${lng},${lat}`);
   return index;
+}
+
+function edgeUseCount(
+  graph: ReturnType<typeof buildZoneGraph>['graph'],
+  aId: number,
+  bId: number,
+): number {
+  let count = 0;
+  for (const zone of graph.zones) {
+    for (const polygon of zone.polygons) {
+      for (const ring of polygon) {
+        for (let index = 0; index < ring.length; index += 1) {
+          const a = ring[index];
+          const b = ring[(index + 1) % ring.length];
+          if ((a === aId && b === bId) || (a === bId && b === aId)) count += 1;
+        }
+      }
+    }
+  }
+  return count;
 }

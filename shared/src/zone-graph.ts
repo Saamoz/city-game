@@ -398,6 +398,8 @@ export function insertGraphNodeOnEdge(graph: ZoneGraph, aId: number, bId: number
 export interface WeldResult {
   ok: boolean;
   reason?: string;
+  /** Number of folded source rings repaired while completing the weld. */
+  healedRingCount?: number;
 }
 
 /**
@@ -436,8 +438,9 @@ export function weldGraphNodes(graph: ZoneGraph, fromId: number, intoId: number)
 
 /**
  * Snaps node `nodeId` onto the segment between `aId` and `bId` and inserts it
- * into every ring where that segment appears (except rings that already
- * contain the node — inserting there would pinch the ring).
+ * into every ring where that segment appears. If the moving node already occurs
+ * in a target ring, the smaller folded loop is removed and its boundary path
+ * is transferred to the zone across the node’s old edge.
  */
 export function weldGraphNodeIntoEdge(graph: ZoneGraph, nodeId: number, aId: number, bId: number): WeldResult {
   if (nodeId === aId || nodeId === bId) return { ok: false, reason: 'Node is already an endpoint of that edge.' };
@@ -447,24 +450,84 @@ export function weldGraphNodeIntoEdge(graph: ZoneGraph, nodeId: number, aId: num
   if (!position || !a || !b) return { ok: false, reason: 'Unknown node.' };
 
   const projection = projectOntoSegment(position, a, b);
-  graph.positions[nodeId] = projection.point;
+  const working = cloneZoneGraph(graph);
+  working.positions[nodeId] = projection.point;
 
-  for (const zone of graph.zones) {
-    for (const polygon of zone.polygons) {
-      for (const ring of polygon) {
-        if (ring.includes(nodeId)) continue;
-        for (let index = 0; index < ring.length; index += 1) {
-          const current = ring[index];
-          const next = ring[(index + 1) % ring.length];
-          if ((current === aId && next === bId) || (current === bId && next === aId)) {
-            ring.splice(index + 1, 0, nodeId);
-            break;
-          }
-        }
+  interface FoldRepair {
+    ringKey: string;
+    keepRing: number[];
+    handoffNeighbor: number;
+    /** Replacement path from nodeId to handoffNeighbor, inclusive. */
+    alternatePath: number[];
+  }
+
+  const repairs: FoldRepair[] = [];
+  let foundTargetEdge = false;
+
+  forEachGraphRing(working, (ring, ringKey) => {
+    const targetIndex = findRingEdgeIndex(ring, aId, bId);
+    if (targetIndex < 0) return;
+    foundTargetEdge = true;
+    if (!ring.includes(nodeId)) return;
+
+    if (countOccurrences(ring, nodeId) > 1) {
+      repairs.push({ ringKey, keepRing: [], handoffNeighbor: -1, alternatePath: [] });
+      return;
+    }
+
+    const repair = planFoldedRingRepair(working, ring, ringKey, nodeId, targetIndex);
+    repairs.push(repair ?? { ringKey, keepRing: [], handoffNeighbor: -1, alternatePath: [] });
+  });
+
+  if (!foundTargetEdge) return { ok: false, reason: 'That boundary edge no longer exists.' };
+  if (repairs.some((repair) => repair.keepRing.length < 3 || repair.alternatePath.length < 2)) {
+    return { ok: false, reason: 'That snap would collapse a zone boundary instead of healing it.' };
+  }
+
+  const foldedRingKeys = new Set(repairs.map((repair) => repair.ringKey));
+  const touchedRingKeys = new Set(foldedRingKeys);
+  forEachGraphRing(working, (ring, ringKey, replace) => {
+    const repair = repairs.find((candidate) => candidate.ringKey === ringKey);
+    if (repair) {
+      replace(repair.keepRing);
+      return;
+    }
+    if (ring.includes(nodeId)) return;
+    const targetIndex = findRingEdgeIndex(ring, aId, bId);
+    if (targetIndex >= 0) {
+      ring.splice(targetIndex + 1, 0, nodeId);
+      touchedRingKeys.add(ringKey);
+    }
+  });
+
+  for (const repair of repairs) {
+    let handedOff = false;
+    forEachGraphRing(working, (ring, ringKey) => {
+      if (foldedRingKeys.has(ringKey)) return;
+      if (replaceRingEdgeWithPath(ring, nodeId, repair.handoffNeighbor, repair.alternatePath)) {
+        handedOff = true;
+        touchedRingKeys.add(ringKey);
       }
+    });
+    if (!handedOff) {
+      return { ok: false, reason: 'Could not transfer the folded area to the neighboring zone safely.' };
     }
   }
-  return { ok: true };
+
+  let invalidRing = false;
+  forEachGraphRing(working, (ring, ringKey) => {
+    if (!touchedRingKeys.has(ringKey)) return;
+    if (ring.length < 3 || countOccurrences(ring, nodeId) > 1 || ringHasSelfIntersections(working, ring)) {
+      invalidRing = true;
+    }
+  });
+  if (invalidRing) {
+    return { ok: false, reason: 'The snapped boundaries could not be healed into valid rings.' };
+  }
+
+  graph.positions = working.positions;
+  graph.zones = working.zones;
+  return { ok: true, healedRingCount: repairs.length };
 }
 
 // ── Extraction & inspection ─────────────────────────────────────────────────
@@ -558,6 +621,133 @@ function graphNodeNeighbors(graph: ZoneGraph, nodeId: number): Set<number> {
   }
   neighbors.delete(nodeId);
   return neighbors;
+}
+
+function forEachGraphRing(
+  graph: ZoneGraph,
+  visit: (ring: number[], ringKey: string, replace: (next: number[]) => void) => void,
+): void {
+  graph.zones.forEach((zone, zoneIndex) => {
+    zone.polygons.forEach((polygon, polygonIndex) => {
+      polygon.forEach((ring, ringIndex) => {
+        visit(ring, `${zoneIndex}:${polygonIndex}:${ringIndex}`, (next) => {
+          polygon[ringIndex] = next;
+        });
+      });
+    });
+  });
+}
+
+function findRingEdgeIndex(ring: number[], aId: number, bId: number): number {
+  for (let index = 0; index < ring.length; index += 1) {
+    const current = ring[index];
+    const next = ring[(index + 1) % ring.length];
+    if ((current === aId && next === bId) || (current === bId && next === aId)) return index;
+  }
+  return -1;
+}
+
+function planFoldedRingRepair(
+  graph: ZoneGraph,
+  ring: number[],
+  ringKey: string,
+  nodeId: number,
+  targetIndex: number,
+): {
+  ringKey: string;
+  keepRing: number[];
+  handoffNeighbor: number;
+  alternatePath: number[];
+} | null {
+  const expanded = [...ring];
+  const insertedIndex = targetIndex + 1;
+  expanded.splice(insertedIndex, 0, nodeId);
+
+  const originalRingIndex = ring.indexOf(nodeId);
+  const originalIndex = originalRingIndex > targetIndex ? originalRingIndex + 1 : originalRingIndex;
+  const insertedToOriginal = cyclicRingPath(expanded, insertedIndex, originalIndex);
+  const originalToInserted = cyclicRingPath(expanded, originalIndex, insertedIndex);
+  if (insertedToOriginal.length < 4 || originalToInserted.length < 4) return null;
+
+  const insertedToOriginalArea = ringPathArea(graph, insertedToOriginal);
+  const originalToInsertedArea = ringPathArea(graph, originalToInserted);
+  const removeInsertedToOriginal = insertedToOriginalArea < originalToInsertedArea
+    || (insertedToOriginalArea === originalToInsertedArea
+      && insertedToOriginal.length <= originalToInserted.length);
+  const removed = removeInsertedToOriginal ? insertedToOriginal : originalToInserted;
+  const kept = removeInsertedToOriginal ? originalToInserted : insertedToOriginal;
+
+  const handoffNeighbor = removeInsertedToOriginal
+    ? removed[removed.length - 2]
+    : removed[1];
+  const alternatePath = removeInsertedToOriginal
+    ? removed.slice(0, -1)
+    : [nodeId, ...removed.slice(1, -1).reverse()];
+
+  const keepRing = dedupeRing(kept.slice(0, -1));
+  if (keepRing.length < 3 || handoffNeighbor === nodeId || alternatePath.length < 2) return null;
+  return { ringKey, keepRing, handoffNeighbor, alternatePath };
+}
+
+function cyclicRingPath(ring: number[], startIndex: number, endIndex: number): number[] {
+  const path = [ring[startIndex]];
+  let index = startIndex;
+  while (index !== endIndex) {
+    index = (index + 1) % ring.length;
+    path.push(ring[index]);
+  }
+  return path;
+}
+
+function ringPathArea(graph: ZoneGraph, closedPath: number[]): number {
+  const origin = graph.positions[closedPath[0]];
+  let twiceArea = 0;
+  for (let index = 0; index < closedPath.length - 1; index += 1) {
+    const current = graph.positions[closedPath[index]];
+    const next = graph.positions[closedPath[index + 1]];
+    twiceArea += ((current[0] - origin[0]) * (next[1] - origin[1]))
+      - ((next[0] - origin[0]) * (current[1] - origin[1]));
+  }
+  return Math.abs(twiceArea / 2);
+}
+
+function replaceRingEdgeWithPath(
+  ring: number[],
+  nodeId: number,
+  neighborId: number,
+  pathFromNode: number[],
+): boolean {
+  const interior = pathFromNode.slice(1, -1);
+  for (let index = 0; index < ring.length; index += 1) {
+    const current = ring[index];
+    const next = ring[(index + 1) % ring.length];
+    if (current === nodeId && next === neighborId) {
+      ring.splice(index + 1, 0, ...interior);
+      return true;
+    }
+    if (current === neighborId && next === nodeId) {
+      ring.splice(index + 1, 0, ...interior.slice().reverse());
+      return true;
+    }
+  }
+  return false;
+}
+
+function ringHasSelfIntersections(graph: ZoneGraph, ring: number[]): boolean {
+  for (let left = 0; left < ring.length; left += 1) {
+    const leftNext = (left + 1) % ring.length;
+    for (let right = left + 1; right < ring.length; right += 1) {
+      const rightNext = (right + 1) % ring.length;
+      if (leftNext === right || rightNext === left) continue;
+      if (segmentsIntersect(
+        graph.positions[ring[left]],
+        graph.positions[ring[leftNext]],
+        graph.positions[ring[right]],
+        graph.positions[ring[rightNext]],
+      )) return true;
+    }
+  }
+  return false;
 }
 
 function sameUndirectedEdge(left: ZoneGraphEdge, right: ZoneGraphEdge): boolean {

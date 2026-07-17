@@ -448,9 +448,15 @@ export class ZoneGraphEditor {
       if (result.ok) {
         this.invalidateTopology();
         this.selection = snap.type === 'node' ? new Set([snap.nodeId]) : new Set([draggedId]);
-        this.callbacks.onNotice('info', snap.type === 'node'
-          ? 'Corners welded — they now move together.'
-          : 'Corner welded into the boundary — the edge is now shared.');
+        const healedRingCount = result.healedRingCount ?? 0;
+        this.callbacks.onNotice(
+          'info',
+          snap.type === 'node'
+            ? 'Corners welded — they now move together.'
+            : healedRingCount > 0
+              ? `Corner welded and ${healedRingCount} folded boundary ${healedRingCount === 1 ? 'was' : 'were'} healed.`
+              : 'Corner welded into the boundary — the edge is now shared.',
+        );
       } else {
         moveGraphNodes(this.graph, startPositions);
         shouldRecord = mutated;
@@ -599,9 +605,7 @@ export class ZoneGraphEditor {
     }
     if (bestEdge && bestEdgePosition) {
       const target = { type: 'edge' as const, edge: bestEdge };
-      return graphSnapCreatesIntersections(this.graph, draggedId, bestEdgePosition, target)
-        ? { snap: null, blocked: true }
-        : { snap: { target, position: bestEdgePosition }, blocked: false };
+      return { snap: { target, position: bestEdgePosition }, blocked: false };
     }
     return { snap: null, blocked: false };
   }
