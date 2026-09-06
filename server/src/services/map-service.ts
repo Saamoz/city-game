@@ -7,6 +7,7 @@ import {
   type GeoJsonPoint,
   type JsonObject,
   type MapDefinition,
+  type MapPlayability,
   type MapZone,
 } from '@city-game/shared';
 import { errorCodes } from '@city-game/shared';
@@ -201,6 +202,66 @@ export async function isMapZonePartitionClean(db: DatabaseClient, mapId: string)
       map_zone_partition_has_no_overlaps(${mapId}::uuid) AS "noOverlaps"
   `);
   return Boolean(result.rows[0]?.connected) && Boolean(result.rows[0]?.noOverlaps);
+}
+
+export async function getMapPlayability(db: DatabaseClient, mapId: string): Promise<MapPlayability> {
+  await getMapByIdOrThrow(db, mapId);
+
+  const summary = await db.execute<{ zoneCount: number; hasOverlaps: boolean }>(sql`
+    SELECT
+      COUNT(*)::integer AS "zoneCount",
+      EXISTS (
+        SELECT 1
+        FROM ${mapZones} left_zone
+        JOIN ${mapZones} right_zone
+          ON left_zone.map_id = right_zone.map_id
+          AND left_zone.id < right_zone.id
+          AND left_zone.geometry && right_zone.geometry
+        WHERE left_zone.map_id = ${mapId}::uuid
+          AND ST_Area(ST_Intersection(left_zone.geometry, right_zone.geometry)) > 0.000000000001
+      ) AS "hasOverlaps"
+    FROM ${mapZones}
+    WHERE ${mapZones.mapId} = ${mapId}::uuid
+  `);
+
+  const row = summary.rows[0];
+  if (!row || Number(row.zoneCount) === 0) {
+    return { mapId, isPlayable: false, reason: 'no_zones' };
+  }
+  if (row.hasOverlaps) {
+    return { mapId, isPlayable: false, reason: 'overlaps' };
+  }
+
+  const connected = await db.execute<{ connected: boolean }>(sql`
+    SELECT map_zone_graph_connected(${mapId}::uuid) AS connected
+  `);
+  if (!connected.rows[0]?.connected) {
+    return { mapId, isPlayable: false, reason: 'disconnected' };
+  }
+
+  return { mapId, isPlayable: true, reason: null };
+}
+
+export async function listMapPlayability(db: DatabaseClient): Promise<MapPlayability[]> {
+  const mapRows = await db.select({ id: maps.id }).from(maps).orderBy(asc(maps.createdAt));
+  return Promise.all(mapRows.map((map) => getMapPlayability(db, map.id)));
+}
+
+export async function assertMapPlayable(db: DatabaseClient, mapId: string): Promise<void> {
+  const playability = await getMapPlayability(db, mapId);
+  if (playability.isPlayable) {
+    return;
+  }
+
+  const message = playability.reason === 'no_zones'
+    ? 'This map has no zones yet and cannot be used to start a game.'
+    : playability.reason === 'overlaps'
+      ? 'This map has overlapping zones and cannot be used to start a game.'
+      : 'This map has disconnected zones and cannot be used to start a game.';
+  throw new AppError(errorCodes.validationError, {
+    message,
+    details: { mapId, reason: playability.reason },
+  });
 }
 
 export async function updateMapZone(
@@ -1028,32 +1089,42 @@ export async function cloneMapZonesToGame(db: DatabaseClient, mapId: string, gam
     return 0;
   }
 
-  const templateZones = await listMapZones(db, mapId);
-  if (templateZones.length === 0) {
-    return 0;
-  }
+  const inserted = await db.execute<{ id: string }>(sql`
+    INSERT INTO ${zones} (
+      game_id,
+      name,
+      geometry,
+      centroid,
+      owner_team_id,
+      captured_at,
+      point_value,
+      claim_radius_meters,
+      max_gps_error_meters,
+      is_disabled,
+      metadata
+    )
+    SELECT
+      ${gameId}::uuid,
+      source_zone.name,
+      source_zone.geometry,
+      source_zone.centroid,
+      NULL,
+      NULL,
+      source_zone.point_value,
+      source_zone.claim_radius_meters,
+      source_zone.max_gps_error_meters,
+      source_zone.is_disabled,
+      source_zone.metadata || jsonb_build_object(
+        'source_map_id', ${mapId}::text,
+        'source_map_zone_id', source_zone.id::text
+      )
+    FROM ${mapZones} source_zone
+    WHERE source_zone.map_id = ${mapId}::uuid
+    ORDER BY source_zone.created_at
+    RETURNING id
+  `);
 
-  for (const zone of templateZones) {
-    await db.insert(zones).values({
-      gameId,
-      name: zone.name,
-      geometry: buildGeometrySql(zone.geometry),
-      centroid: buildCentroidSql(zone.geometry),
-      ownerTeamId: null,
-      capturedAt: null,
-      pointValue: zone.pointValue,
-      claimRadiusMeters: zone.claimRadiusMeters,
-      maxGpsErrorMeters: zone.maxGpsErrorMeters,
-      isDisabled: zone.isDisabled,
-      metadata: {
-        ...(zone.metadata ?? {}),
-        source_map_id: mapId,
-        source_map_zone_id: zone.id,
-      },
-    });
-  }
-
-  return templateZones.length;
+  return inserted.rows.length;
 }
 
 export async function applyMapDefaultsToGame(db: DatabaseClient, mapId: string) {

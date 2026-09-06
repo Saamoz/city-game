@@ -4,6 +4,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
 import type { DatabaseClient, DatabasePool } from './db/connection.js';
 import { createDb } from './db/connection.js';
+import { env } from './db/env.js';
 import { registerAuth } from './lib/auth.js';
 import { registerAppErrorHandler } from './lib/errors.js';
 import { createModeRegistry, type ModeRegistry } from './modes/index.js';
@@ -36,7 +37,12 @@ export interface BuildAppOptions {
 
 export function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({
-    logger: false,
+    logger: env.nodeEnv === 'production'
+      ? {
+          level: 'info',
+          redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'],
+        }
+      : false,
     bodyLimit: 50 * 1024 * 1024, // 50 MB — GeoJSON imports can be large
   });
 

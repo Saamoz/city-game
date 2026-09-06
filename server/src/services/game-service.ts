@@ -26,7 +26,7 @@ import {
 import { AppError } from '../lib/errors.js';
 import type { ModeRegistry } from '../modes/index.js';
 import { cloneChallengeSetToGame } from './challenge-set-service.js';
-import { cloneMapZonesToGame } from './map-service.js';
+import { assertMapPlayable, cloneMapZonesToGame } from './map-service.js';
 
 export type GameRecord = typeof games.$inferSelect;
 export type LifecycleTransition = 'start' | 'pause' | 'resume' | 'end';
@@ -190,6 +190,10 @@ async function applyLifecycleTransition(
   options: TransitionOptions = {},
 ): Promise<TransitionResult> {
   assertValidTransition(currentGame, transition);
+
+  if (transition === 'start' && currentGame.mapId) {
+    await assertMapPlayable(db, currentGame.mapId);
+  }
 
   const modeHandler = registry.get(currentGame.modeKey);
   const nextTimestamp = options.timestamp ?? new Date();

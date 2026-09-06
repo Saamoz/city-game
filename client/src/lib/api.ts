@@ -18,6 +18,7 @@ import {
   type JsonObject,
   type JsonValue,
   type MapDefinition,
+  type MapPlayability,
   type MapZone,
   type Player,
   type PushSubscriptionData,
@@ -58,6 +59,7 @@ interface ChallengeSetResponse { challengeSet: ChallengeSet }
 interface ChallengeSetItemsResponse { items: ChallengeSetItem[] }
 interface ChallengeSetItemResponse { item: ChallengeSetItem }
 interface MapsResponse { maps: MapDefinition[] }
+interface MapPlayabilityResponse { maps: MapPlayability[] }
 interface MapResponse { map: MapDefinition }
 interface PlayerResponse { player: Player }
 interface JoinTeamResponse { player: Player; team: Team }
@@ -228,6 +230,11 @@ export async function transitionGameLifecycle(gameId: string, transition: 'start
 
 export async function listMaps(signal?: AbortSignal): Promise<MapDefinition[]> {
   const response = await apiRequest<MapsResponse>('/maps', { signal });
+  return response.maps;
+}
+
+export async function listMapPlayability(signal?: AbortSignal): Promise<MapPlayability[]> {
+  const response = await apiRequest<MapPlayabilityResponse>('/maps/playability', { signal });
   return response.maps;
 }
 
@@ -505,10 +512,25 @@ export async function setCurrentPlayerReady(ready: boolean): Promise<Player> {
 }
 
 export async function startLobbyGame(): Promise<Game> {
-  const response = await apiRequest<GameResponse>('/players/me/start-game', {
-    method: 'POST',
-  });
-  return response.game;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await apiRequest<GameResponse>('/players/me/start-game', {
+      method: 'POST',
+      signal: controller.signal,
+    });
+    return response.game;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new ApiError('Starting the game timed out. Please try again or ask the organizer to check the map.', {
+        statusCode: 408,
+        code: 'REQUEST_TIMEOUT',
+      });
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 export async function subscribeCurrentPlayerPush(pushSubscription: PushSubscriptionData): Promise<Player> {

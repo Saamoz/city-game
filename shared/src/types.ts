@@ -140,6 +140,14 @@ export interface MapDefinition {
   updatedAt: IsoTimestamp;
 }
 
+export type MapPlayabilityReason = 'no_zones' | 'overlaps' | 'disconnected';
+
+export interface MapPlayability {
+  mapId: Uuid;
+  isPlayable: boolean;
+  reason: MapPlayabilityReason | null;
+}
+
 export interface MapZone {
   id: Uuid;
   mapId: Uuid;

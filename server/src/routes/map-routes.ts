@@ -14,6 +14,7 @@ import {
   getMapZoneById,
   healMapZoneGaps,
   importMapZones,
+  listMapPlayability,
   listMaps,
   listMapZones,
   mergeMapZonesById,
@@ -264,6 +265,10 @@ const mergeMapZonesBodySchema = {
 export const mapRoutes: FastifyPluginAsync = async (app) => {
   app.get('/maps', async (_request, reply) => {
     reply.send({ maps: await listMaps(app.db) });
+  });
+
+  app.get('/maps/playability', async (_request, reply) => {
+    reply.send({ maps: await listMapPlayability(app.db) });
   });
 
   app.post(

@@ -6,6 +6,7 @@ import type {
   GameSettings,
   JsonObject,
   MapDefinition,
+  MapPlayability,
   Player,
   ScoreboardEntry,
   Team,
@@ -29,6 +30,7 @@ import {
   listGameChallenges,
   listGames,
   listMaps,
+  listMapPlayability,
   listPlayers,
   listZones,
   transitionGameLifecycle,
@@ -103,6 +105,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [games, setGames] = useState<Game[]>([]);
   const [maps, setMaps] = useState<MapDefinition[]>([]);
+  const [mapPlayability, setMapPlayability] = useState<MapPlayability[]>([]);
   const [challengeSets, setChallengeSets] = useState<ChallengeSet[]>([]);
   const [selectedGameId, setSelectedGameId] = useState<string | null>(initialGameId);
   const [currentGame, setCurrentGame] = useState<Game | null>(null);
@@ -131,6 +134,14 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     return counts;
   }, [players]);
 
+  const playabilityByMapId = useMemo(
+    () => new Map(mapPlayability.map((entry) => [entry.mapId, entry])),
+    [mapPlayability],
+  );
+  const firstPlayableMapId = useMemo(
+    () => maps.find((map) => playabilityByMapId.get(map.id)?.isPlayable)?.id ?? '',
+    [maps, playabilityByMapId],
+  );
   const selectedMap = useMemo(() => maps.find((entry) => entry.id === gameForm.mapId) ?? null, [gameForm.mapId, maps]);
   const selectedChallengeSet = useMemo(
     () => challengeSets.find((entry) => entry.id === gameForm.challengeSetId) ?? null,
@@ -179,14 +190,16 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     setErrorMessage(null);
 
     try {
-      const [nextGames, nextMaps, nextChallengeSets] = await Promise.all([
+      const [nextGames, nextMaps, nextMapPlayability, nextChallengeSets] = await Promise.all([
         listGames(),
         listMaps(),
+        listMapPlayability(),
         listChallengeSets(),
       ]);
 
       setGames(nextGames);
       setMaps(nextMaps);
+      setMapPlayability(nextMapPlayability);
       setChallengeSets(nextChallengeSets);
 
       const resolvedGameId = preferredGameId?.trim() || nextGames[0]?.id || null;
@@ -197,7 +210,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
         setCurrentGame(null);
         setGameForm({
           ...INITIAL_GAME_FORM,
-          mapId: nextMaps[0]?.id ?? '',
+          mapId: nextMaps.find((map) => nextMapPlayability.find((entry) => entry.mapId === map.id)?.isPlayable)?.id ?? '',
           challengeSetId: nextChallengeSets[0]?.id ?? '',
         });
         setTeams([]);
@@ -285,7 +298,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     setCurrentGame(null);
     setGameForm({
       ...INITIAL_GAME_FORM,
-      mapId: maps[0]?.id ?? '',
+      mapId: firstPlayableMapId,
       challengeSetId: challengeSets[0]?.id ?? '',
     });
     setTeams([]);
@@ -310,6 +323,10 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     }
     if (!gameForm.mapId) {
       setNotice({ tone: 'error', message: 'Choose an authored map.' });
+      return;
+    }
+    if (playabilityByMapId.get(gameForm.mapId)?.isPlayable === false) {
+      setNotice({ tone: 'error', message: 'Choose a playable map before saving the game.' });
       return;
     }
     if (!gameForm.challengeSetId) {
@@ -673,9 +690,14 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                     disabled={!canEditSetupBindings}
                   >
                     <option value="">Select a map</option>
-                    {maps.map((map) => (
-                      <option key={map.id} value={map.id}>{map.name}</option>
-                    ))}
+                    {maps.map((map) => {
+                      const playability = playabilityByMapId.get(map.id);
+                      return (
+                        <option disabled={playability?.isPlayable === false} key={map.id} value={map.id}>
+                          {map.name}{playability?.isPlayable === false ? ' — ' + mapPlayabilityLabel(playability.reason) : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </Field>
                 <Field label="Challenge Set">
@@ -801,7 +823,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                 <LifecycleRow
                   label="Start"
                   description="Clone the authored map and challenge set into runtime zones and challenges."
-                  disabled={!currentGame || currentGame.status !== 'setup' || isRefreshing}
+                  disabled={!currentGame || currentGame.status !== 'setup' || isRefreshing || playabilityByMapId.get(currentGame.mapId ?? '')?.isPlayable === false}
                   onClick={() => { void handleLifecycle('start'); }}
                 />
                 <LifecycleRow
@@ -1257,6 +1279,12 @@ function CompactList(props: { title: string; items: Array<{ id: string; label: s
       </div>
     </div>
   );
+}
+
+function mapPlayabilityLabel(reason: MapPlayability['reason']): string {
+  if (reason === 'overlaps') return 'Overlapping zones';
+  if (reason === 'disconnected') return 'Disconnected zones';
+  return 'No zones';
 }
 
 const inputClassName = 'w-full rounded-xl border border-[#cfd9de] bg-white px-3 py-2.5 text-sm text-[#182126] shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] outline-none transition focus:border-[#8094a1] focus:ring-2 focus:ring-[#c9d5dc]';
