@@ -9,6 +9,7 @@ const TRUNCATE_TABLES = [
   'action_receipts',
   'game_events',
   'resource_ledger',
+  'challenge_reroll_votes',
   'challenge_claims',
   'challenges',
   'zones',

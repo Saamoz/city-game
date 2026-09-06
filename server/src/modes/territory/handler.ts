@@ -6,6 +6,7 @@ import {
   resourceDefinitions,
   type Challenge,
   type ChallengeClaim,
+  type ChallengeRerollState,
   type GpsPayload,
   type Team,
   type JsonObject,
@@ -48,6 +49,7 @@ export interface TerritoryChallengeCompletedPostCommit {
   zone: Zone | null;
   activatedChallenge: Challenge | null;
   resourcesAwarded: ResourceAwardMap;
+  rerollState: ChallengeRerollState;
   resourceEntries: ResourceLedgerEntry[];
 }
 
@@ -142,6 +144,7 @@ export function createTerritoryModeHandler(): ModeHandler {
               zone: result.zone,
               activatedChallenge: result.activatedChallenge,
               resourcesAwarded: result.resourcesAwarded,
+              rerollState: result.rerollState,
               stateVersion: result.stateVersion,
             },
             responseHeaders: {
@@ -156,6 +159,7 @@ export function createTerritoryModeHandler(): ModeHandler {
               zone: result.zone,
               activatedChallenge: result.activatedChallenge,
               resourcesAwarded: result.resourcesAwarded,
+              rerollState: result.rerollState,
               resourceEntries: result.resourceEntries,
             } satisfies TerritoryChallengeCompletedPostCommit,
           };

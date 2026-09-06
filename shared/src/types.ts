@@ -116,6 +116,7 @@ export type GameSettings = JsonObject & {
   broadcast_team_locations?: boolean;
   allow_midgame_join?: boolean;
   allow_reclaim_zones?: boolean;
+  reroll_completion_target?: number;
 };
 
 export type WinCondition =
@@ -289,6 +290,19 @@ export interface ChallengeClaim {
   createdAt: IsoTimestamp;
 }
 
+export interface ChallengeRerollVoteSummary {
+  challengeId: Uuid;
+  teamIds: Uuid[];
+}
+
+export interface ChallengeRerollState {
+  isAvailable: boolean;
+  completionProgress: number;
+  completionTarget: number;
+  eligibleTeamCount: number;
+  votes: ChallengeRerollVoteSummary[];
+}
+
 export interface ResourceLedgerEntry {
   id: Uuid;
   gameId: Uuid;
@@ -382,6 +396,7 @@ export interface GameStateSnapshot {
   claims: ChallengeClaim[];
   annotations: Annotation[];
   teamResources: TeamResourcesByTeam;
+  challengeReroll: ChallengeRerollState;
 }
 
 export interface ScoreboardEntry {

@@ -308,6 +308,7 @@ describe('realtime socket server', () => {
       claims: [],
       annotations: [],
       teamResources: {},
+      challengeReroll: { isAvailable: false, completionProgress: 0, completionTarget: 2, eligibleTeamCount: 0, votes: [] },
     } satisfies GameStateSnapshot;
 
     const syncEventPromise = waitForSocketEvent(firstSocket, socketServerEventTypes.gameStateSync);

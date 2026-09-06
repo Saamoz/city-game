@@ -17,6 +17,7 @@ import { getAllBalances } from './resource-service.js';
 import { getGameById, serializeGameRecord } from './game-service.js';
 import { listZonesByGame } from './spatial-service.js';
 import { listTeamLocationsByGame, shouldBroadcastTeamLocations } from './team-location-service.js';
+import { getChallengeRerollState } from '../modes/territory/reroll-service.js';
 
 interface ViewerContextInput {
   gameId: string;
@@ -30,18 +31,19 @@ export async function buildGameStateSnapshot(
 ): Promise<GameStateSnapshot> {
   const game = await getGameById(db, input.gameId);
   const teamLocationsEnabled = shouldBroadcastTeamLocations(game.settings);
-  const [teamRows, playerRows, zoneRows, challengeRows, claimRows, annotationRows, teamResources, teamLocations] = await Promise.all([
+  const [teamRows, playerRows, zoneRows, challengeRows, claimRows, annotationRows, teamResources, teamLocations, challengeReroll] = await Promise.all([
     db.select().from(teams).where(eq(teams.gameId, input.gameId)).orderBy(asc(teams.createdAt)),
     db.select().from(players).where(eq(players.gameId, input.gameId)).orderBy(asc(players.createdAt)),
     listZonesByGame(db, input.gameId),
     db.select()
       .from(challenges)
-      .where(and(eq(challenges.gameId, input.gameId), or(eq(challenges.isDeckActive, true), eq(challenges.status, 'claimed'), eq(challenges.status, 'completed'))))
+      .where(and(eq(challenges.gameId, input.gameId), or(eq(challenges.isDeckActive, true), eq(challenges.status, 'claimed'), eq(challenges.status, 'completed'), eq(challenges.status, 'skipped'))))
       .orderBy(asc(challenges.sortOrder), asc(challenges.createdAt)),
     db.select().from(challengeClaims).where(eq(challengeClaims.gameId, input.gameId)).orderBy(asc(challengeClaims.createdAt)),
     db.select().from(annotations).where(eq(annotations.gameId, input.gameId)).orderBy(asc(annotations.createdAt)),
     getAllBalances(db, input.gameId),
     teamLocationsEnabled ? listTeamLocationsByGame(db, input.gameId) : Promise.resolve([]),
+    getChallengeRerollState(db, input.gameId),
   ]);
 
   const viewerPlayerRow = playerRows.find((player) => player.id == input.playerId);
@@ -72,6 +74,7 @@ export async function buildGameStateSnapshot(
     claims: claimRows.map((claim) => serializeClaimRow(claim)),
     annotations: filteredAnnotations,
     teamResources,
+    challengeReroll,
   } satisfies GameStateSnapshot;
 
   return registry.get(game.modeKey).filterStateForViewer(fullSnapshot, {

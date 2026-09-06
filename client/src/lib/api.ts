@@ -3,6 +3,7 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   type Challenge,
   type ChallengeClaim,
+  type ChallengeRerollState,
   type ChallengeSet,
   type ChallengeSetItem,
   type ErrorResponse,
@@ -114,6 +115,16 @@ export interface CompleteChallengeResponse extends ChallengeActionResponse {
   zone: Zone | null;
   activatedChallenge?: Challenge | null;
   resourcesAwarded: ResourceAwardMap;
+  rerollState: ChallengeRerollState;
+}
+
+export interface ChallengeRerollVoteResponse {
+  gameId: string;
+  stateVersion: number;
+  rerollState: ChallengeRerollState;
+  challenge: Challenge;
+  activatedChallenge: Challenge | null;
+  didReroll: boolean;
 }
 
 export interface ZoneUpsertInput {
@@ -590,6 +601,16 @@ export async function completeChallenge(
       gps: input?.gps ?? null,
       targetZoneId: input?.targetZoneId ?? null,
     },
+    idempotencyKey,
+  });
+}
+
+export async function toggleChallengeRerollVote(
+  challengeId: string,
+  idempotencyKey?: string,
+): Promise<ChallengeRerollVoteResponse> {
+  return apiRequest<ChallengeRerollVoteResponse>('/challenges/' + challengeId + '/reroll-vote', {
+    method: 'POST',
     idempotencyKey,
   });
 }

@@ -71,6 +71,13 @@
       "when": 1782748613241,
       "tag": "0009_zone_partition_overlap",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788702035705,
+      "tag": "0010_sloppy_silverclaw",
+      "breakpoints": true
     }
   ]
 }

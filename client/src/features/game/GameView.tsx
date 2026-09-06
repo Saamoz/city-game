@@ -13,6 +13,7 @@ import {
 import {
   ApiError,
   completeChallenge,
+  toggleChallengeRerollVote,
   getMapState,
   getRecentEvents,
   updatePlayerLocation,
@@ -685,6 +686,33 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     });
   };
 
+  const handleToggleRerollVote = (challengeId: string) => {
+    void runAction('reroll:' + challengeId, async (idempotencyKey) => {
+      try {
+        const response = await toggleChallengeRerollVote(challengeId, idempotencyKey);
+        applyRealtimePayload(gameId, socketServerEventTypes.challengeRerollStateChanged, {
+          gameId,
+          stateVersion: response.stateVersion,
+          serverTime: new Date().toISOString(),
+          rerollState: response.rerollState,
+          challenge: response.challenge,
+          activatedChallenge: response.activatedChallenge,
+        });
+
+        if (response.didReroll) {
+          setToast({ tone: 'info', title: 'Challenge replaced' });
+        }
+        return response;
+      } catch (error) {
+        setToast({
+          tone: 'error',
+          title: 'Reroll unavailable',
+          body: getMutationErrorMessage(error),
+        });
+        throw error;
+      }
+    });
+  };
   const handleDeckPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.target instanceof Element && e.target.closest('[data-deck-interactive="true"]')) {
       return;
@@ -1001,6 +1029,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                   allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones === true}
                   animatedChallengeIds={animatedChallengeIds}
                   challenges={snapshot.challenges}
+                  rerollState={snapshot.challengeReroll}
+                  teamId={snapshot.team?.id ?? null}
                   completedCards={completedCards}
                   currentZoneId={currentZone?.id ?? null}
                   currentZoneName={currentZone?.name ?? null}
@@ -1009,6 +1039,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                   locationMessage={locationErrorMessage}
                   locationStatus={locationStatus}
                   onCaptureChallenge={handleCaptureChallenge}
+                  onToggleRerollVote={handleToggleRerollVote}
                   onFocusCompletedCard={handleFocusCompletedCard}
                   onOpen={() => {}}
                   onSelectChallenge={setSelectedChallengeId}
@@ -1049,6 +1080,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones === true}
               animatedChallengeIds={animatedChallengeIds}
               challenges={snapshot.challenges}
+              rerollState={snapshot.challengeReroll}
+              teamId={snapshot.team?.id ?? null}
               completedCards={completedCards}
               currentZoneId={currentZone?.id ?? null}
               currentZoneName={currentZone?.name ?? null}
@@ -1057,6 +1090,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               locationMessage={locationErrorMessage}
               locationStatus={locationStatus}
               onCaptureChallenge={handleCaptureChallenge}
+              onToggleRerollVote={handleToggleRerollVote}
               onFocusCompletedCard={handleFocusCompletedCard}
               onOpen={() => setIsDeckOpen(true)}
               onSelectChallenge={setSelectedChallengeId}
@@ -1213,6 +1247,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       claim: response.claim,
       zone: response.zone,
       resourcesAwarded: response.resourcesAwarded,
+      rerollState: response.rerollState,
     });
 
     if (response.activatedChallenge) {
@@ -1317,7 +1352,7 @@ function buildChallengeCounts(snapshot: GameStateSnapshot | null) {
       current[challenge.status] += 1;
       return current;
     },
-    { available: 0, claimed: 0, completed: 0 },
+    { available: 0, claimed: 0, completed: 0, skipped: 0 },
   );
 
   const configuredTotal = snapshot?.game.settings?.challenge_total_count;
@@ -1328,7 +1363,7 @@ function buildChallengeCounts(snapshot: GameStateSnapshot | null) {
   return {
     ...counts,
     total,
-    remaining: Math.max(0, total - counts.completed),
+    remaining: Math.max(0, total - counts.completed - counts.skipped),
   };
 }
 

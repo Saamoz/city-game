@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
-import type { Challenge, Zone } from '@city-game/shared';
+import type { Challenge, ChallengeRerollState, Zone } from '@city-game/shared';
 import {
   CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH,
   CHALLENGE_CARD_TITLE_MAX_LENGTH,
@@ -24,6 +24,8 @@ interface RenderedChallengeCard extends ExitingChallengeCard {
 
 interface ChallengeDeckProps {
   challenges: Challenge[];
+  rerollState: ChallengeRerollState;
+  teamId: string | null;
   completedCards: CompletedChallengeCard[];
   animatedChallengeIds: string[];
   currentZoneId: string | null;
@@ -36,6 +38,7 @@ interface ChallengeDeckProps {
   selectedChallengeId: string | null;
   onSelectChallenge(challengeId: string): void;
   onCaptureChallenge(challengeId: string, targetZoneId: string | null): void;
+  onToggleRerollVote(challengeId: string): void;
   onFocusCompletedCard(challengeId: string): void;
   isActionPending(actionKey: string): boolean;
   isPeeking: boolean;
@@ -53,6 +56,8 @@ interface DragStateRefs {
 
 export function ChallengeDeck({
   challenges,
+  rerollState,
+  teamId,
   completedCards,
   animatedChallengeIds,
   currentZoneId,
@@ -65,6 +70,7 @@ export function ChallengeDeck({
   selectedChallengeId,
   onSelectChallenge,
   onCaptureChallenge,
+  onToggleRerollVote,
   onFocusCompletedCard,
   isActionPending,
   isPeeking,
@@ -205,6 +211,11 @@ export function ChallengeDeck({
               const isSelected = !isExiting && challenge.id === selectedChallengeId;
               const isConfirming = !isExiting && confirmChallengeId === challenge.id;
               const capturePending = !isExiting && isActionPending(`capture:${challenge.id}`);
+              const rerollVote = rerollState.votes.find((vote) => vote.challengeId === challenge.id);
+              const rerollVoteCount = rerollVote?.teamIds.length ?? 0;
+              const hasRerollVote = Boolean(teamId && rerollVote?.teamIds.includes(teamId));
+              const rerollPending = !isExiting && isActionPending('reroll:' + challenge.id);
+              const showReroll = !isExiting && rerollState.isAvailable && Boolean(teamId);
               const shortDescription = getShortDescription(challenge);
 
               return (
@@ -246,13 +257,38 @@ export function ChallengeDeck({
                     </div>
                   ) : (
                     <>
-                      <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start justify-between gap-2">
                         <h3
-                          className="font-[Georgia,Times_New_Roman,serif] text-base lg:text-lg font-semibold leading-snug text-[#1f2a2f]"
+                          className="min-w-0 font-[Georgia,Times_New_Roman,serif] text-base lg:text-lg font-semibold leading-snug text-[#1f2a2f]"
                           title={challenge.title}
                         >
                           {getDisplayTitle(challenge.title)}
                         </h3>
+                        {showReroll ? (
+                          <button
+                            aria-label={hasRerollVote ? 'Withdraw reroll vote' : 'Vote to reroll challenge'}
+                            aria-pressed={hasRerollVote}
+                            className={[
+                              'inline-flex h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-full px-2 text-[10px] font-semibold tabular-nums transition disabled:cursor-wait disabled:opacity-50',
+                              hasRerollVote
+                                ? 'bg-[#e8ddc4] text-[#5f523b]'
+                                : 'text-[#7d745f] hover:bg-[#eee4cf] hover:text-[#4f4635]',
+                            ].join(' ')}
+                            data-deck-interactive="true"
+                            disabled={rerollPending}
+                            onClick={() => onToggleRerollVote(challenge.id)}
+                            title={hasRerollVote ? 'Withdraw reroll vote' : 'Vote to reroll'}
+                            type="button"
+                          >
+                            <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24">
+                              <path d="M19 8a8 8 0 1 0 1 7" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                              <path d="M19 4v4h-4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                            </svg>
+                            {rerollVoteCount > 0 ? (
+                              <span>{rerollVoteCount}/{rerollState.eligibleTeamCount}</span>
+                            ) : null}
+                          </button>
+                        ) : null}
                       </div>
 
                       <p className="mt-2 overflow-hidden text-xs leading-5 text-[#4f6168] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:4]">

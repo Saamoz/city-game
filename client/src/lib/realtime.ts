@@ -23,6 +23,7 @@ export const directRealtimeEventTypes = [
   socketServerEventTypes.challengeCompleted,
   socketServerEventTypes.challengeReleased,
   socketServerEventTypes.challengeSpawned,
+  socketServerEventTypes.challengeRerollStateChanged,
 ] as const;
 
 export function createRealtimeSocket(): GameRealtimeSocket {

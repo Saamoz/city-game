@@ -3,6 +3,7 @@ import type {
   Annotation,
   Challenge,
   ChallengeClaim,
+  ChallengeRerollState,
   Game,
   GameEventRecord,
   GameStateSnapshot,
@@ -35,6 +36,7 @@ export const territoryEventTypes = {
   challengeReleased: 'CHALLENGE_RELEASED',
   challengeCompleted: 'CHALLENGE_COMPLETED',
   challengeSpawned: 'CHALLENGE_SPAWNED',
+  challengeRerollStateChanged: 'CHALLENGE_REROLL_STATE_CHANGED',
 } as const;
 
 export const eventTypes = {
@@ -64,6 +66,7 @@ export const socketServerEventTypes = {
   challengeCompleted: 'challenge_completed',
   challengeReleased: 'challenge_released',
   challengeSpawned: 'challenge_spawned',
+  challengeRerollStateChanged: 'challenge_reroll_state_changed',
 } as const;
 
 export const socketClientEventTypes = {
@@ -146,6 +149,7 @@ export interface ChallengeCompletedPayload extends BroadcastEnvelopeBase {
   claim: ChallengeClaim;
   zone: Zone | null;
   resourcesAwarded: ResourceAwardMap;
+  rerollState: ChallengeRerollState;
 }
 
 export interface ChallengeReleasedPayload extends BroadcastEnvelopeBase {
@@ -156,6 +160,12 @@ export interface ChallengeReleasedPayload extends BroadcastEnvelopeBase {
 export interface ChallengeSpawnedPayload extends BroadcastEnvelopeBase {
   challenge: Challenge;
   zone: Zone | null;
+}
+
+export interface ChallengeRerollStateChangedPayload extends BroadcastEnvelopeBase {
+  rerollState: ChallengeRerollState;
+  challenge: Challenge;
+  activatedChallenge: Challenge | null;
 }
 
 export interface EngineEventPayloadMap {
@@ -181,8 +191,10 @@ export interface TerritoryEventPayloadMap {
     claim: ChallengeClaim;
     zone: Zone | null;
     resourcesAwarded: ResourceAwardMap;
+    rerollState: ChallengeRerollState;
   };
   CHALLENGE_SPAWNED: { challenge: Challenge; zone: Zone | null };
+  CHALLENGE_REROLL_STATE_CHANGED: { rerollState: ChallengeRerollState; challenge: Challenge; activatedChallenge: Challenge | null };
 }
 
 export type GameEventPayloadMap = EngineEventPayloadMap & TerritoryEventPayloadMap;
@@ -205,6 +217,7 @@ export interface SocketEventPayloadMap {
   challenge_completed: ChallengeCompletedPayload;
   challenge_released: ChallengeReleasedPayload;
   challenge_spawned: ChallengeSpawnedPayload;
+  challenge_reroll_state_changed: ChallengeRerollStateChangedPayload;
   join_game: JoinGamePayload;
   leave_game: LeaveGamePayload;
 }

@@ -5,6 +5,7 @@ import {
   eventTypes,
   type Challenge,
   type ChallengeClaim,
+  type ChallengeRerollState,
   type GameSettings,
   type GpsPayload,
   type JsonObject,
@@ -18,7 +19,7 @@ import { env } from '../../db/env.js';
 import { challengeClaims, challenges, zones } from '../../db/schema.js';
 import { AppError } from '../../lib/errors.js';
 import { appendEvents, type AppendEventInput } from '../../services/event-service.js';
-import { getGameById } from '../../services/game-service.js';
+import { lockGameById } from '../../services/game-service.js';
 import { transactInTransaction } from '../../services/resource-service.js';
 import {
   findContainingZones,
@@ -26,6 +27,8 @@ import {
   getZoneByIdOrThrow,
   isPointWithinZoneBuffer,
 } from '../../services/spatial-service.js';
+import { activateNextQueuedChallenge } from './deck-service.js';
+import { advanceChallengeRerollCharge } from './reroll-service.js';
 import { isPortableChallengeConfig, lockChallenge, serializeChallenge, serializeClaim } from './claim-service.js';
 
 const ACTIVE_CLAIM_STATUS = 'active';
@@ -49,6 +52,7 @@ export interface CompleteChallengeSuccessResult {
   zone: Zone | null;
   activatedChallenge: Challenge | null;
   resourcesAwarded: ResourceAwardMap;
+  rerollState: ChallengeRerollState;
   resourceEntries: ResourceLedgerEntry[];
 }
 
@@ -66,7 +70,7 @@ export async function completeChallenge(
   db: DatabaseClient,
   input: CompleteChallengeInput,
 ): Promise<CompleteChallengeResult> {
-  const game = await getGameById(db, input.gameId);
+  const game = await lockGameById(db, input.gameId);
 
   if (game.status !== 'active') {
     throw new AppError(errorCodes.gameNotActive, {
@@ -166,6 +170,7 @@ export async function completeChallenge(
     updatedChallenge,
     updatedClaim,
     zoneBefore,
+    settings: game.settings as GameSettings,
   });
 }
 
@@ -265,6 +270,7 @@ async function completePortableChallengeDirectly(
     updatedChallenge,
     updatedClaim: insertedClaim,
     zoneBefore,
+    settings: input.settings,
   });
 }
 
@@ -292,6 +298,7 @@ async function finishChallengeCompletion(
     updatedChallenge: typeof challenges.$inferSelect;
     updatedClaim: typeof challengeClaims.$inferSelect;
     zoneBefore: Zone | null;
+    settings: GameSettings;
   },
 ): Promise<CompleteChallengeSuccessResult> {
   let updatedZone: Zone | null = null;
@@ -318,6 +325,12 @@ async function finishChallengeCompletion(
       activatedZone = await getZoneByIdOrThrow(db, activatedChallengeRow.zoneId);
     }
   }
+
+  const rerollState = await advanceChallengeRerollCharge(db, {
+    gameId: input.gameId,
+    completedChallengeId: input.updatedChallenge.id,
+    settings: input.settings,
+  });
 
   const resourcesAwarded = normalizeResourceAwards(input.updatedChallenge.scoring as ResourceAwardMap);
   const resourceEntries: ResourceLedgerEntry[] = [];
@@ -438,6 +451,7 @@ async function finishChallengeCompletion(
       claim,
       zone: updatedZone,
       resourcesAwarded,
+      rerollState,
     } as unknown as JsonObject,
   });
 
@@ -471,37 +485,9 @@ async function finishChallengeCompletion(
     zone: updatedZone,
     activatedChallenge,
     resourcesAwarded,
+    rerollState,
     resourceEntries,
   };
-}
-
-async function activateNextQueuedChallenge(
-  db: DatabaseClient,
-  gameId: string,
-  now: Date,
-): Promise<typeof challenges.$inferSelect | null> {
-  const [nextQueued] = await db
-    .select()
-    .from(challenges)
-    .where(and(eq(challenges.gameId, gameId), eq(challenges.status, 'available'), eq(challenges.isDeckActive, false)))
-    .orderBy(challenges.sortOrder, challenges.createdAt)
-    .limit(1)
-    .for('update');
-
-  if (!nextQueued) {
-    return null;
-  }
-
-  const [updatedChallenge] = await db
-    .update(challenges)
-    .set({
-      isDeckActive: true,
-      updatedAt: now,
-    })
-    .where(eq(challenges.id, nextQueued.id))
-    .returning();
-
-  return updatedChallenge ?? null;
 }
 
 async function lockActiveClaim(

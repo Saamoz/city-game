@@ -112,6 +112,8 @@ export const games = pgTable(
     stateVersion: bigint('state_version', { mode: 'number' }).notNull().default(0),
     winCondition: jsonb('win_condition').notNull().default(defaultJsonArray),
     settings: jsonb('settings').notNull().default(defaultJsonObject),
+    rerollAvailable: boolean('reroll_available').notNull().default(false),
+    rerollCompletionProgress: integer('reroll_completion_progress').notNull().default(0),
     startedAt: timestamp('started_at', { withTimezone: true }),
     endedAt: timestamp('ended_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -236,6 +238,22 @@ export const challengeClaims = pgTable(
     oneActiveClaimPerChallenge: uniqueIndex('idx_one_active_claim_per_challenge')
       .on(table.challengeId)
       .where(sql`${table.status} = 'active'`),
+  }),
+);
+
+export const challengeRerollVotes = pgTable(
+  'challenge_reroll_votes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    gameId: uuid('game_id').notNull().references(() => games.id, { onDelete: 'cascade' }),
+    challengeId: uuid('challenge_id').notNull().references(() => challenges.id, { onDelete: 'cascade' }),
+    teamId: uuid('team_id').notNull().references(() => teams.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    challengeTeamUnique: uniqueIndex('challenge_reroll_votes_challenge_team_unique')
+      .on(table.challengeId, table.teamId),
+    gameIdx: index('idx_challenge_reroll_votes_game').on(table.gameId),
   }),
 );
 
@@ -371,6 +389,7 @@ export const schema = {
   zones,
   challenges,
   challengeClaims,
+  challengeRerollVotes,
   resourceLedger,
   gameEvents,
   actionReceipts,

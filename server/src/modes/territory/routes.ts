@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { and, eq, ne } from 'drizzle-orm';
 import {
+  STATE_VERSION_HEADER,
   socketServerEventTypes,
   type Challenge,
   type ChallengeClaim,
@@ -14,6 +15,7 @@ import { gpsPayloadSchema } from '../../middleware/gps-validation.js';
 import { executeIdempotentMutation } from '../../services/idempotency-service.js';
 import { evaluateConfiguredWinConditions } from '../../services/win-condition-service.js';
 import type { TerritoryPostCommitData } from './handler.js';
+import { toggleChallengeRerollVote, type ToggleChallengeRerollVoteResult } from './reroll-service.js';
 
 const challengeParamsSchema = {
   type: 'object',
@@ -198,6 +200,7 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
               claim: postCommitData.claim,
               zone: postCommitData.zone,
               resourcesAwarded: postCommitData.resourcesAwarded,
+              rerollState: postCommitData.rerollState,
             },
           });
 
@@ -261,6 +264,58 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
             stateVersion: winConditionResult.stateVersion,
             payload: {
               game: winConditionResult.game,
+            },
+          });
+        },
+      );
+    },
+  );
+
+  app.post(
+    '/challenges/:id/reroll-vote',
+    {
+      preHandler: [app.authenticate, app.requireTeam],
+      schema: { params: challengeParamsSchema },
+    },
+    async (request, reply) => {
+      let broadcastPayload: ToggleChallengeRerollVoteResult | null = null;
+
+      await executeIdempotentMutation(
+        app,
+        request,
+        reply,
+        async (db) => {
+          const player = request.player;
+          if (!player?.teamId) throw new Error('Authenticated team player expected.');
+
+          const result = await toggleChallengeRerollVote(db, {
+            gameId: player.gameId,
+            challengeId: (request.params as { id: string }).id,
+            playerId: player.id,
+            teamId: player.teamId,
+          });
+          broadcastPayload = result;
+
+          return {
+            gameId: result.gameId,
+            playerId: player.id,
+            statusCode: 200,
+            body: result,
+            responseHeaders: { [STATE_VERSION_HEADER]: String(result.stateVersion) },
+          };
+        },
+        async () => {
+          if (!broadcastPayload) return;
+          const result = broadcastPayload as ToggleChallengeRerollVoteResult;
+          await app.broadcaster.send({
+            gameId: result.gameId,
+            modeKey: 'territory',
+            eventType: socketServerEventTypes.challengeRerollStateChanged,
+            stateVersion: result.stateVersion,
+            payload: {
+              rerollState: result.rerollState,
+              challenge: result.challenge,
+              activatedChallenge: result.activatedChallenge,
             },
           });
         },

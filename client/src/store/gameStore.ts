@@ -3,6 +3,7 @@ import {
   type Annotation,
   type Challenge,
   type ChallengeClaim,
+  type ChallengeRerollState,
   type Game,
   type GameEventRecord,
   type GameStateSnapshot,
@@ -257,10 +258,13 @@ function applyGameEventRecord(snapshot: GameStateSnapshot, event: GameEventRecor
     case 'CHALLENGE_CLAIMED':
     case 'CHALLENGE_RELEASED':
     case 'CHALLENGE_COMPLETED':
+    case 'CHALLENGE_REROLL_STATE_CHANGED':
     case 'CHALLENGE_SPAWNED': {
       const challenge = asChallenge(event.meta.challenge);
       const claim = asChallengeClaim(event.meta.claim) ?? asChallengeClaim(event.afterState);
       const zone = asZone(event.meta.zone);
+      const rerollState = asChallengeRerollState(event.meta.rerollState);
+      const activatedChallenge = asChallenge(event.meta.activatedChallenge);
 
       if (challenge) {
         snapshot.challenges = upsertById(snapshot.challenges, challenge);
@@ -272,6 +276,12 @@ function applyGameEventRecord(snapshot: GameStateSnapshot, event: GameEventRecor
 
       if (zone) {
         snapshot.zones = upsertById(snapshot.zones, zone);
+      }
+      if (activatedChallenge) {
+        snapshot.challenges = upsertById(snapshot.challenges, activatedChallenge);
+      }
+      if (rerollState) {
+        snapshot.challengeReroll = rerollState;
       }
 
       return snapshot;
@@ -389,6 +399,7 @@ function applyDirectRealtimePayload(
       if (completedPayload.zone) {
         snapshot.zones = upsertById(snapshot.zones, completedPayload.zone);
       }
+      snapshot.challengeReroll = completedPayload.rerollState;
       snapshot.game = {
         ...snapshot.game,
         stateVersion: completedPayload.stateVersion,
@@ -403,6 +414,16 @@ function applyDirectRealtimePayload(
         ...snapshot.game,
         stateVersion: releasedPayload.stateVersion,
       };
+      return snapshot;
+    }
+    case socketServerEventTypes.challengeRerollStateChanged: {
+      const rerollPayload = payload as SocketEventPayloadMap['challenge_reroll_state_changed'];
+      snapshot.challenges = upsertById(snapshot.challenges, rerollPayload.challenge);
+      if (rerollPayload.activatedChallenge) {
+        snapshot.challenges = upsertById(snapshot.challenges, rerollPayload.activatedChallenge);
+      }
+      snapshot.challengeReroll = rerollPayload.rerollState;
+      snapshot.game = { ...snapshot.game, stateVersion: rerollPayload.stateVersion };
       return snapshot;
     }
     case socketServerEventTypes.challengeSpawned: {
@@ -436,6 +457,10 @@ function cloneSnapshot(snapshot: GameStateSnapshot): GameStateSnapshot {
     claims: [...snapshot.claims],
     annotations: [...snapshot.annotations],
     teamResources: cloneTeamResources(snapshot.teamResources),
+    challengeReroll: {
+      ...snapshot.challengeReroll,
+      votes: snapshot.challengeReroll.votes.map((vote) => ({ ...vote, teamIds: [...vote.teamIds] })),
+    },
   };
 }
 
@@ -524,6 +549,12 @@ function asChallenge(value: unknown): Challenge | null {
 
 function asChallengeClaim(value: unknown): ChallengeClaim | null {
   return isObjectWithId(value) ? (value as ChallengeClaim) : null;
+}
+
+function asChallengeRerollState(value: unknown): ChallengeRerollState | null {
+  return value && typeof value === 'object' && 'isAvailable' in value && 'votes' in value
+    ? value as ChallengeRerollState
+    : null;
 }
 
 function asAnnotation(value: unknown): Annotation | null {

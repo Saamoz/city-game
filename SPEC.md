@@ -23,6 +23,8 @@ Admin first authors a reusable city map and its zones (Zone Editor), then author
 
 **Gameplay:** Territory V1 uses the portable deck flow. At game start, a configurable window of challenges (default 3, set via `game.settings.active_challenge_count`) is made active and visible to all players simultaneously. Players travel to zones, select a card from the shared deck, and complete it to capture the zone they are currently standing in. When a challenge is completed it disappears from the deck for all players and the next queued challenge slides in with an animation; the new challenge title is announced in the live feed. Challenges are consumed on completion. Game ends when a win condition is met.
 
+**Shared reroll:** The game earns one shared reroll charge after every two completed challenges (configurable with `game.settings.reroll_completion_target`, default 2) and cannot bank more than one. While charged and a queued replacement exists, each active card exposes a subtle reroll vote. Every team with at least one player must vote for the same card; votes may be withdrawn. Unanimity marks the card `skipped`, consumes the charge, clears outstanding votes, and promotes the next queued challenge. A normal completion clears votes for that card without consuming the charge.
+
 ### Future Modes (Not Built in V1)
 
 - **Scavenger Hunt** — challenges for points, first team to finish gets the most.
