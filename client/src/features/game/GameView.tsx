@@ -938,7 +938,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           ) : null}
 
           {/* Desktop: full section with chrome */}
-          {snapshot ? (
+          {snapshot && snapshot.game.status !== 'paused' ? (
             <section className="hidden rounded-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8]/96 p-4 shadow-[0_22px_60px_rgba(46,58,62,0.18)] backdrop-blur-sm lg:block lg:p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
@@ -982,7 +982,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                   completedCards={completedCards}
                   currentZoneId={currentZone?.id ?? null}
                   currentZoneName={currentZone?.name ?? null}
-                  isActionPending={snapshot.game.status === 'paused' ? () => true : isPending}
+                  isActionPending={isPending}
                   isPeeking={false}
                   locationMessage={locationErrorMessage}
                   locationStatus={locationStatus}
@@ -1002,7 +1002,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       </div>
 
       {/* Mobile: card fan peek → swipe up to open deck */}
-      {snapshot ? (
+      {snapshot && snapshot.game.status !== 'paused' ? (
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 lg:hidden">
           <div
             className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#f3e2d8]/92 via-[#f3e2d8]/72 to-transparent"
@@ -1033,7 +1033,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               completedCards={completedCards}
               currentZoneId={currentZone?.id ?? null}
               currentZoneName={currentZone?.name ?? null}
-              isActionPending={snapshot.game.status === 'paused' ? () => true : isPending}
+              isActionPending={isPending}
               isPeeking={!isDeckOpen}
               locationMessage={locationErrorMessage}
               locationStatus={locationStatus}
