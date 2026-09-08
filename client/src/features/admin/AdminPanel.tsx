@@ -103,7 +103,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
   const [isDeletingGame, setIsDeletingGame] = useState(false);
   const [isDeleteGameArmed, setIsDeleteGameArmed] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [resultsPublishingPending, setResultsPublishingPending] = useState<'homepage' | 'paths' | null>(null);
+  const [isHomepagePublishingPending, setIsHomepagePublishingPending] = useState(false);
   const [games, setGames] = useState<Game[]>([]);
   const [maps, setMaps] = useState<MapDefinition[]>([]);
   const [mapPlayability, setMapPlayability] = useState<MapPlayability[]>([]);
@@ -393,30 +393,28 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     }
   };
 
-  const handleResultsPublishing = async (kind: 'homepage' | 'paths') => {
+  const handleHomepagePublishing = async () => {
     if (!currentGame || currentGame.status !== 'completed') return;
-    const setting = kind === 'homepage' ? 'feature_results_on_home' : 'publish_recap_locations';
-    const isEnabled = currentGame.settings[setting] === true;
-    setResultsPublishingPending(kind);
+    const isEnabled = currentGame.settings.feature_results_on_home === true;
+    setIsHomepagePublishingPending(true);
     try {
       const updatedGame = await updateGameDefinition(currentGame.id, {
-        settings: { ...currentGame.settings, [setting]: !isEnabled },
+        settings: { ...currentGame.settings, feature_results_on_home: !isEnabled },
       });
       setCurrentGame(updatedGame);
       setGames(await listGames());
       setNotice({
         tone: 'success',
-        message: kind === 'homepage'
-          ? (!isEnabled ? 'This finished game is now shown on the public homepage.' : 'This game is no longer featured on the public homepage.')
-          : (!isEnabled ? 'Spectators can now see historical team paths in the replay.' : 'Historical team paths are now hidden from spectators.'),
+        message: !isEnabled
+          ? 'This finished game is now shown on the public homepage.'
+          : 'This game is no longer featured on the public homepage.',
       });
     } catch (error) {
       setNotice({ tone: 'error', message: getApiErrorMessage(error) });
     } finally {
-      setResultsPublishingPending(null);
+      setIsHomepagePublishingPending(false);
     }
   };
-
   const handleDeleteGame = async () => {
     if (!currentGame || currentGame.status === 'active' || currentGame.status === 'paused') {
       return;
@@ -876,31 +874,17 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                   onClick={() => { void handleLifecycle('end'); }}
                 />
                 {currentGame?.status === 'completed' ? (
-                  <div className="space-y-3 border-t border-[#d9e1e5] pt-4">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#40535c]">Public Results</p>
-                      <p className="mt-2 text-sm text-[#5f6d74]">Choose whether this finished game appears at the main website address. A live or paused game always takes priority.</p>
-                      <button
-                        type="button"
-                        onClick={() => { void handleResultsPublishing('homepage'); }}
-                        disabled={resultsPublishingPending !== null}
-                        className="mt-3 rounded-full border border-[#718991] px-4 py-2 text-sm font-semibold text-[#314952] transition hover:bg-[#f0f5f6] disabled:opacity-50"
-                      >
-                        {resultsPublishingPending === 'homepage' ? 'Updating…' : currentGame.settings.feature_results_on_home === true ? 'Remove from Homepage' : 'Show Results on Homepage'}
-                      </button>
-                    </div>
-                    <div className="rounded-2xl border border-[#ead9bb] bg-[#fffaf0] p-3">
-                      <p className="text-sm font-semibold text-[#664d20]">Spectator movement paths</p>
-                      <p className="mt-1 text-xs leading-5 text-[#766343]">Off by default because the replay contains historical team locations. Publish them only when everyone is comfortable sharing the route.</p>
-                      <button
-                        type="button"
-                        onClick={() => { void handleResultsPublishing('paths'); }}
-                        disabled={resultsPublishingPending !== null}
-                        className="mt-3 rounded-full border border-[#b89b60] px-4 py-2 text-sm font-semibold text-[#664d20] transition hover:bg-[#fff3d8] disabled:opacity-50"
-                      >
-                        {resultsPublishingPending === 'paths' ? 'Updating…' : currentGame.settings.publish_recap_locations === true ? 'Hide Team Paths' : 'Publish Team Paths'}
-                      </button>
-                    </div>
+                  <div className="border-t border-[#d9e1e5] pt-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#40535c]">Public Results</p>
+                    <p className="mt-2 text-sm text-[#5f6d74]">Choose whether this finished game appears at the main website address. A live or paused game always takes priority.</p>
+                    <button
+                      type="button"
+                      onClick={() => { void handleHomepagePublishing(); }}
+                      disabled={isHomepagePublishingPending}
+                      className="mt-3 rounded-full border border-[#718991] px-4 py-2 text-sm font-semibold text-[#314952] transition hover:bg-[#f0f5f6] disabled:opacity-50"
+                    >
+                      {isHomepagePublishingPending ? 'Updating…' : currentGame.settings.feature_results_on_home === true ? 'Remove from Homepage' : 'Show Results on Homepage'}
+                    </button>
                   </div>
                 ) : null}
                 <div className="border-t border-[#d9e1e5] pt-4">

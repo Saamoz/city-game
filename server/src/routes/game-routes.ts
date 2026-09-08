@@ -514,7 +514,7 @@ function normalizeGameSettings(input: JsonObject | undefined, existing: JsonObje
     next.allow_reclaim_zones = false;
   }
 
-  for (const key of ['feature_results_on_home', 'publish_recap_locations'] as const) {
+  for (const key of ['feature_results_on_home'] as const) {
     if (next[key] !== undefined && typeof next[key] !== 'boolean') {
       throw new AppError(errorCodes.validationError, { message: `settings.${key} must be a boolean.` });
     }

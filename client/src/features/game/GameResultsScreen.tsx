@@ -82,7 +82,6 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
   };
 
   const activeMoment = recap ? findActiveMoment(recap, progress) : null;
-  const showsMovementPaths = !publicAccess || game.settings.publish_recap_locations === true;
   const spectatorWinner = scoreboard[0]?.team.name ?? null;
   const title = viewerTeam
     ? didViewerWin ? (isTie ? "It's a draw!" : 'Victory!') : 'Game over'
@@ -104,11 +103,11 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
           <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(238,229,207,0.58),transparent_23%,transparent_68%,rgba(31,47,52,0.32))]" />
           <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 px-3 pt-[calc(env(safe-area-inset-top,0px)+0.7rem)] sm:px-6">
             <div className="results-map-paper min-w-0 px-3.5 py-2.5">
-              <p className="truncate font-['IBM_Plex_Mono',monospace] text-[9px] font-semibold uppercase tracking-[0.24em] text-[#80652f]">Final expedition map</p>
+              <p className="truncate font-['IBM_Plex_Mono',monospace] text-[9px] font-semibold uppercase tracking-[0.24em] text-[#80652f]">Final map replay</p>
               <p className="mt-0.5 truncate font-[Georgia,Times_New_Roman,serif] text-lg font-semibold text-[#26373c]">{game.name}</p>
             </div>
             <div className="pointer-events-auto flex shrink-0 gap-2">
-              <button className="results-map-paper px-3.5 py-2.5 font-['IBM_Plex_Mono',monospace] text-[10px] font-bold uppercase tracking-[0.12em] text-[#31454b] transition hover:-translate-y-0.5" onClick={() => setView('results')} type="button">Field report</button>
+              <button className="results-map-paper px-3.5 py-2.5 font-['IBM_Plex_Mono',monospace] text-[10px] font-bold uppercase tracking-[0.12em] text-[#31454b] transition hover:-translate-y-0.5" onClick={() => setView('results')} type="button">Score screen</button>
               {onLeave ? <button className="results-map-paper px-3.5 py-2.5 font-['IBM_Plex_Mono',monospace] text-[10px] font-bold uppercase tracking-[0.12em] text-[#31454b]" onClick={onLeave} type="button">Lobby</button> : null}
             </div>
           </header>
@@ -121,7 +120,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-[#eee1c5]" style={{ backgroundColor: colorForTeam(activeMoment.teamId, teams) }} />
                     <p className="truncate font-[Georgia,Times_New_Roman,serif] text-sm font-semibold text-[#293b40]">{activeMoment.title}</p>
                   </>
-                ) : <p className="truncate text-[11px] text-[#657176]">{recapError ?? 'Drag through the expedition log'}</p>}
+                ) : <p className="truncate text-[11px] text-[#657176]">{recapError ?? 'Drag through the replay'}</p>}
               </div>
               <div className="flex items-center gap-3">
                 <button className="shrink-0 border border-[#263a40] bg-[#2c4147] px-3.5 py-2 font-['IBM_Plex_Mono',monospace] text-[10px] font-bold uppercase tracking-[0.13em] text-[#f4ead2] shadow-[2px_3px_0_rgba(125,98,48,0.22)] disabled:opacity-45" disabled={!recap} onClick={togglePlayback} type="button">
@@ -131,7 +130,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
                   <input aria-label="Replay position" className="block w-full accent-[#8d7138]" disabled={!recap} max="1000" min="0" onChange={(event) => seek(Number(event.target.value) / 1000)} type="range" value={Math.round(progress * 1000)} />
                   <div className="mt-0.5 flex justify-between font-['IBM_Plex_Mono',monospace] text-[9px] uppercase tracking-[0.1em] text-[#687479]">
                     <span>{formatReplayTime(recap, progress)}</span>
-                    <span>{recap ? `${recap.playbackDurationSeconds}s field replay` : 'Preparing log'}</span>
+                    <span>{recap ? `${recap.playbackDurationSeconds}s replay` : 'Preparing log'}</span>
                   </div>
                 </div>
               </div>
@@ -144,7 +143,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
           <div className="relative z-10 mx-auto w-full max-w-4xl pb-4">
             <header className="flex items-center justify-between gap-4 px-1 text-[#304349]">
               <div className="min-w-0">
-                <p className="truncate font-['IBM_Plex_Mono',monospace] text-[10px] font-semibold uppercase tracking-[0.3em] text-[#7c683c]">Territory · Final field report</p>
+                <p className="truncate font-['IBM_Plex_Mono',monospace] text-[10px] font-semibold uppercase tracking-[0.3em] text-[#7c683c]">Final score screen</p>
                 <p className="mt-1 truncate font-[Georgia,Times_New_Roman,serif] text-lg font-semibold">{game.name}</p>
               </div>
               {onLeave ? <button className="border-b border-[#6f644c] px-1 py-1 font-['IBM_Plex_Mono',monospace] text-[10px] font-bold uppercase tracking-[0.13em] text-[#43545a]" onClick={onLeave} type="button">Back to lobby</button> : null}
@@ -155,7 +154,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
               <CompassRose />
               <div className="relative z-10">
                 <div className="mx-auto max-w-2xl text-center">
-                  <p className="font-['IBM_Plex_Mono',monospace] text-[10px] font-semibold uppercase tracking-[0.34em] text-[#8d7138]">Expedition complete</p>
+                  <p className="font-['IBM_Plex_Mono',monospace] text-[10px] font-semibold uppercase tracking-[0.34em] text-[#8d7138]">Game complete</p>
                   <h1 className="mt-2 font-[Georgia,Times_New_Roman,serif] text-4xl font-semibold leading-none text-[#26373c] sm:text-6xl">{title}</h1>
                   <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#58666a] sm:text-base">{subtitle}</p>
                 </div>
@@ -163,18 +162,18 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
                 {scoreboard[0] ? (
                   <div className="results-winner-stamp mx-auto mt-6 flex min-h-44 w-full max-w-sm flex-col items-center justify-center px-6 py-5 text-center" style={{ '--winner-color': scoreboard[0].team.color } as CSSProperties}>
                     <span className="text-2xl text-[#8d7138]" aria-hidden="true">✦</span>
-                    <p className="mt-1 font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#7d6738]">{isTie ? 'Shared first place' : 'Expedition winner'}</p>
+                    <p className="mt-1 font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#7d6738]">{isTie ? 'First-place tie' : 'Winner'}</p>
                     <h2 className="mt-2 max-w-full font-[Georgia,Times_New_Roman,serif] text-3xl font-semibold leading-tight text-[#203239] sm:text-4xl">{isTie ? scoreboard.filter((entry) => entry.rank === 1).map((entry) => entry.team.name).join(' · ') : scoreboard[0].team.name}</h2>
                     <p className="mt-2 font-['IBM_Plex_Mono',monospace] text-[10px] uppercase tracking-[0.16em] text-[#667277]">{highestZoneCount} {highestZoneCount === 1 ? 'zone' : 'zones'} held</p>
                   </div>
                 ) : (
-                  <div className="mx-auto mt-6 max-w-sm border-y border-dashed border-[#9e8b62]/55 py-8 text-center text-sm text-[#687579]">No teams reached the final ledger.</div>
+                  <div className="mx-auto mt-6 max-w-sm border-y border-dashed border-[#9e8b62]/55 py-8 text-center text-sm text-[#687579]">No teams reached the final standings.</div>
                 )}
 
                 <section className="mx-auto mt-7 max-w-2xl">
                   <div className="flex items-end justify-between gap-3 border-b border-[#8c7a54]/55 pb-2">
                     <div>
-                      <p className="font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#866d37]">Territory ledger</p>
+                      <p className="font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#866d37]">Score</p>
                       <h2 className="mt-1 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#293a3f]">Final standings</h2>
                     </div>
                     <span className="font-['IBM_Plex_Mono',monospace] text-[9px] uppercase tracking-[0.13em] text-[#758085]">Zones held</span>
@@ -196,12 +195,12 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
 
                 <div className="mx-auto mt-7 grid max-w-2xl gap-3 border-t border-dashed border-[#9e8b62]/55 pt-5 sm:grid-cols-2">
                   <button className="group border border-[#2d4147] bg-[#2d4147] px-5 py-4 text-left text-[#f4ead2] shadow-[3px_4px_0_rgba(126,101,54,0.28)] transition hover:-translate-y-0.5" onClick={() => setView('map')} type="button">
-                    <span className="block font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.24em] text-[#d9bd7d]">Unfold the city</span>
-                    <span className="mt-1 block font-[Georgia,Times_New_Roman,serif] text-xl font-semibold">Open map & replay <span aria-hidden="true">↗</span></span>
-                    <span className="mt-1 block text-xs leading-5 text-[#e8dfca]/68">{showsMovementPaths ? 'Trace the routes and watch the territory change.' : 'Watch the territory change through the expedition.'}</span>
+                    <span className="block font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.24em] text-[#d9bd7d]">Replay</span>
+                    <span className="mt-1 block font-[Georgia,Times_New_Roman,serif] text-xl font-semibold">Map replay <span aria-hidden="true">↗</span></span>
+                    <span className="mt-1 block text-xs leading-5 text-[#e8dfca]/68">Watch the team trails and zone ownership change over time.</span>
                   </button>
                   <button className="border border-[#897650] bg-[#eee2c6]/65 px-5 py-4 text-left text-[#2d4046] shadow-[3px_4px_0_rgba(126,101,54,0.16)] transition hover:-translate-y-0.5 hover:bg-[#f3e8cf]" onClick={() => setShowFeed(true)} type="button">
-                    <span className="block font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.24em] text-[#806938]">Captain's log</span>
+                    <span className="block font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.24em] text-[#806938]">Timeline</span>
                     <span className="mt-1 block font-[Georgia,Times_New_Roman,serif] text-xl font-semibold">Read full timeline <span aria-hidden="true">→</span></span>
                     <span className="mt-1 block text-xs leading-5 text-[#617075]">Claims, captures, rerolls, pauses, and every turn of the game.</span>
                   </button>
