@@ -1,20 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
-import type { GameRecap, GameRecapMoment, GameStateSnapshot, Team, TeamRecapPath, Zone } from '@city-game/shared';
-import { getGameRecap } from '../../lib/api';
-import { FeedOverlay, buildFeedEntries, buildZoneScoreboard } from './Phase32Panels';
+import type { GameRecap, GameRecapMoment, Game, Team, TeamRecapPath, Zone } from '@city-game/shared';
+import { getGameRecap, getPublicGameRecap } from '../../lib/api';
+import { FeedOverlay, buildFeedEntriesForTeams } from './Phase32Panels';
 import { buildRenderedZoneGeometry, collectGeometryPositions } from './mapGeometry';
 
 interface GameResultsScreenProps {
-  snapshot: GameStateSnapshot;
-  onLeave(): void;
+  game: Game;
+  teams: Team[];
+  zones: Zone[];
+  viewerTeam?: Team | null;
+  publicAccess?: boolean;
+  onLeave?(): void;
 }
 
 type ResultsView = 'results' | 'map';
 
 const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env.MAPBOX_ACCESS_TOKEN ?? '').trim();
 
-export function GameResultsScreen({ snapshot, onLeave }: GameResultsScreenProps) {
+export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publicAccess = false, onLeave }: GameResultsScreenProps) {
   const [recap, setRecap] = useState<GameRecap | null>(null);
   const [recapError, setRecapError] = useState<string | null>(null);
   const [progress, setProgress] = useState(1);
@@ -23,20 +27,20 @@ export function GameResultsScreen({ snapshot, onLeave }: GameResultsScreenProps)
   const [showFeed, setShowFeed] = useState(false);
   const startedPlaybackAtRef = useRef(0);
   const startedProgressRef = useRef(0);
-  const scoreboard = useMemo(() => withTiedRanks(buildZoneScoreboard(snapshot)), [snapshot]);
+  const scoreboard = useMemo(() => withTiedRanks(teams.map((team) => ({ team, zoneCount: zones.filter((zone) => zone.ownerTeamId === team.id).length, rank: 0 })).sort((left, right) => right.zoneCount - left.zoneCount || left.team.name.localeCompare(right.team.name))), [teams, zones]);
   const highestZoneCount = scoreboard[0]?.zoneCount ?? 0;
   const winnerIds = useMemo(() => new Set(scoreboard.filter((entry) => entry.zoneCount === highestZoneCount).map((entry) => entry.team.id)), [highestZoneCount, scoreboard]);
-  const viewerEntry = scoreboard.find((entry) => entry.team.id === snapshot.team?.id) ?? null;
-  const didViewerWin = Boolean(snapshot.team && winnerIds.has(snapshot.team.id));
+  const viewerEntry = scoreboard.find((entry) => entry.team.id === viewerTeam?.id) ?? null;
+  const didViewerWin = Boolean(viewerTeam && winnerIds.has(viewerTeam.id));
   const isTie = winnerIds.size > 1;
 
   useEffect(() => {
     const controller = new AbortController();
-    void getGameRecap(snapshot.game.id, controller.signal)
+    void (publicAccess ? getPublicGameRecap : getGameRecap)(game.id, controller.signal)
       .then(setRecap)
       .catch(() => setRecapError('The movement replay could not be loaded. Final scores and map are still available.'));
     return () => controller.abort();
-  }, [snapshot.game.id]);
+  }, [game.id, publicAccess]);
 
   useEffect(() => {
     if (!isPlaying || !recap) return;
@@ -78,30 +82,34 @@ export function GameResultsScreen({ snapshot, onLeave }: GameResultsScreenProps)
   };
 
   const activeMoment = recap ? findActiveMoment(recap, progress) : null;
-  const title = snapshot.team ? didViewerWin ? (isTie ? "It's a draw!" : 'Victory!') : 'Game over' : 'Final standings';
-  const subtitle = snapshot.team
+  const showsMovementPaths = !publicAccess || game.settings.publish_recap_locations === true;
+  const spectatorWinner = scoreboard[0]?.team.name ?? null;
+  const title = viewerTeam
+    ? didViewerWin ? (isTie ? "It's a draw!" : 'Victory!') : 'Game over'
+    : isTie ? "It's a draw!" : spectatorWinner ? `${spectatorWinner} won!` : 'Game over';
+  const subtitle = viewerTeam
     ? didViewerWin
       ? isTie
-        ? `${snapshot.team.name} tied for first with ${viewerEntry?.zoneCount ?? 0} zones.`
-        : `${snapshot.team.name} finished on top with ${viewerEntry?.zoneCount ?? 0} zones.`
-      : `${snapshot.team.name} placed ${ordinal(viewerEntry?.rank ?? scoreboard.length)} with ${viewerEntry?.zoneCount ?? 0} zones.`
-    : isTie ? `${winnerIds.size} teams tied for first with ${highestZoneCount} zones.` : `${scoreboard[0]?.team.name ?? 'No team'} finished on top with ${highestZoneCount} zones.`;
+        ? `${viewerTeam.name} tied for first with ${viewerEntry?.zoneCount ?? 0} zones.`
+        : `${viewerTeam.name} finished on top with ${viewerEntry?.zoneCount ?? 0} zones.`
+      : `${viewerTeam.name} placed ${ordinal(viewerEntry?.rank ?? scoreboard.length)} with ${viewerEntry?.zoneCount ?? 0} zones.`
+    : isTie ? `${winnerIds.size} teams tied for first with ${highestZoneCount} zones.` : `${spectatorWinner ?? 'No team'} won with ${highestZoneCount} zones.`;
 
   return (
     <main className="relative h-[100dvh] overflow-hidden bg-[#17262c] text-[#f8efdd]">
-      <ResultsMap progress={progress} recap={recap} teams={snapshot.teams} zones={snapshot.zones} />
+      <ResultsMap progress={progress} recap={recap} teams={teams} zones={zones} />
 
       {view === 'map' ? (
         <>
           <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(12,25,30,0.62),transparent_25%,transparent_62%,rgba(12,25,30,0.55))]" />
           <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 px-4 pt-[calc(env(safe-area-inset-top,0px)+0.8rem)] sm:px-6">
             <div className="min-w-0 rounded-2xl border border-[#ead5a5]/35 bg-[#14252b]/78 px-3.5 py-2.5 shadow-lg backdrop-blur-md">
-              <p className="truncate text-[9px] font-semibold uppercase tracking-[0.25em] text-[#e0bd6d]">{snapshot.game.name} · Replay</p>
+              <p className="truncate text-[9px] font-semibold uppercase tracking-[0.25em] text-[#e0bd6d]">{game.name} · Replay</p>
               <p className="mt-0.5 truncate font-[Georgia,Times_New_Roman,serif] text-lg font-semibold">{title}</p>
             </div>
             <div className="pointer-events-auto flex shrink-0 gap-2">
               <button className="rounded-full border border-[#ead5a5]/40 bg-[#14252b]/82 px-3.5 py-2.5 text-[10px] font-bold uppercase tracking-[0.14em] shadow-lg backdrop-blur-md" onClick={() => setView('results')} type="button">Results</button>
-              <button className="rounded-full border border-[#ead5a5]/40 bg-[#14252b]/82 px-3.5 py-2.5 text-[10px] font-bold uppercase tracking-[0.14em] shadow-lg backdrop-blur-md" onClick={onLeave} type="button">Lobby</button>
+              {onLeave ? <button className="rounded-full border border-[#ead5a5]/40 bg-[#14252b]/82 px-3.5 py-2.5 text-[10px] font-bold uppercase tracking-[0.14em] shadow-lg backdrop-blur-md" onClick={onLeave} type="button">Lobby</button> : null}
             </div>
           </header>
 
@@ -109,7 +117,7 @@ export function GameResultsScreen({ snapshot, onLeave }: GameResultsScreenProps)
             <section className="pointer-events-auto mx-auto max-w-2xl rounded-[1.35rem] border border-[#d6bb7a]/45 bg-[#17282f]/92 px-3.5 py-3 shadow-[0_18px_50px_rgba(8,16,19,0.42)] backdrop-blur-md sm:px-5">
               {activeMoment ? (
                 <div className="mb-2 flex min-w-0 items-center gap-2 border-b border-[#d6bb7a]/20 pb-2">
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: colorForTeam(activeMoment.teamId, snapshot.teams) }} />
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: colorForTeam(activeMoment.teamId, teams) }} />
                   <p className="truncate text-xs font-semibold">{activeMoment.title}</p>
                 </div>
               ) : recapError ? <p className="mb-2 text-xs text-[#f3c5ba]">{recapError}</p> : null}
@@ -130,35 +138,35 @@ export function GameResultsScreen({ snapshot, onLeave }: GameResultsScreenProps)
         </>
       ) : (
         <section className="absolute inset-0 z-20 overflow-y-auto overscroll-contain bg-[radial-gradient(circle_at_15%_10%,rgba(211,170,82,0.17),transparent_30%),linear-gradient(160deg,rgba(19,37,44,0.97),rgba(12,24,29,0.96))] px-4 pb-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] pt-[calc(env(safe-area-inset-top,0px)+1rem)] sm:px-6">
-          {didViewerWin && !isTie ? <CelebrationSparks /> : null}
+          {!isTie && (didViewerWin || (!viewerTeam && Boolean(spectatorWinner))) ? <CelebrationSparks /> : null}
           <div className="relative z-10 mx-auto flex min-h-full max-w-4xl flex-col justify-between gap-8">
             <header className="flex items-start justify-between gap-4">
               <div className="max-w-2xl">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-[#e0bd6d]">{snapshot.game.name} · Final</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-[#e0bd6d]">{game.name} · Final</p>
                 <h1 className="mt-2 font-[Georgia,Times_New_Roman,serif] text-4xl font-semibold leading-none sm:text-6xl">{title}</h1>
                 <p className="mt-3 max-w-xl text-sm leading-6 text-[#f8efdd]/78 sm:text-base">{subtitle}</p>
               </div>
-              <button className="shrink-0 rounded-full border border-[#ead5a5]/35 bg-[#20353d] px-3.5 py-2 text-[10px] font-bold uppercase tracking-[0.14em]" onClick={onLeave} type="button">Lobby</button>
+              {onLeave ? <button className="shrink-0 rounded-full border border-[#ead5a5]/35 bg-[#20353d] px-3.5 py-2 text-[10px] font-bold uppercase tracking-[0.14em]" onClick={onLeave} type="button">Lobby</button> : null}
             </header>
 
             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
               <button className="group flex min-h-48 flex-col justify-end overflow-hidden rounded-[1.8rem] border border-[#d6bb7a]/45 bg-[linear-gradient(145deg,rgba(224,189,109,0.18),rgba(23,40,47,0.88))] p-5 text-left shadow-[0_24px_70px_rgba(8,16,19,0.35)] transition hover:border-[#e8c36c]/70 hover:bg-[#203740] sm:p-6" onClick={() => setView('map')} type="button">
                 <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-[#e0bd6d]">Interactive final map</span>
                 <span className="mt-2 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold sm:text-3xl">Map & replay →</span>
-                <span className="mt-2 max-w-md text-sm leading-6 text-[#f8efdd]/68">Pan around freely, replay every team path, and watch zones change hands as challenges are completed.</span>
+                <span className="mt-2 max-w-md text-sm leading-6 text-[#f8efdd]/68">{showsMovementPaths ? 'Pan around freely, replay every team path, and watch zones change hands as challenges are completed.' : 'Pan around freely, replay the match, and watch zones change hands as challenges are completed.'}</span>
               </button>
 
-              <section className="rounded-[1.8rem] border border-[#d6bb7a]/45 bg-[#f5eddc]/96 p-4 text-[#21333a] shadow-[0_24px_70px_rgba(8,16,19,0.35)] sm:p-5">
+              <section className="rounded-[1.8rem] border border-[#d6bb7a]/45 bg-[#fff8e8] p-4 text-[#17282f] shadow-[0_24px_70px_rgba(8,16,19,0.35)] sm:p-5">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[#966b19]">Final score</p>
-                    <h2 className="mt-1 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold">Zones held</h2>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[#76500c]">Final score</p>
+                    <h2 className="mt-1 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#14262d]">Zones held</h2>
                   </div>
                   <button className="rounded-full border border-[#bda66f]/55 bg-[#fff9ec] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em]" onClick={() => setShowFeed(true)} type="button">Timeline</button>
                 </div>
                 <div className="mt-4 space-y-2">
                   {scoreboard.map((entry) => (
-                    <div className={['flex items-center justify-between rounded-2xl border px-3 py-2.5', entry.team.id === snapshot.team?.id ? 'border-[#92732f]/55 bg-[#fff9ec]' : 'border-[#d9c9a4]/65 bg-[#eee4ce]'].join(' ')} key={entry.team.id}>
+                    <div className={['flex items-center justify-between rounded-2xl border px-3 py-2.5', entry.team.id === viewerTeam?.id ? 'border-[#92732f]/55 bg-[#fff9ec]' : 'border-[#d9c9a4]/65 bg-[#eee4ce]'].join(' ')} key={entry.team.id}>
                       <div className="flex min-w-0 items-center gap-2.5">
                         <span className="w-5 text-center text-sm font-bold text-[#8a6b2d]">{entry.rank}</span>
                         <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-white" style={{ backgroundColor: entry.team.color }} />
@@ -174,7 +182,7 @@ export function GameResultsScreen({ snapshot, onLeave }: GameResultsScreenProps)
         </section>
       )}
 
-      {showFeed ? <FeedOverlay entries={buildFeedEntries(recap?.events ?? [], snapshot)} errorMessage={recapError} isLoading={!recap && !recapError} onClose={() => setShowFeed(false)} onFocusZone={() => { setShowFeed(false); setView('map'); }} /> : null}
+      {showFeed ? <FeedOverlay entries={buildFeedEntriesForTeams(recap?.events ?? [], teams)} errorMessage={recapError} isLoading={!recap && !recapError} onClose={() => setShowFeed(false)} onFocusZone={() => { setShowFeed(false); setView('map'); }} /> : null}
     </main>
   );
 }

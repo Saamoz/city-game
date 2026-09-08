@@ -21,6 +21,7 @@ import {
   subscribeCurrentPlayerPush,
 } from '../../lib/api';
 import { buildFeedEntriesForTeams, type FeedEntry } from '../game/Phase32Panels';
+import { GameResultsScreen } from '../game/GameResultsScreen';
 import { buildRenderedZoneGeometry, collectGeometryPositions } from '../game/mapGeometry';
 import { clearTeamLocationMarkers, syncTeamLocationMarkers } from '../game/teamLocationMarkers';
 import {
@@ -141,7 +142,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
         }
       }
 
-      if (currentPlayer && currentPlayer.gameId !== resolvedGame.id) {
+      if (currentPlayer && currentPlayer.gameId !== resolvedGame.id && resolvedGame.status !== 'completed') {
         setPlayer(null);
         setStatus('ready');
         setStep('home');
@@ -742,6 +743,10 @@ function HomeScreen(props: {
     [props.spectatorEvents, props.spectatorTeams],
   );
 
+  if (props.game.status === 'completed') {
+    return <GameResultsScreen game={props.game} publicAccess teams={props.spectatorTeams} zones={props.spectatorZones} />;
+  }
+
   return (
     <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#f5f0e8] px-5 py-8 sm:px-8">
       {showSpectatorView ? <SpectatorMapBackground game={props.game} teams={props.spectatorTeams} teamLocations={props.spectatorTeamLocations} zones={props.spectatorZones} /> : null}
@@ -756,7 +761,7 @@ function HomeScreen(props: {
               <div className="flex items-start justify-between gap-3">
                 <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#d8c6a0]/75 bg-[#f7efdc]/94 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#5d4d33] shadow-[0_12px_28px_rgba(24,32,36,0.12)] backdrop-blur">
                   <span className="h-2.5 w-2.5 rounded-full bg-[#c8a86b]" />
-                  {props.game.status === 'completed' ? 'Final Results' : 'Spectator View'}
+                  Spectator View
                 </div>
                 {props.canReturnToGame ? (
                   <button
@@ -764,7 +769,7 @@ function HomeScreen(props: {
                     onClick={props.onEnterGame}
                     type="button"
                   >
-                    {props.game.status === 'completed' ? 'View Results' : 'Return to Game'}
+                    Return to Game
                   </button>
                 ) : null}
               </div>
@@ -784,7 +789,7 @@ function HomeScreen(props: {
               submitting={props.submitting}
               teams={props.spectatorTeams}
               zones={props.spectatorZones}
-              isCompleted={props.game.status === 'completed'}
+              isCompleted={false}
             />
           </div>
         ) : (

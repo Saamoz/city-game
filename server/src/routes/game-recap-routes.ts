@@ -1,7 +1,8 @@
 import { errorCodes } from '@city-game/shared';
 import type { FastifyPluginAsync } from 'fastify';
-import { AppError } from '../lib/errors.js';
 import { buildGameRecap } from '../services/game-recap-service.js';
+import { AppError } from '../lib/errors.js';
+import { getGameById } from '../services/game-service.js';
 
 const gameParamsSchema = {
   type: 'object',
@@ -20,6 +21,18 @@ export const gameRecapRoutes: FastifyPluginAsync = async (app) => {
       }
       const recap = await buildGameRecap(app.db, app.modeRegistry, id);
       reply.send({ recap });
+    },
+  );
+
+  app.get(
+    '/game/:id/public-recap',
+    { schema: { params: gameParamsSchema } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const game = await getGameById(app.db, id);
+      const recap = await buildGameRecap(app.db, app.modeRegistry, id);
+      const publishLocations = (game.settings as Record<string, unknown>).publish_recap_locations === true;
+      reply.send({ recap: publishLocations ? recap : { ...recap, paths: [] } });
     },
   );
 };

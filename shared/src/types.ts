@@ -116,6 +116,8 @@ export type GameSettings = JsonObject & {
   broadcast_team_locations?: boolean;
   allow_midgame_join?: boolean;
   allow_reclaim_zones?: boolean;
+  feature_results_on_home?: boolean;
+  publish_recap_locations?: boolean;
   reroll_completion_target?: number;
 };
 

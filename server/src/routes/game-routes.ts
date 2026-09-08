@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { and, asc, desc, eq, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { GAME_MODE_KEYS, STATE_VERSION_HEADER, errorCodes, socketServerEventTypes, type JsonObject } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { games, teams } from '../db/schema.js';
@@ -120,20 +120,33 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get('/game/active', async (_request, reply) => {
-    const [game] = await app.db
+    const [liveGame] = await app.db
       .select()
       .from(games)
-      .where(ne(games.status, 'completed'))
+      .where(inArray(games.status, ['active', 'paused']))
       .orderBy(desc(games.createdAt))
       .limit(1);
 
-    if (!game) {
-      throw new AppError(errorCodes.gameNotFound, {
-        message: 'No active game found.',
-      });
+    const [featuredFinishedGame] = liveGame ? [] : await app.db
+      .select()
+      .from(games)
+      .where(and(eq(games.status, 'completed'), sql`${games.settings}->>'feature_results_on_home' = 'true'`))
+      .orderBy(desc(games.updatedAt))
+      .limit(1);
+
+    const [setupGame] = liveGame || featuredFinishedGame ? [] : await app.db
+      .select()
+      .from(games)
+      .where(eq(games.status, 'setup'))
+      .orderBy(desc(games.createdAt))
+      .limit(1);
+
+    const publicGame = liveGame ?? featuredFinishedGame ?? setupGame;
+    if (!publicGame) {
+      throw new AppError(errorCodes.gameNotFound, { message: 'No active game found.' });
     }
 
-    reply.send({ game: serializeGameRecord(game) });
+    reply.send({ game: serializeGameRecord(publicGame) });
   });
 
   app.post(
@@ -244,6 +257,17 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
         const nextSettings = body.settings === undefined
           ? normalizeGameSettings(existingGame.settings as JsonObject)
           : normalizeGameSettings(body.settings as JsonObject, existingGame.settings as JsonObject);
+
+        if (nextSettings.feature_results_on_home === true && existingGame.status !== 'completed') {
+          throw new AppError(errorCodes.validationError, { message: 'Only a finished game can be featured on the public homepage.' });
+        }
+
+        if (nextSettings.feature_results_on_home === true) {
+          await db
+            .update(games)
+            .set({ settings: sql`${games.settings} - 'feature_results_on_home'` })
+            .where(and(ne(games.id, id), sql`${games.settings}->>'feature_results_on_home' = 'true'`));
+        }
 
         if ((body.mapId !== undefined || body.challengeSetId !== undefined) && existingGame.status !== 'setup') {
           throw new AppError(errorCodes.validationError, {
@@ -488,6 +512,12 @@ function normalizeGameSettings(input: JsonObject | undefined, existing: JsonObje
   }
   if (next.allow_reclaim_zones === undefined || next.allow_reclaim_zones === null) {
     next.allow_reclaim_zones = false;
+  }
+
+  for (const key of ['feature_results_on_home', 'publish_recap_locations'] as const) {
+    if (next[key] !== undefined && typeof next[key] !== 'boolean') {
+      throw new AppError(errorCodes.validationError, { message: `settings.${key} must be a boolean.` });
+    }
   }
 
   const activeChallengeCount = next.active_challenge_count;

@@ -178,6 +178,11 @@ export async function getGameRecap(gameId: string, signal?: AbortSignal): Promis
   return response.recap;
 }
 
+export async function getPublicGameRecap(gameId: string, signal?: AbortSignal): Promise<GameRecap> {
+  const response = await apiRequest<GameRecapResponse>('/game/' + gameId + '/public-recap', { signal });
+  return response.recap;
+}
+
 export async function getGame(gameId: string, signal?: AbortSignal): Promise<Game> {
   const response = await apiRequest<GameResponse>('/game/' + gameId, { signal });
   return response.game;

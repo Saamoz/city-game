@@ -830,7 +830,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   }, [focusZoneById]);
 
   if (snapshot?.game.status === 'completed') {
-    return <GameResultsScreen snapshot={snapshot} onLeave={onLeaveMap} />;
+    return <GameResultsScreen game={snapshot.game} onLeave={onLeaveMap} teams={snapshot.teams} viewerTeam={snapshot.team} zones={snapshot.zones} />;
   }
 
   return (

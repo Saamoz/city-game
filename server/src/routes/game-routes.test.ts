@@ -321,6 +321,40 @@ describe("game and team routes", () => {
     });
   });
 
+  it("shows featured finished results when there is no live game, while live play takes priority", async () => {
+    await seedGame({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      name: "Upcoming Game",
+      status: "setup",
+    });
+    await seedGame({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      name: "Featured Final",
+      status: "completed",
+      settings: { feature_results_on_home: true },
+    });
+    app = await createGameTestApp();
+
+    const featuredResponse = await app.inject({ method: "GET", url: "/api/v1/game/active" });
+    expect(featuredResponse.statusCode).toBe(200);
+    expect(featuredResponse.json().game).toMatchObject({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      status: "completed",
+    });
+
+    await seedGame({
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      name: "Live Game",
+      status: "active",
+    });
+    const liveResponse = await app.inject({ method: "GET", url: "/api/v1/game/active" });
+    expect(liveResponse.statusCode).toBe(200);
+    expect(liveResponse.json().game).toMatchObject({
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      status: "active",
+    });
+  });
+
   it("runs the full lifecycle, initializes resources once, and logs events", async () => {
     await seedGame();
     await seedTeam();
