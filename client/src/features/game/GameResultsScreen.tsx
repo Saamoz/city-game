@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import mapboxgl from 'mapbox-gl';
 import type { GameRecap, GameRecapMoment, Game, Team, TeamRecapPath, Zone } from '@city-game/shared';
 import { getGameRecap, getPublicGameRecap } from '../../lib/api';
@@ -96,40 +96,42 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
     : isTie ? `${winnerIds.size} teams tied for first with ${highestZoneCount} zones.` : `${spectatorWinner ?? 'No team'} won with ${highestZoneCount} zones.`;
 
   return (
-    <main className="relative h-[100dvh] overflow-hidden bg-[#17262c] text-[#f8efdd]">
+    <main className="relative h-[100dvh] overflow-hidden bg-[#d7dedb] text-[#24343a]">
       <ResultsMap progress={progress} recap={recap} teams={teams} zones={zones} />
 
       {view === 'map' ? (
         <>
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(12,25,30,0.62),transparent_25%,transparent_62%,rgba(12,25,30,0.55))]" />
-          <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 px-4 pt-[calc(env(safe-area-inset-top,0px)+0.8rem)] sm:px-6">
-            <div className="min-w-0 rounded-2xl border border-[#ead5a5]/35 bg-[#14252b]/78 px-3.5 py-2.5 shadow-lg backdrop-blur-md">
-              <p className="truncate text-[9px] font-semibold uppercase tracking-[0.25em] text-[#e0bd6d]">{game.name} · Replay</p>
-              <p className="mt-0.5 truncate font-[Georgia,Times_New_Roman,serif] text-lg font-semibold">{title}</p>
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(238,229,207,0.58),transparent_23%,transparent_68%,rgba(31,47,52,0.32))]" />
+          <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 px-3 pt-[calc(env(safe-area-inset-top,0px)+0.7rem)] sm:px-6">
+            <div className="results-map-paper min-w-0 px-3.5 py-2.5">
+              <p className="truncate font-['IBM_Plex_Mono',monospace] text-[9px] font-semibold uppercase tracking-[0.24em] text-[#80652f]">Final expedition map</p>
+              <p className="mt-0.5 truncate font-[Georgia,Times_New_Roman,serif] text-lg font-semibold text-[#26373c]">{game.name}</p>
             </div>
             <div className="pointer-events-auto flex shrink-0 gap-2">
-              <button className="rounded-full border border-[#ead5a5]/40 bg-[#14252b]/82 px-3.5 py-2.5 text-[10px] font-bold uppercase tracking-[0.14em] shadow-lg backdrop-blur-md" onClick={() => setView('results')} type="button">Results</button>
-              {onLeave ? <button className="rounded-full border border-[#ead5a5]/40 bg-[#14252b]/82 px-3.5 py-2.5 text-[10px] font-bold uppercase tracking-[0.14em] shadow-lg backdrop-blur-md" onClick={onLeave} type="button">Lobby</button> : null}
+              <button className="results-map-paper px-3.5 py-2.5 font-['IBM_Plex_Mono',monospace] text-[10px] font-bold uppercase tracking-[0.12em] text-[#31454b] transition hover:-translate-y-0.5" onClick={() => setView('results')} type="button">Field report</button>
+              {onLeave ? <button className="results-map-paper px-3.5 py-2.5 font-['IBM_Plex_Mono',monospace] text-[10px] font-bold uppercase tracking-[0.12em] text-[#31454b]" onClick={onLeave} type="button">Lobby</button> : null}
             </div>
           </header>
 
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.65rem)] sm:px-6 sm:pb-5">
-            <section className="pointer-events-auto mx-auto max-w-2xl rounded-[1.35rem] border border-[#d6bb7a]/45 bg-[#17282f]/92 px-3.5 py-3 shadow-[0_18px_50px_rgba(8,16,19,0.42)] backdrop-blur-md sm:px-5">
-              {activeMoment ? (
-                <div className="mb-2 flex min-w-0 items-center gap-2 border-b border-[#d6bb7a]/20 pb-2">
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: colorForTeam(activeMoment.teamId, teams) }} />
-                  <p className="truncate text-xs font-semibold">{activeMoment.title}</p>
-                </div>
-              ) : recapError ? <p className="mb-2 text-xs text-[#f3c5ba]">{recapError}</p> : null}
+            <section className="results-map-paper pointer-events-auto mx-auto max-w-2xl px-3.5 py-3 sm:px-5">
+              <div className="mb-2 flex min-h-5 min-w-0 items-center gap-2 border-b border-dashed border-[#927d50]/45 pb-2">
+                {activeMoment ? (
+                  <>
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-[#eee1c5]" style={{ backgroundColor: colorForTeam(activeMoment.teamId, teams) }} />
+                    <p className="truncate font-[Georgia,Times_New_Roman,serif] text-sm font-semibold text-[#293b40]">{activeMoment.title}</p>
+                  </>
+                ) : <p className="truncate text-[11px] text-[#657176]">{recapError ?? 'Drag through the expedition log'}</p>}
+              </div>
               <div className="flex items-center gap-3">
-                <button className="shrink-0 rounded-full bg-[#e8c36c] px-3.5 py-2 text-[10px] font-bold uppercase tracking-[0.13em] text-[#1c2c31] disabled:opacity-45" disabled={!recap} onClick={togglePlayback} type="button">
+                <button className="shrink-0 border border-[#263a40] bg-[#2c4147] px-3.5 py-2 font-['IBM_Plex_Mono',monospace] text-[10px] font-bold uppercase tracking-[0.13em] text-[#f4ead2] shadow-[2px_3px_0_rgba(125,98,48,0.22)] disabled:opacity-45" disabled={!recap} onClick={togglePlayback} type="button">
                   {isPlaying ? 'Pause' : progress >= 0.999 ? 'Replay' : 'Play'}
                 </button>
                 <div className="min-w-0 flex-1">
-                  <input aria-label="Replay position" className="block w-full accent-[#e8c36c]" disabled={!recap} max="1000" min="0" onChange={(event) => seek(Number(event.target.value) / 1000)} type="range" value={Math.round(progress * 1000)} />
-                  <div className="mt-0.5 flex justify-between text-[9px] uppercase tracking-[0.12em] text-[#f8efdd]/58">
+                  <input aria-label="Replay position" className="block w-full accent-[#8d7138]" disabled={!recap} max="1000" min="0" onChange={(event) => seek(Number(event.target.value) / 1000)} type="range" value={Math.round(progress * 1000)} />
+                  <div className="mt-0.5 flex justify-between font-['IBM_Plex_Mono',monospace] text-[9px] uppercase tracking-[0.1em] text-[#687479]">
                     <span>{formatReplayTime(recap, progress)}</span>
-                    <span>{recap ? `${recap.playbackDurationSeconds}s` : 'Loading'}</span>
+                    <span>{recap ? `${recap.playbackDurationSeconds}s field replay` : 'Preparing log'}</span>
                   </div>
                 </div>
               </div>
@@ -137,53 +139,101 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
           </div>
         </>
       ) : (
-        <section className="absolute inset-0 z-20 overflow-y-auto overscroll-contain bg-[radial-gradient(circle_at_15%_10%,rgba(211,170,82,0.17),transparent_30%),linear-gradient(160deg,rgba(19,37,44,0.97),rgba(12,24,29,0.96))] px-4 pb-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] pt-[calc(env(safe-area-inset-top,0px)+1rem)] sm:px-6">
+        <section className="results-atlas-surface absolute inset-0 z-20 overflow-y-auto overscroll-contain px-3 pb-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] sm:px-6 sm:pt-6">
           {!isTie && (didViewerWin || (!viewerTeam && Boolean(spectatorWinner))) ? <CelebrationSparks /> : null}
-          <div className="relative z-10 mx-auto flex min-h-full max-w-4xl flex-col justify-between gap-8">
-            <header className="flex items-start justify-between gap-4">
-              <div className="max-w-2xl">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-[#e0bd6d]">{game.name} · Final</p>
-                <h1 className="mt-2 font-[Georgia,Times_New_Roman,serif] text-4xl font-semibold leading-none sm:text-6xl">{title}</h1>
-                <p className="mt-3 max-w-xl text-sm leading-6 text-[#f8efdd]/78 sm:text-base">{subtitle}</p>
+          <div className="relative z-10 mx-auto w-full max-w-4xl pb-4">
+            <header className="flex items-center justify-between gap-4 px-1 text-[#304349]">
+              <div className="min-w-0">
+                <p className="truncate font-['IBM_Plex_Mono',monospace] text-[10px] font-semibold uppercase tracking-[0.3em] text-[#7c683c]">Territory · Final field report</p>
+                <p className="mt-1 truncate font-[Georgia,Times_New_Roman,serif] text-lg font-semibold">{game.name}</p>
               </div>
-              {onLeave ? <button className="shrink-0 rounded-full border border-[#ead5a5]/35 bg-[#20353d] px-3.5 py-2 text-[10px] font-bold uppercase tracking-[0.14em]" onClick={onLeave} type="button">Lobby</button> : null}
+              {onLeave ? <button className="border-b border-[#6f644c] px-1 py-1 font-['IBM_Plex_Mono',monospace] text-[10px] font-bold uppercase tracking-[0.13em] text-[#43545a]" onClick={onLeave} type="button">Back to lobby</button> : null}
             </header>
 
-            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
-              <button className="group flex min-h-48 flex-col justify-end overflow-hidden rounded-[1.8rem] border border-[#d6bb7a]/45 bg-[linear-gradient(145deg,rgba(224,189,109,0.18),rgba(23,40,47,0.88))] p-5 text-left shadow-[0_24px_70px_rgba(8,16,19,0.35)] transition hover:border-[#e8c36c]/70 hover:bg-[#203740] sm:p-6" onClick={() => setView('map')} type="button">
-                <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-[#e0bd6d]">Interactive final map</span>
-                <span className="mt-2 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold sm:text-3xl">Map & replay →</span>
-                <span className="mt-2 max-w-md text-sm leading-6 text-[#f8efdd]/68">{showsMovementPaths ? 'Pan around freely, replay every team path, and watch zones change hands as challenges are completed.' : 'Pan around freely, replay the match, and watch zones change hands as challenges are completed.'}</span>
-              </button>
+            <article className="results-paper relative mt-3 overflow-hidden px-4 py-6 text-[#293a3f] sm:mt-5 sm:px-8 sm:py-8">
+              <CartographicRoute />
+              <CompassRose />
+              <div className="relative z-10">
+                <div className="mx-auto max-w-2xl text-center">
+                  <p className="font-['IBM_Plex_Mono',monospace] text-[10px] font-semibold uppercase tracking-[0.34em] text-[#8d7138]">Expedition complete</p>
+                  <h1 className="mt-2 font-[Georgia,Times_New_Roman,serif] text-4xl font-semibold leading-none text-[#26373c] sm:text-6xl">{title}</h1>
+                  <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#58666a] sm:text-base">{subtitle}</p>
+                </div>
 
-              <section className="rounded-[1.8rem] border border-[#d6bb7a]/45 bg-[#fff8e8] p-4 text-[#17282f] shadow-[0_24px_70px_rgba(8,16,19,0.35)] sm:p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[#76500c]">Final score</p>
-                    <h2 className="mt-1 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#14262d]">Zones held</h2>
+                {scoreboard[0] ? (
+                  <div className="results-winner-stamp mx-auto mt-6 flex min-h-44 w-full max-w-sm flex-col items-center justify-center px-6 py-5 text-center" style={{ '--winner-color': scoreboard[0].team.color } as CSSProperties}>
+                    <span className="text-2xl text-[#8d7138]" aria-hidden="true">✦</span>
+                    <p className="mt-1 font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#7d6738]">{isTie ? 'Shared first place' : 'Expedition winner'}</p>
+                    <h2 className="mt-2 max-w-full font-[Georgia,Times_New_Roman,serif] text-3xl font-semibold leading-tight text-[#203239] sm:text-4xl">{isTie ? scoreboard.filter((entry) => entry.rank === 1).map((entry) => entry.team.name).join(' · ') : scoreboard[0].team.name}</h2>
+                    <p className="mt-2 font-['IBM_Plex_Mono',monospace] text-[10px] uppercase tracking-[0.16em] text-[#667277]">{highestZoneCount} {highestZoneCount === 1 ? 'zone' : 'zones'} held</p>
                   </div>
-                  <button className="rounded-full border border-[#bda66f]/55 bg-[#fff9ec] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em]" onClick={() => setShowFeed(true)} type="button">Timeline</button>
-                </div>
-                <div className="mt-4 space-y-2">
-                  {scoreboard.map((entry) => (
-                    <div className={['flex items-center justify-between rounded-2xl border px-3 py-2.5', entry.team.id === viewerTeam?.id ? 'border-[#92732f]/55 bg-[#fff9ec]' : 'border-[#d9c9a4]/65 bg-[#eee4ce]'].join(' ')} key={entry.team.id}>
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        <span className="w-5 text-center text-sm font-bold text-[#8a6b2d]">{entry.rank}</span>
-                        <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-white" style={{ backgroundColor: entry.team.color }} />
-                        <span className="truncate text-sm font-semibold">{entry.team.name}</span>
-                      </div>
-                      <span className="ml-3 text-sm font-bold">{entry.zoneCount}</span>
+                ) : (
+                  <div className="mx-auto mt-6 max-w-sm border-y border-dashed border-[#9e8b62]/55 py-8 text-center text-sm text-[#687579]">No teams reached the final ledger.</div>
+                )}
+
+                <section className="mx-auto mt-7 max-w-2xl">
+                  <div className="flex items-end justify-between gap-3 border-b border-[#8c7a54]/55 pb-2">
+                    <div>
+                      <p className="font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#866d37]">Territory ledger</p>
+                      <h2 className="mt-1 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#293a3f]">Final standings</h2>
                     </div>
-                  ))}
+                    <span className="font-['IBM_Plex_Mono',monospace] text-[9px] uppercase tracking-[0.13em] text-[#758085]">Zones held</span>
+                  </div>
+                  <div className="divide-y divide-dashed divide-[#a99a78]/55">
+                    {scoreboard.map((entry) => (
+                      <div className={['grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2.5 px-1 py-3', entry.team.id === viewerTeam?.id ? 'bg-[#eadfbe]/55' : ''].join(' ')} key={entry.team.id}>
+                        <span className="font-[Georgia,Times_New_Roman,serif] text-xl font-bold text-[#856d3b]">{entry.rank}</span>
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <span className="h-3 w-3 shrink-0 rotate-45 border border-[#f7efd9] shadow-sm" style={{ backgroundColor: entry.team.color }} />
+                          <span className="truncate font-[Georgia,Times_New_Roman,serif] text-base font-semibold text-[#26383e]">{entry.team.name}</span>
+                          {entry.team.id === viewerTeam?.id ? <span className="hidden font-['IBM_Plex_Mono',monospace] text-[8px] uppercase tracking-[0.12em] text-[#806a3b] sm:inline">Your team</span> : null}
+                        </div>
+                        <span className="font-['IBM_Plex_Mono',monospace] text-sm font-bold text-[#26383e]">{entry.zoneCount}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <div className="mx-auto mt-7 grid max-w-2xl gap-3 border-t border-dashed border-[#9e8b62]/55 pt-5 sm:grid-cols-2">
+                  <button className="group border border-[#2d4147] bg-[#2d4147] px-5 py-4 text-left text-[#f4ead2] shadow-[3px_4px_0_rgba(126,101,54,0.28)] transition hover:-translate-y-0.5" onClick={() => setView('map')} type="button">
+                    <span className="block font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.24em] text-[#d9bd7d]">Unfold the city</span>
+                    <span className="mt-1 block font-[Georgia,Times_New_Roman,serif] text-xl font-semibold">Open map & replay <span aria-hidden="true">↗</span></span>
+                    <span className="mt-1 block text-xs leading-5 text-[#e8dfca]/68">{showsMovementPaths ? 'Trace the routes and watch the territory change.' : 'Watch the territory change through the expedition.'}</span>
+                  </button>
+                  <button className="border border-[#897650] bg-[#eee2c6]/65 px-5 py-4 text-left text-[#2d4046] shadow-[3px_4px_0_rgba(126,101,54,0.16)] transition hover:-translate-y-0.5 hover:bg-[#f3e8cf]" onClick={() => setShowFeed(true)} type="button">
+                    <span className="block font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.24em] text-[#806938]">Captain's log</span>
+                    <span className="mt-1 block font-[Georgia,Times_New_Roman,serif] text-xl font-semibold">Read full timeline <span aria-hidden="true">→</span></span>
+                    <span className="mt-1 block text-xs leading-5 text-[#617075]">Claims, captures, rerolls, pauses, and every turn of the game.</span>
+                  </button>
                 </div>
-              </section>
-            </div>
+                {recapError ? <p className="mx-auto mt-4 max-w-2xl text-center text-xs text-[#8b4e42]">{recapError}</p> : null}
+              </div>
+            </article>
           </div>
         </section>
       )}
 
       {showFeed ? <FeedOverlay entries={buildFeedEntriesForTeams(recap?.events ?? [], teams)} errorMessage={recapError} isLoading={!recap && !recapError} onClose={() => setShowFeed(false)} onFocusZone={() => { setShowFeed(false); setView('map'); }} /> : null}
     </main>
+  );
+}
+
+function CartographicRoute() {
+  return (
+    <svg aria-hidden="true" className="results-cartographic-route" preserveAspectRatio="none" viewBox="0 0 800 360">
+      <path d="M-40 296 C90 190 168 330 282 218 S468 92 552 162 S686 244 850 66" fill="none" stroke="currentColor" strokeDasharray="5 11" strokeLinecap="round" strokeWidth="2" />
+      <circle cx="282" cy="218" fill="currentColor" r="5" />
+      <circle cx="552" cy="162" fill="#f2e5c8" r="7" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function CompassRose() {
+  return (
+    <div aria-hidden="true" className="results-compass-rose">
+      <span className="results-compass-north">N</span>
+      <span className="results-compass-star">✦</span>
+    </div>
   );
 }
 
