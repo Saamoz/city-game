@@ -8,6 +8,7 @@ import {
   type ChallengeSetItem,
   type ErrorResponse,
   type Game,
+  type GameRecap,
   type GameEventRecord,
   type GameEventType,
   type GameStateSnapshot,
@@ -54,6 +55,7 @@ interface ApiRequestOptions {
 
 interface GamesResponse { games: Game[] }
 interface GameResponse { game: Game }
+interface GameRecapResponse { recap: GameRecap }
 interface ChallengeSetsResponse { challengeSets: ChallengeSet[] }
 interface ChallengeSetResponse { challengeSet: ChallengeSet }
 interface ChallengeSetItemsResponse { items: ChallengeSetItem[] }
@@ -169,6 +171,11 @@ export async function getActiveGame(signal?: AbortSignal): Promise<Game> {
 export async function listGames(signal?: AbortSignal): Promise<Game[]> {
   const response = await apiRequest<GamesResponse>('/games', { signal });
   return response.games;
+}
+
+export async function getGameRecap(gameId: string, signal?: AbortSignal): Promise<GameRecap> {
+  const response = await apiRequest<GameRecapResponse>('/game/' + gameId + '/recap', { signal });
+  return response.recap;
 }
 
 export async function getGame(gameId: string, signal?: AbortSignal): Promise<Game> {

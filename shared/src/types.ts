@@ -413,3 +413,39 @@ export interface ScoreboardEntry {
   resources: TeamResourceBalances;
   rank: number;
 }
+
+export interface GameRecapPoint {
+  lat: number;
+  lng: number;
+  recordedAt: IsoTimestamp;
+  progress: number;
+}
+
+export interface TeamRecapPath {
+  teamId: Uuid;
+  points: GameRecapPoint[];
+}
+
+export type GameRecapMomentType = 'challenge_completed' | 'challenge_rerolled' | 'game_paused' | 'game_resumed';
+
+export interface GameRecapMoment {
+  id: Uuid;
+  type: GameRecapMomentType;
+  title: string;
+  detail: string | null;
+  teamId: Uuid | null;
+  zoneId: Uuid | null;
+  occurredAt: IsoTimestamp;
+  progress: number;
+}
+
+export interface GameRecap {
+  gameId: Uuid;
+  startedAt: IsoTimestamp;
+  endedAt: IsoTimestamp;
+  playbackDurationSeconds: number;
+  scoreboard: ScoreboardEntry[];
+  paths: TeamRecapPath[];
+  moments: GameRecapMoment[];
+  events: GameEventRecord[];
+}

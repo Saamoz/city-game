@@ -421,6 +421,29 @@ function formatFeedEntry(
         zoneId: zone?.id,
       };
     }
+    case 'CHALLENGE_CLAIMED': {
+      const challenge = asNamedObject(event.meta.challenge);
+      const teamName = event.actorTeamId ? teamNameById.get(event.actorTeamId) ?? 'A team' : 'A team';
+      return { id: event.id, title: `${teamName} claimed ${challenge?.name ?? 'a challenge'}`, body: null, createdAt: event.createdAt, accentColor: event.actorTeamId ? teamColorById.get(event.actorTeamId) : undefined };
+    }
+    case 'CHALLENGE_RELEASED': {
+      const challenge = asNamedObject(event.meta.challenge);
+      const teamName = event.actorTeamId ? teamNameById.get(event.actorTeamId) ?? 'A team' : 'A team';
+      return { id: event.id, title: `${teamName} released ${challenge?.name ?? 'a challenge'}`, body: null, createdAt: event.createdAt, accentColor: event.actorTeamId ? teamColorById.get(event.actorTeamId) : undefined };
+    }
+    case 'CHALLENGE_COMPLETED': {
+      const challenge = asNamedObject(event.meta.challenge);
+      const zone = asNamedObject(event.meta.zone);
+      if (zone) return null;
+      const teamName = event.actorTeamId ? teamNameById.get(event.actorTeamId) ?? 'A team' : 'A team';
+      return { id: event.id, title: `${teamName} completed ${challenge?.name ?? 'a challenge'}`, body: null, createdAt: event.createdAt, accentColor: event.actorTeamId ? teamColorById.get(event.actorTeamId) : undefined };
+    }
+    case 'CHALLENGE_REROLL_STATE_CHANGED': {
+      const challenge = asNamedObject(event.meta.challenge);
+      const didReroll = asRecord(event.afterState)?.didReroll === true;
+      const teamName = event.actorTeamId ? teamNameById.get(event.actorTeamId) ?? 'A team' : 'A team';
+      return { id: event.id, title: didReroll ? `${challenge?.name ?? 'A challenge'} was rerolled` : `${teamName} voted to reroll`, body: didReroll ? 'A replacement challenge entered the deck.' : challenge?.name ?? null, createdAt: event.createdAt, accentColor: event.actorTeamId ? teamColorById.get(event.actorTeamId) : '#c8a86b' };
+    }
     case 'CHALLENGE_SPAWNED': {
       const challenge = asNamedObject(event.meta.challenge);
       return {
@@ -451,6 +474,10 @@ function formatFeedEntry(
     default:
       return null;
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
 function asNamedObject(value: unknown): { id?: string; name?: string } | null {

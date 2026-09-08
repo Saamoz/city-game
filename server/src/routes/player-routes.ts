@@ -85,7 +85,10 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       await executeIdempotentMutation(app, request, reply, async (db) => {
         const { id } = request.params as { id: string };
-        await getGameById(db, id);
+        const game = await getGameById(db, id);
+        if (game.status === 'completed') {
+          throw new AppError(errorCodes.validationError, { message: 'Registration is closed because this game has finished.' });
+        }
 
         const body = request.body as { display_name: string };
         const sessionToken = generateSessionToken();

@@ -367,8 +367,11 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
       return;
     }
 
-    const label = transition.charAt(0).toUpperCase() + transition.slice(1);
-    if (!window.confirm(label + ' this game?')) {
+    const label = transition === 'end' ? 'Finish' : transition.charAt(0).toUpperCase() + transition.slice(1);
+    const confirmation = transition === 'end'
+      ? 'Finish this game? This freezes the final score and ends play. Results remain available until you permanently delete the game.'
+      : label + ' this game?';
+    if (!window.confirm(confirmation)) {
       return;
     }
 
@@ -378,7 +381,10 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
       setCurrentGame(updatedGame);
       setGames((current) => upsertById(current, updatedGame));
       await loadGameBundle(updatedGame.id);
-      setNotice({ tone: 'success', message: 'Game ' + transition + 'ed.' });
+      const lifecycleMessage = transition === 'end'
+        ? 'Game finished. Results and recap are now available.'
+        : `Game ${{ start: 'started', pause: 'paused', resume: 'resumed' }[transition as 'start' | 'pause' | 'resume']}.`;
+      setNotice({ tone: 'success', message: lifecycleMessage });
     } catch (error) {
       setNotice({ tone: 'error', message: getApiErrorMessage(error) });
     } finally {
@@ -839,24 +845,24 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                   onClick={() => { void handleLifecycle('resume'); }}
                 />
                 <LifecycleRow
-                  label="End"
-                  description="Close the current session."
-                  disabled={!currentGame || currentGame.status === 'completed' || isRefreshing}
+                  label="Finish Game"
+                  description="Freeze the final result and open the standings, final map, timeline, and movement recap."
+                  disabled={!currentGame || (currentGame.status !== 'active' && currentGame.status !== 'paused') || isRefreshing}
                   onClick={() => { void handleLifecycle('end'); }}
                 />
                 <div className="border-t border-[#d9e1e5] pt-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#a03d32]">Delete Game Data</p>
-                  <p className="mt-2 text-sm text-[#5f6d74]">Deletes the selected game, locations, players, teams, events, and runtime state. Authored maps and challenge sets are kept.</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#a03d32]">Permanently Delete Game</p>
+                  <p className="mt-2 text-sm text-[#5f6d74]">Permanently removes results, location history, players, teams, events, and runtime state. Authored maps and challenge sets are kept.</p>
                   <button
                     type="button"
                     onClick={() => { void handleDeleteGame(); }}
                     disabled={!currentGame || currentGame.status === 'active' || currentGame.status === 'paused' || isDeletingGame}
                     className="mt-3 rounded-full border border-[#b94b3f] px-4 py-2 text-sm font-semibold text-[#9b352c] transition hover:bg-[#fff2ef] disabled:cursor-not-allowed disabled:border-[#cbd3d8] disabled:text-[#8b969c]"
                   >
-                    {isDeletingGame ? 'Deleting…' : isDeleteGameArmed ? 'Confirm Delete All Data' : 'Delete Game Data'}
+                    {isDeletingGame ? 'Deleting…' : isDeleteGameArmed ? 'Confirm Permanent Delete' : 'Permanently Delete'}
                   </button>
                   {currentGame?.status === 'active' || currentGame?.status === 'paused' ? (
-                    <p className="mt-2 text-xs text-[#7a858b]">End the game before deleting it.</p>
+                    <p className="mt-2 text-xs text-[#7a858b]">Finish the game before permanently deleting it.</p>
                   ) : null}
                 </div>
               </div>
@@ -1206,7 +1212,7 @@ function StatusBadge(props: { status: Game['status'] }) {
 
   return (
     <span className={['rounded-full border px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-[0.14em]', tone].join(' ')}>
-      {props.status}
+      {props.status === 'completed' ? 'finished' : props.status}
     </span>
   );
 }

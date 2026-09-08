@@ -128,3 +128,30 @@ input {
     transform: translateY(0) scale(1);
   }
 }
+
+.result-team-marker {
+  width: 1rem;
+  height: 1rem;
+  border: 3px solid #fff7e7;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 5px rgba(255, 247, 231, 0.18), 0 6px 16px rgba(12, 24, 28, 0.45);
+}
+
+.result-spark {
+  position: absolute;
+  top: -1rem;
+  width: 0.45rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  animation: result-spark-fall 2.4s cubic-bezier(0.18, 0.76, 0.3, 1) both;
+}
+
+@keyframes result-spark-fall {
+  0% { transform: translate3d(0, -1rem, 0) rotate(0deg); opacity: 0; }
+  12% { opacity: 1; }
+  100% { transform: translate3d(1.2rem, 14rem, 0) rotate(540deg); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .result-spark { display: none; }
+}

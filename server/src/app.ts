@@ -17,6 +17,7 @@ import { challengeSetRoutes } from './routes/challenge-set-routes.js';
 import { registerRealtime } from './socket/server.js';
 import { eventRoutes } from './routes/event-routes.js';
 import { gameRoutes } from './routes/game-routes.js';
+import { gameRecapRoutes } from './routes/game-recap-routes.js';
 import { mapRoutes } from './routes/map-routes.js';
 import { playerRoutes } from './routes/player-routes.js';
 import { resourceRoutes } from './routes/resource-routes.js';
@@ -78,6 +79,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.register(adminRoutes, { prefix: '/api/v1' });
   app.register(annotationRoutes, { prefix: '/api/v1' });
   app.register(gameRoutes, { prefix: '/api/v1' });
+  app.register(gameRecapRoutes, { prefix: '/api/v1' });
   app.register(mapRoutes, { prefix: '/api/v1' });
   app.register(playerRoutes, { prefix: '/api/v1' });
   app.register(resourceRoutes, { prefix: '/api/v1' });

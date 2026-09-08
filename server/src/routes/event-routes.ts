@@ -26,7 +26,7 @@ const recentEventsQuerySchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    limit: { type: 'integer', minimum: 1, maximum: 200 },
+    limit: { type: 'integer', minimum: 1, maximum: 1000 },
     eventType: { type: 'string', enum: [...EVENT_TYPE_VALUES] },
   },
 } as const;

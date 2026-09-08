@@ -102,13 +102,13 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
     setMapZones(nextZones);
   }, []);
 
-  const loadSpectatorAssets = useCallback(async (gameId: string, signal?: AbortSignal) => {
+  const loadSpectatorAssets = useCallback(async (gameId: string, signal?: AbortSignal, eventLimit = 40) => {
     const [nextTeams, nextZones, nextTeamLocations, nextPlayers, nextEvents] = await Promise.all([
       getTeams(gameId, signal),
       listZones(gameId, signal),
       getTeamLocations(gameId, signal),
       listPlayers(gameId, signal),
-      getRecentEvents(gameId, { limit: 40, signal }).catch(() => []),
+      getRecentEvents(gameId, { limit: eventLimit, signal }).catch(() => []),
     ]);
 
     setTeams(nextTeams);
@@ -159,13 +159,13 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
         });
       }
 
-      if (resolvedGame.status === 'active' && currentPlayer?.teamId && !suppressAutoEnter) {
+      if (!suppressAutoEnter && currentPlayer && ((resolvedGame.status === 'active' || resolvedGame.status === 'paused') && currentPlayer.teamId || resolvedGame.status === 'completed')) {
         onEnterGame(resolvedGame.id);
         return;
       }
 
       if (resolvedGame.status !== 'setup') {
-        await loadSpectatorAssets(resolvedGame.id, signal);
+        await loadSpectatorAssets(resolvedGame.id, signal, resolvedGame.status === 'completed' ? 1000 : 40);
         setStatus('ready');
         setStep('home');
         if (resolvedGame.status === 'active' && currentPlayer?.teamId) {
@@ -173,7 +173,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
         } else if (resolvedGame.status === 'active') {
           setMessage('Spectating the live game.');
         } else {
-          setMessage('Game finished. Spectator map remains available.');
+          setMessage(resolvedGame.status === 'paused' ? 'Game paused. The live map remains available until play resumes.' : 'Game finished. Final results remain available.');
         }
         return;
       }
@@ -247,7 +247,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
   }, [hydrate]);
 
   useEffect(() => {
-    if (!(status === 'empty' || (status === 'ready' && game && game.status !== 'setup'))) {
+    if (!(status === 'empty' || (status === 'ready' && game && (game.status === 'active' || game.status === 'paused')))) {
       return;
     }
 
@@ -626,7 +626,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
     onEnterGame(game.id);
   }
 
-  const canReturnToGame = Boolean(game && game.status === 'active' && player?.teamId);
+  const canReturnToGame = Boolean(game && player && (game.status === 'completed' || ((game.status === 'active' || game.status === 'paused') && player.teamId)));
   const canJoinCurrentGame = Boolean(game && game.status === 'setup');
   const canJoinMidGame = Boolean(game && (game.status === 'active' || game.status === 'paused') && !player?.teamId && isMidgameJoinAllowed(game.settings));
   const teamedPlayers = useMemo(() => players.filter((entry) => entry.teamId), [players]);
@@ -756,7 +756,7 @@ function HomeScreen(props: {
               <div className="flex items-start justify-between gap-3">
                 <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#d8c6a0]/75 bg-[#f7efdc]/94 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#5d4d33] shadow-[0_12px_28px_rgba(24,32,36,0.12)] backdrop-blur">
                   <span className="h-2.5 w-2.5 rounded-full bg-[#c8a86b]" />
-                  Spectator View
+                  {props.game.status === 'completed' ? 'Final Results' : 'Spectator View'}
                 </div>
                 {props.canReturnToGame ? (
                   <button
@@ -764,7 +764,7 @@ function HomeScreen(props: {
                     onClick={props.onEnterGame}
                     type="button"
                   >
-                    Return to Game
+                    {props.game.status === 'completed' ? 'View Results' : 'Return to Game'}
                   </button>
                 ) : null}
               </div>
@@ -783,6 +783,8 @@ function HomeScreen(props: {
               players={props.spectatorPlayers}
               submitting={props.submitting}
               teams={props.spectatorTeams}
+              zones={props.spectatorZones}
+              isCompleted={props.game.status === 'completed'}
             />
           </div>
         ) : (
@@ -847,7 +849,7 @@ function HomeScreen(props: {
 
 function SpectatorFeedPanel({ entries }: { entries: FeedEntry[] }) {
   const [expanded, setExpanded] = useState(false);
-  const visibleEntries = expanded ? entries.slice(0, 20) : entries.slice(0, 3);
+  const visibleEntries = expanded ? entries : entries.slice(0, 3);
 
   return (
     <section className="pointer-events-auto w-full max-w-sm rounded-[1.4rem] border border-[#d8c6a0]/80 bg-[#f7efdc]/94 p-3 shadow-[0_18px_42px_rgba(24,32,36,0.16)] backdrop-blur">
@@ -906,6 +908,8 @@ function SpectatorTeamPanel(props: {
   players: Player[];
   submitting: boolean;
   teams: Team[];
+  zones: Zone[];
+  isCompleted: boolean;
   onJoin(team: Team): void;
   onNameChange(value: string): void;
 }) {
@@ -927,14 +931,22 @@ function SpectatorTeamPanel(props: {
     return grouped;
   }, [props.players, props.teams]);
 
-  const visibleTeams = expanded ? props.teams : props.teams.slice(0, 3);
+  const zoneCountByTeamId = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const zone of props.zones) if (zone.ownerTeamId) counts.set(zone.ownerTeamId, (counts.get(zone.ownerTeamId) ?? 0) + 1);
+    return counts;
+  }, [props.zones]);
+  const rankedTeams = useMemo(() => props.isCompleted
+    ? [...props.teams].sort((left, right) => (zoneCountByTeamId.get(right.id) ?? 0) - (zoneCountByTeamId.get(left.id) ?? 0) || left.name.localeCompare(right.name))
+    : props.teams, [props.isCompleted, props.teams, zoneCountByTeamId]);
+  const visibleTeams = expanded ? rankedTeams : rankedTeams.slice(0, 3);
 
   return (
     <section className="pointer-events-auto mb-1 w-full max-w-md self-start rounded-[1.4rem] border border-[#d8c6a0]/80 bg-[#f7efdc]/94 p-3 shadow-[0_18px_42px_rgba(24,32,36,0.16)] backdrop-blur sm:mb-0 sm:p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8c7a57]">Teams</p>
-          <p className="mt-1 font-[Georgia,Times_New_Roman,serif] text-xl font-semibold text-[#223238]">{props.teams.length} teams live</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8c7a57]">{props.isCompleted ? 'Final score' : 'Teams'}</p>
+          <p className="mt-1 font-[Georgia,Times_New_Roman,serif] text-xl font-semibold text-[#223238]">{props.isCompleted ? 'Zones held' : `${props.teams.length} teams live`}</p>
         </div>
         <button
           className="rounded-full border border-[#b7a47d]/75 bg-[#fffaf0] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#3d4b50] transition hover:bg-[#f1e6cc]"
@@ -969,7 +981,7 @@ function SpectatorTeamPanel(props: {
                     <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: team.color }} />
                     <p className="truncate text-sm font-semibold text-[#223238]">{team.name}</p>
                   </div>
-                  <p className="mt-1 text-xs text-[#66757a]">{teamPlayers.length} player{teamPlayers.length === 1 ? '' : 's'}</p>
+                  <p className="mt-1 text-xs text-[#66757a]">{props.isCompleted ? `${zoneCountByTeamId.get(team.id) ?? 0} zones` : `${teamPlayers.length} player${teamPlayers.length === 1 ? '' : 's'}`}</p>
                 </div>
                 {props.canJoin ? (
                   <button

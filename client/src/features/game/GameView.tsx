@@ -28,6 +28,7 @@ import {
 } from '../../lib/realtime';
 import { useGameStore, type RealtimeConnectionStatus } from '../../store/gameStore';
 import { ChallengeDeck } from './ChallengeDeck';
+import { GameResultsScreen } from './GameResultsScreen';
 import {
   FeedOverlay,
   MiniScoreboardCard,
@@ -490,6 +491,16 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     didFitBoundsRef.current = true;
   }, [snapshot]);
 
+  useEffect(() => {
+    if (snapshot?.game.status !== 'completed' || !mapRef.current) return;
+    locationMarkerRef.current?.remove();
+    locationMarkerRef.current = null;
+    clearTeamLocationMarkers(teamLocationMarkersRef.current);
+    mapRef.current.remove();
+    mapRef.current = null;
+    setMapForLayer(null);
+  }, [snapshot?.game.status]);
+
   const activeChallenges = useMemo(() => getAvailableDeckChallenges(snapshot), [snapshot]);
 
   useEffect(() => {
@@ -818,10 +829,15 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     setActiveOverlay(null);
   }, [focusZoneById]);
 
+  if (snapshot?.game.status === 'completed') {
+    return <GameResultsScreen snapshot={snapshot} onLeave={onLeaveMap} />;
+  }
+
   return (
     <main className="fixed inset-0 h-[100dvh] overflow-hidden overscroll-none bg-[#dfe6e8] text-[#1f2a2f]">
       <div ref={mapContainerRef} className="absolute inset-0" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,234,215,0.16),transparent_28%),linear-gradient(180deg,rgba(223,230,232,0.04),rgba(223,230,232,0.16))]" />
+
       <ZoneLayer map={mapForLayer} snapshot={snapshot} />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-[linear-gradient(180deg,rgba(243,236,220,0.9),rgba(243,236,220,0))] px-4 pb-10 pt-[calc(env(safe-area-inset-top,0px)+1rem)] lg:px-8">
@@ -909,6 +925,10 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
             <Banner title="Unable to load map state" body={errorMessage ?? 'The snapshot request failed.'} tone="danger" />
           ) : null}
 
+          {snapshot?.game.status === 'paused' ? (
+            <Banner title="Game paused" body="The map remains visible. Challenges and location tracking resume when an admin resumes play." tone="warning" />
+          ) : null}
+
           {status === 'ready' && connectionStatus !== 'idle' && connectionStatus !== 'live' ? (
             <Banner
               title={getConnectionBannerTitle(connectionStatus)}
@@ -962,7 +982,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                   completedCards={completedCards}
                   currentZoneId={currentZone?.id ?? null}
                   currentZoneName={currentZone?.name ?? null}
-                  isActionPending={isPending}
+                  isActionPending={snapshot.game.status === 'paused' ? () => true : isPending}
                   isPeeking={false}
                   locationMessage={locationErrorMessage}
                   locationStatus={locationStatus}
@@ -1013,7 +1033,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               completedCards={completedCards}
               currentZoneId={currentZone?.id ?? null}
               currentZoneName={currentZone?.name ?? null}
-              isActionPending={isPending}
+              isActionPending={snapshot.game.status === 'paused' ? () => true : isPending}
               isPeeking={!isDeckOpen}
               locationMessage={locationErrorMessage}
               locationStatus={locationStatus}
