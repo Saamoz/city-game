@@ -37,11 +37,13 @@ describe('challenge set routes', () => {
       headers: idempotencyHeaders('create-set'),
       payload: {
         name: 'Transit Deck',
-        description: 'Portable + location-linked challenges.',
+        description: 'Point-linked challenges.',
+        locationMode: 'point',
       },
     });
 
     expect(createSetResponse.statusCode).toBe(201);
+    expect(createSetResponse.json().challengeSet.locationMode).toBe('point');
     const challengeSetId = createSetResponse.json().challengeSet.id as string;
 
     const createPortableItem = await app.inject({
@@ -51,13 +53,15 @@ describe('challenge set routes', () => {
       payload: {
         title: 'Photo Pair',
         description: 'Take a matching team photo.',
+        mapPoint: { type: 'Point', coordinates: [-79.38, 43.646] },
+        metadata: { sourceMapId: authored.mapId },
         sortOrder: 0,
       },
     });
 
     expect(createPortableItem.statusCode).toBe(201);
     expect(createPortableItem.json().item.mapZoneId).toBeNull();
-    expect(createPortableItem.json().item.mapPoint).toBeNull();
+    expect(createPortableItem.json().item.mapPoint).toMatchObject({ type: 'Point' });
     expect(createPortableItem.json().item.kind).toBe('text');
     expect(createPortableItem.json().item.completionMode).toBe('self_report');
 
@@ -106,157 +110,23 @@ describe('challenge set routes', () => {
     expect(listItemsResponse.json().items[1].title).toBe('Station Proof');
   });
 
-  it('clones portable, zone-linked, and point-linked authored items into runtime challenges on game start', async () => {
+  it('clones every item in a point-linked set as an active map challenge without runtime zones', async () => {
     app = await createChallengeSetTestApp(testDatabase);
     const authored = await seedAuthoredMap(app);
-
-    const createSetResponse = await app.inject({
-      method: 'POST',
-      url: '/api/v1/challenge-sets',
-      headers: idempotencyHeaders('create-set-for-start'),
-      payload: {
-        name: 'Territory Deck',
-        description: 'Gameplay set',
-      },
-    });
-
-    const challengeSetId = createSetResponse.json().challengeSet.id as string;
-
-    await app.inject({
-      method: 'POST',
-      url: '/api/v1/challenge-sets/' + challengeSetId + '/items',
-      headers: idempotencyHeaders('create-portable-for-start'),
-      payload: {
-        title: 'Portable Proof',
-        description: 'Portable challenge.',
-        sortOrder: 0,
-      },
-    });
-
-    await app.inject({
-      method: 'POST',
-      url: '/api/v1/challenge-sets/' + challengeSetId + '/items',
-      headers: idempotencyHeaders('create-zoned-for-start'),
-      payload: {
-        title: 'Zone Proof',
-        description: 'Linked challenge.',
-        mapZoneId: authored.mapZoneId,
-        sortOrder: 1,
-        metadata: { sourceMapId: authored.mapId },
-      },
-    });
-
-    await app.inject({
-      method: 'POST',
-      url: '/api/v1/challenge-sets/' + challengeSetId + '/items',
-      headers: idempotencyHeaders('create-point-for-start'),
-      payload: {
-        title: 'Pinned Proof',
-        description: 'Point-linked challenge.',
-        mapPoint: {
-          type: 'Point',
-          coordinates: [-79.381, 43.647],
-        },
-        sortOrder: 2,
-        metadata: { sourceMapId: authored.mapId },
-      },
-    });
-
-    await app.inject({
-      method: 'POST',
-      url: '/api/v1/challenge-sets/' + challengeSetId + '/items',
-      headers: idempotencyHeaders('create-fourth-for-start'),
-      payload: {
-        title: 'Fourth Proof',
-        description: 'Queued at start.',
-        sortOrder: 3,
-      },
-    });
-
-    const createGameResponse = await app.inject({
-      method: 'POST',
-      url: '/api/v1/game',
-      headers: adminHeaders('create-game-with-set'),
-      payload: {
-        name: 'Challenge Clone Game',
-        modeKey: 'territory',
-        mapId: authored.mapId,
-        challengeSetId,
-        settings: { active_challenge_count: 2 },
-      },
-    });
-
-    expect(createGameResponse.statusCode).toBe(201);
-    const gameId = createGameResponse.json().game.id as string;
-
-    const startResponse = await app.inject({
-      method: 'POST',
-      url: '/api/v1/game/' + gameId + '/start',
-      headers: adminHeaders('start-game-with-set'),
-    });
-
+    const setResponse = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets', headers: idempotencyHeaders('point-set'), payload: { name: 'Point Trail', locationMode: 'point' } });
+    const challengeSetId = setResponse.json().challengeSet.id as string;
+    for (let index = 0; index < 4; index += 1) {
+      const response = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets/' + challengeSetId + '/items', headers: idempotencyHeaders('point-item-' + index), payload: { title: 'Point ' + index, description: 'Visit this point.', mapPoint: { type: 'Point', coordinates: [-79.381 + index * 0.001, 43.647] }, sortOrder: index, metadata: { sourceMapId: authored.mapId } } });
+      expect(response.statusCode).toBe(201);
+    }
+    const gameResponse = await app.inject({ method: 'POST', url: '/api/v1/game', headers: adminHeaders('point-game'), payload: { name: 'Point Game', modeKey: 'point_challenge', mapId: authored.mapId, challengeSetId } });
+    const gameId = gameResponse.json().game.id as string;
+    const startResponse = await app.inject({ method: 'POST', url: '/api/v1/game/' + gameId + '/start', headers: adminHeaders('start-point-game') });
     expect(startResponse.statusCode).toBe(200);
-
-    const runtimeZones = await testDatabase.db
-      .select({ id: zones.id, metadata: zones.metadata })
-      .from(zones)
-      .where(eq(zones.gameId, gameId));
-
-    expect(runtimeZones).toHaveLength(1);
-    expect(runtimeZones[0]?.metadata).toMatchObject({ source_map_zone_id: authored.mapZoneId });
-
-    const runtimeChallenges = await testDatabase.db
-      .select({
-        id: challenges.id,
-        title: challenges.title,
-        zoneId: challenges.zoneId,
-        sortOrder: challenges.sortOrder,
-        isDeckActive: challenges.isDeckActive,
-        config: challenges.config,
-      })
-      .from(challenges)
-      .where(eq(challenges.gameId, gameId));
-
+    expect(await testDatabase.db.select().from(zones).where(eq(zones.gameId, gameId))).toHaveLength(0);
+    const runtimeChallenges = await testDatabase.db.select().from(challenges).where(eq(challenges.gameId, gameId));
     expect(runtimeChallenges).toHaveLength(4);
-
-    const portable = runtimeChallenges.find((entry) => entry.title === 'Portable Proof');
-    const linked = runtimeChallenges.find((entry) => entry.title === 'Zone Proof');
-    const pointLinked = runtimeChallenges.find((entry) => entry.title === 'Pinned Proof');
-    const queued = runtimeChallenges.find((entry) => entry.title === 'Fourth Proof');
-
-    expect(portable?.zoneId).toBeNull();
-    expect(portable?.isDeckActive).toBeTypeOf('boolean');
-    expect(portable?.config).toMatchObject({
-      portable: true,
-      location_mode: 'portable',
-      source_challenge_set_id: challengeSetId,
-    });
-
-    expect(linked?.zoneId).toBe(runtimeZones[0]?.id);
-    expect(linked?.isDeckActive).toBeTypeOf('boolean');
-    expect(linked?.config).toMatchObject({
-      portable: false,
-      location_mode: 'zone',
-      source_map_zone_id: authored.mapZoneId,
-    });
-
-    expect(pointLinked?.zoneId).toBeNull();
-    expect(pointLinked?.isDeckActive).toBeTypeOf('boolean');
-    expect(pointLinked?.config).toMatchObject({
-      portable: false,
-      location_mode: 'point',
-      source_map_point: {
-        type: 'Point',
-        coordinates: [-79.381, 43.647],
-      },
-    });
-
-    expect(queued?.zoneId).toBeNull();
-    expect(queued?.isDeckActive).toBeTypeOf('boolean');
-
-    const runtimeSortOrders = runtimeChallenges.map((entry) => entry.sortOrder).sort((left, right) => left - right);
-    expect(runtimeSortOrders).toEqual([0, 1, 2, 3]);
-    expect(runtimeChallenges.filter((entry) => entry.isDeckActive)).toHaveLength(2);
+    expect(runtimeChallenges.every((challenge) => challenge.isDeckActive && challenge.zoneId === null && (challenge.config as { location_mode?: string }).location_mode === 'point')).toBe(true);
   });
 });
 

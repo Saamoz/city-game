@@ -38,12 +38,14 @@ interface ChallengeSetItemRow {
 }
 
 export interface ChallengeSetInput {
+  locationMode?: 'portable' | 'zone' | 'point';
   name: string;
   description?: string | null;
   metadata?: JsonObject;
 }
 
 export interface ChallengeSetUpdateInput {
+  locationMode?: 'portable' | 'zone' | 'point';
   name?: string;
   description?: string | null;
   metadata?: JsonObject;
@@ -100,7 +102,7 @@ export async function createChallengeSet(db: DatabaseClient, input: ChallengeSet
   const [inserted] = await db.insert(challengeSets).values({
     name: input.name,
     description: normalizeNullableString(input.description),
-    metadata: input.metadata ?? {},
+    metadata: { ...(input.metadata ?? {}), locationMode: input.locationMode ?? 'portable' },
   }).returning({ id: challengeSets.id });
 
   return getChallengeSetByIdOrThrow(db, inserted.id);
@@ -112,7 +114,7 @@ export async function updateChallengeSet(db: DatabaseClient, challengeSetId: str
   await db.update(challengeSets).set({
     name: input.name ?? existing.name,
     description: input.description === undefined ? existing.description : normalizeNullableString(input.description),
-    metadata: input.metadata ?? existing.metadata,
+    metadata: { ...(input.metadata ?? existing.metadata), locationMode: input.locationMode ?? existing.locationMode },
     updatedAt: new Date(),
   }).where(eq(challengeSets.id, challengeSetId));
 
@@ -147,13 +149,14 @@ export async function getChallengeSetItemByIdOrThrow(db: DatabaseClient, challen
 }
 
 export async function createChallengeSetItem(db: DatabaseClient, input: ChallengeSetItemInput): Promise<ChallengeSetItem> {
-  await getChallengeSetByIdOrThrow(db, input.setId);
+  const challengeSet = await getChallengeSetByIdOrThrow(db, input.setId);
 
   const nextMetadata = input.metadata ?? {};
   const sourceMapId = getSourceMapId(nextMetadata);
   const nextMapZoneId = input.mapZoneId ?? null;
   const nextMapPoint = input.mapPoint ?? null;
 
+  assertPlacementMatchesSet(challengeSet.locationMode, nextMapZoneId, nextMapPoint);
   await assertPlacementIsValid(db, { mapZoneId: nextMapZoneId, mapPoint: nextMapPoint, sourceMapId });
 
   const [inserted] = await db.insert(challengeSetItems).values({
@@ -175,11 +178,13 @@ export async function createChallengeSetItem(db: DatabaseClient, input: Challeng
 
 export async function updateChallengeSetItem(db: DatabaseClient, challengeSetItemId: string, input: ChallengeSetItemUpdateInput): Promise<ChallengeSetItem> {
   const existing = await getChallengeSetItemByIdOrThrow(db, challengeSetItemId);
+  const challengeSet = await getChallengeSetByIdOrThrow(db, existing.setId);
   const nextMetadata = input.metadata ?? existing.metadata;
   const sourceMapId = getSourceMapId(nextMetadata);
   const nextMapZoneId = input.mapZoneId === undefined ? existing.mapZoneId : input.mapZoneId;
   const nextMapPoint = input.mapPoint === undefined ? existing.mapPoint : input.mapPoint;
 
+  assertPlacementMatchesSet(challengeSet.locationMode, nextMapZoneId, nextMapPoint);
   await assertPlacementIsValid(db, { mapZoneId: nextMapZoneId, mapPoint: nextMapPoint, sourceMapId });
 
   await db.update(challengeSetItems).set({
@@ -209,15 +214,26 @@ export async function cloneChallengeSetToGame(
   challengeSetId: string,
   gameId: string,
   activeChallengeCount: number,
+  modeKey: string = 'territory',
 ): Promise<number> {
   const existingRuntimeChallenges = await db.select({ id: challenges.id }).from(challenges).where(eq(challenges.gameId, gameId)).limit(1);
   if (existingRuntimeChallenges.length > 0) {
     return 0;
   }
 
+  const challengeSet = await getChallengeSetByIdOrThrow(db, challengeSetId);
   const items = await listChallengeSetItems(db, challengeSetId);
   if (items.length === 0) {
     return 0;
+  }
+  if (items.some((item) => getLocationMode(item) !== challengeSet.locationMode)) {
+    throw new AppError(errorCodes.validationError, { message: 'Every challenge item must match its challenge set placement mode.' });
+  }
+  if (modeKey === 'point_challenge' && challengeSet.locationMode !== 'point') {
+    throw new AppError(errorCodes.validationError, { message: 'Point Challenge games require a point-linked challenge set.' });
+  }
+  if (modeKey === 'point_challenge' && items.some((item) => !item.mapPoint)) {
+    throw new AppError(errorCodes.validationError, { message: 'Point Challenge games require every challenge to have a map point.' });
   }
 
   const shuffledItems = shuffleChallengeSetItems(items);
@@ -279,7 +295,14 @@ export async function cloneChallengeSetToGame(
     insertedChallengeIds.push(insertedChallenge.id);
   }
 
-  const initialActiveIds = insertedChallengeIds.slice(0, Math.max(1, activeChallengeCount));
+  const pointChallengeIds = shuffledItems
+    .map((item, index) => item.mapPoint ? insertedChallengeIds[index] : null)
+    .filter((id): id is string => Boolean(id));
+  const deckChallengeIds = shuffledItems
+    .map((item, index) => item.mapPoint ? null : insertedChallengeIds[index])
+    .filter((id): id is string => Boolean(id))
+    .slice(0, Math.max(1, activeChallengeCount));
+  const initialActiveIds = [...new Set([...pointChallengeIds, ...deckChallengeIds])];
   if (initialActiveIds.length > 0) {
     await db.update(challenges).set({
       isDeckActive: true,
@@ -324,6 +347,11 @@ function buildPersistedConfig(config: JsonObject, mapZoneId: string | null, mapP
   nextConfig.location_mode = getLocationMode({ mapZoneId, mapPoint });
 
   return nextConfig;
+}
+
+function assertPlacementMatchesSet(mode: 'portable' | 'zone' | 'point', mapZoneId: string | null, mapPoint: GeoJsonPoint | null): void {
+  const valid = mode === 'portable' ? !mapZoneId && !mapPoint : mode === 'zone' ? Boolean(mapZoneId) && !mapPoint : Boolean(mapPoint) && !mapZoneId;
+  if (!valid) throw new AppError(errorCodes.validationError, { message: mode === 'portable' ? 'Portable challenge sets cannot contain placed items.' : mode === 'zone' ? 'Every item in a zone-linked set requires a source zone.' : 'Every item in a point-linked set requires a source point.' });
 }
 
 async function assertPlacementIsValid(
@@ -376,6 +404,11 @@ function isGeoJsonPoint(value: unknown): value is GeoJsonPoint {
     && typeof candidate.coordinates[1] === 'number';
 }
 
+function getSetLocationMode(metadata: JsonObject): 'portable' | 'zone' | 'point' {
+  const mode = metadata.locationMode;
+  return mode === 'zone' || mode === 'point' ? mode : 'portable';
+}
+
 function normalizeNullableString(value: string | null | undefined): string | null {
   if (value === undefined || value === null) {
     return value ?? null;
@@ -413,6 +446,7 @@ const challengeSetItemSelectFields = {
 
 function serializeChallengeSetRow(row: ChallengeSetRow): ChallengeSet {
   return {
+    locationMode: getSetLocationMode(row.metadata),
     id: row.id,
     name: row.name,
     description: row.description,

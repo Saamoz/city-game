@@ -165,6 +165,7 @@ export interface MapZone {
 }
 
 export interface ChallengeSet {
+  locationMode: ChallengeSetItemLocationMode;
   id: Uuid;
   name: string;
   description: string | null;

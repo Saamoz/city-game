@@ -709,6 +709,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                     className={inputClassName}
                   >
                     <option value="territory">Territory</option>
+                    <option value="point_challenge">Point Challenges</option>
                   </select>
                 </Field>
                 <Field label="Map">
@@ -722,7 +723,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                     {maps.map((map) => {
                       const playability = playabilityByMapId.get(map.id);
                       return (
-                        <option disabled={playability?.isPlayable === false} key={map.id} value={map.id}>
+                        <option disabled={gameForm.modeKey === 'territory' && playability?.isPlayable === false} key={map.id} value={map.id}>
                           {map.name}{playability?.isPlayable === false ? ' — ' + mapPlayabilityLabel(playability.reason) : ''}
                         </option>
                       );
@@ -1000,7 +1001,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
               </div>
             </PanelCard>
 
-            <PanelCard title="Standings" subtitle="Zone-only Territory ranking. This is the same scoreboard the live client consumes.">
+            <PanelCard title="Standings" subtitle="Live ranking for the selected game mode. This is the same scoreboard the live client consumes.">
               <div className="space-y-2">
                 {scoreboard.map((entry) => (
                   <div key={entry.team.id} className="flex items-center justify-between rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] px-4 py-3">
@@ -1012,7 +1013,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                         <p className="text-xs text-[#64727a]">{playerCountByTeamId.get(entry.team.id) ?? 0} players</p>
                       </div>
                     </div>
-                    <p className="text-sm font-semibold text-[#182126]">Zones {entry.zoneCount}</p>
+                    <p className="text-sm font-semibold text-[#182126]">{currentGame?.modeKey === 'point_challenge' ? 'Points ' + (entry.resources.points ?? 0) : 'Zones ' + entry.zoneCount}</p>
                   </div>
                 ))}
                 {scoreboard.length === 0 ? (

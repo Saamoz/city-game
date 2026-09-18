@@ -191,7 +191,7 @@ async function applyLifecycleTransition(
 ): Promise<TransitionResult> {
   assertValidTransition(currentGame, transition);
 
-  if (transition === 'start' && currentGame.mapId) {
+  if (transition === 'start' && currentGame.mapId && currentGame.modeKey === 'territory') {
     await assertMapPlayable(db, currentGame.mapId);
   }
 
@@ -214,13 +214,13 @@ async function applyLifecycleTransition(
 
   if (transition === 'start') {
 
-    if (runtimeGame.mapId) {
+    if (runtimeGame.mapId && runtimeGame.modeKey === 'territory') {
       await cloneMapZonesToGame(db, runtimeGame.mapId, runtimeGame.id);
     }
 
     if (runtimeGame.challengeSetId) {
       const activeChallengeCount = getActiveChallengeCount(runtimeGame.settings as JsonObject);
-      const challengeTotalCount = await cloneChallengeSetToGame(db, runtimeGame.challengeSetId, runtimeGame.id, activeChallengeCount);
+      const challengeTotalCount = await cloneChallengeSetToGame(db, runtimeGame.challengeSetId, runtimeGame.id, activeChallengeCount, runtimeGame.modeKey);
       const nextSettings = normalizeRuntimeSettings(runtimeGame.settings as JsonObject, {
         activeChallengeCount,
         challengeTotalCount,

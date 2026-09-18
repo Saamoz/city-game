@@ -1,12 +1,14 @@
 import { and, eq, sql } from 'drizzle-orm';
 import {
   DEFAULT_GPS_BUFFER_METERS,
+  DEFAULT_POINT_CHALLENGE_RADIUS_METERS,
   errorCodes,
   eventTypes,
   type Challenge,
   type ChallengeClaim,
   type ChallengeRerollState,
   type GameSettings,
+  type GeoJsonPoint,
   type GpsPayload,
   type JsonObject,
   type JsonValue,
@@ -92,6 +94,24 @@ export async function completeChallenge(
 
   if (
     lockedChallenge.status === 'available' &&
+    isPointChallengeConfig(lockedChallenge.config) &&
+    input.gpsPayload
+  ) {
+    return completePointChallengeDirectly(db, {
+      challenge: lockedChallenge,
+      gameId: input.gameId,
+      playerId: input.playerId,
+      teamId: input.teamId,
+      submission: input.submission ?? null,
+      gpsPayload: input.gpsPayload,
+      now,
+      settings: game.settings as GameSettings,
+      captureContainingZone: game.modeKey === 'territory',
+    });
+  }
+
+  if (
+    lockedChallenge.status === 'available' &&
     isPortableChallengeConfig(lockedChallenge.config) &&
     input.gpsPayload
   ) {
@@ -172,6 +192,39 @@ export async function completeChallenge(
     zoneBefore,
     settings: game.settings as GameSettings,
   });
+}
+
+
+async function completePointChallengeDirectly(db: DatabaseClient, input: { challenge: typeof challenges.$inferSelect; gameId: string; playerId: string; teamId: string; submission: JsonValue | null; gpsPayload: GpsPayload; now: Date; settings: GameSettings; captureContainingZone: boolean }): Promise<CompleteChallengeSuccessResult> {
+  const point = getPointLocation(input.challenge.config);
+  if (!point) throw new AppError(errorCodes.validationError, { message: 'Point challenge has no valid map location.' });
+  if (input.settings.require_gps_accuracy) assertGpsAccuracy(null, input.gpsPayload.gpsErrorMeters);
+  const radiusMeters = getPointRadius(input.challenge.config);
+  const distanceMeters = pointDistance([input.gpsPayload.lng, input.gpsPayload.lat], [point.coordinates[0] as number, point.coordinates[1] as number]);
+  if (distanceMeters > radiusMeters) throw new AppError(errorCodes.outsideZone, { message: 'Move closer to this challenge location.', details: { challengeId: input.challenge.id, distanceMeters, radiusMeters } });
+  const [containingZone] = input.captureContainingZone ? await findContainingZones(db, { gameId: input.gameId, lat: point.coordinates[1] as number, lng: point.coordinates[0] as number, bufferMeters: 0 }) : [];
+  const zoneBefore = containingZone ? await lockZone(db, containingZone.id) : null;
+  assertZoneReclaimAllowed(zoneBefore, input.settings);
+  const locationAtClaim = sql`ST_SetSRID(ST_MakePoint(${input.gpsPayload.lng}, ${input.gpsPayload.lat}), 4326)`;
+  const [updatedClaim] = await db.insert(challengeClaims).values({ challengeId: input.challenge.id, gameId: input.gameId, teamId: input.teamId, playerId: input.playerId, status: 'completed', expiresAt: input.now, completedAt: input.now, submission: input.submission, locationAtClaim }).returning();
+  const [updatedChallenge] = await db.update(challenges).set({ zoneId: zoneBefore?.id ?? null, status: 'completed', currentClaimId: null, expiresAt: null, isDeckActive: false, updatedAt: input.now }).where(eq(challenges.id, input.challenge.id)).returning();
+  if (!updatedClaim || !updatedChallenge) throw new AppError(errorCodes.validationError, { message: 'Challenge completion failed.' });
+  return finishChallengeCompletion(db, { gameId: input.gameId, playerId: input.playerId, teamId: input.teamId, now: input.now, lockedChallenge: input.challenge, updatedChallenge, updatedClaim, zoneBefore, settings: input.settings });
+}
+function isPointChallengeConfig(config: unknown): boolean { return getPointLocation(config) !== null; }
+function getPointLocation(config: unknown): GeoJsonPoint | null {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return null;
+  const p = (config as { source_map_point?: unknown }).source_map_point as GeoJsonPoint | undefined;
+  return p?.type === 'Point' && Array.isArray(p.coordinates) && typeof p.coordinates[0] === 'number' && typeof p.coordinates[1] === 'number' ? p : null;
+}
+function getPointRadius(config: unknown): number {
+  const r = config && typeof config === 'object' && !Array.isArray(config) ? (config as { point_radius_meters?: unknown }).point_radius_meters : null;
+  return typeof r === 'number' && Number.isFinite(r) && r > 0 ? r : DEFAULT_POINT_CHALLENGE_RADIUS_METERS;
+}
+function pointDistance(a: [number, number], b: [number, number]): number {
+  const rad=(v:number)=>v*Math.PI/180, p1=rad(a[1]), p2=rad(b[1]), dp=p2-p1, dl=rad(b[0]-a[0]);
+  const h=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
+  return 12742000*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));
 }
 
 async function completePortableChallengeDirectly(

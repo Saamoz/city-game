@@ -17,8 +17,18 @@ const POINT_SOURCE_ID = 'challenge-point-picker-point';
 export function ChallengePointPicker({ mapDefinition, zones, value, onChange }: ChallengePointPickerProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
+  const onChangeRef = useRef(onChange);
+  const zoneDataRef = useRef<ReturnType<typeof buildZoneFeatureCollection>>(emptyFeatureCollection());
+  const pointDataRef = useRef<ReturnType<typeof buildPointFeatureCollection>>(emptyFeatureCollection());
+  const zonesRef = useRef(zones);
+  const valueRef = useRef(value);
   const zoneData = useMemo(() => buildZoneFeatureCollection(zones), [zones]);
   const pointData = useMemo(() => buildPointFeatureCollection(value), [value]);
+  onChangeRef.current = onChange;
+  zoneDataRef.current = zoneData;
+  pointDataRef.current = pointData;
+  zonesRef.current = zones;
+  valueRef.current = value;
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current || !mapDefinition || !mapboxToken) {
@@ -43,13 +53,13 @@ export function ChallengePointPicker({ mapDefinition, zones, value, onChange }: 
 
     const handleLoad = () => {
       ensureLayers(map);
-      syncZoneSource(map, zoneData);
-      syncPointSource(map, pointData);
-      fitToMapContent(map, mapDefinition, zones, value);
+      syncZoneSource(map, zoneDataRef.current);
+      syncPointSource(map, pointDataRef.current);
+      fitToMapContent(map, mapDefinition, zonesRef.current, valueRef.current);
     };
 
     const handleClick = (event: mapboxgl.MapMouseEvent) => {
-      onChange({
+      onChangeRef.current({
         type: 'Point',
         coordinates: [event.lngLat.lng, event.lngLat.lat],
       });
@@ -64,7 +74,7 @@ export function ChallengePointPicker({ mapDefinition, zones, value, onChange }: 
       map.remove();
       mapRef.current = null;
     };
-  }, [mapDefinition, onChange, pointData, zoneData, zones, value]);
+  }, [mapDefinition]);
 
   useEffect(() => {
     const map = mapRef.current;

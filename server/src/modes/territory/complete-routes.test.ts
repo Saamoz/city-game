@@ -244,6 +244,36 @@ describe('territory complete route', () => {
     expect(storedEvents.map((event) => event.eventType)).toContain(eventTypes.challengeSpawned);
   });
 
+  it('completes a point-linked challenge inside its radius and captures the containing zone', async () => {
+    await seedGame(); await seedTeam(); await seedPlayer({ sessionToken: 'point-complete-session' });
+    const zone = await seedZone();
+    await seedChallenge({ zoneId: null, config: { portable: false, location_mode: 'point', source_map_point: { type: 'Point', coordinates: [-97.1384, 49.8951] }, point_radius_meters: 25 }, scoring: { points: 5 } });
+    app = await createTestApp({ db: testDatabase.db });
+    const response = await completeRequest({ sessionToken: 'point-complete-session', actionId: 'point-complete', payload: { gps: validGpsPayload() } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ challenge: { status: 'completed', zoneId: zone.id }, claim: { status: 'completed' }, zone: { id: zone.id, ownerTeamId: TEAM_ONE_ID }, resourcesAwarded: { points: 5 } });
+  });
+
+  it('scores a point challenge without creating or capturing zones in point-challenge mode', async () => {
+    await seedGame({ modeKey: 'point_challenge' }); await seedTeam(); await seedPlayer({ sessionToken: 'point-mode-session' });
+    await seedChallenge({ zoneId: null, config: { portable: false, location_mode: 'point', source_map_point: { type: 'Point', coordinates: [-97.1384, 49.8951] }, point_radius_meters: 25 }, scoring: { points: 8 } });
+    app = await createTestApp({ db: testDatabase.db });
+    const response = await completeRequest({ sessionToken: 'point-mode-session', actionId: 'point-mode-complete', payload: { gps: validGpsPayload() } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ challenge: { status: 'completed', zoneId: null }, zone: null, resourcesAwarded: { points: 8 } });
+    expect(await testDatabase.db.select().from(zones).where(eq(zones.gameId, GAME_ID))).toHaveLength(0);
+  });
+
+  it('rejects a point-linked challenge outside its configured radius', async () => {
+    await seedGame(); await seedTeam(); await seedPlayer({ sessionToken: 'point-far-session' }); await seedZone();
+    await seedChallenge({ zoneId: null, config: { portable: false, location_mode: 'point', source_map_point: { type: 'Point', coordinates: [-97.12, 49.905] }, point_radius_meters: 20 } });
+    app = await createTestApp({ db: testDatabase.db });
+    const response = await completeRequest({ sessionToken: 'point-far-session', actionId: 'point-far', payload: { gps: validGpsPayload() } });
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toMatchObject({ error: { code: 'OUTSIDE_ZONE', message: 'Move closer to this challenge location.', details: { challengeId: CHALLENGE_ID, radiusMeters: 20 } } });
+    expect(response.json().error.details.distanceMeters).toBeGreaterThan(20);
+  });
+
   it('completes a portable card directly from the current zone without creating a visible claimed state', async () => {
     await seedGame();
     await seedTeam();

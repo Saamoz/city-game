@@ -85,6 +85,13 @@
       "when": 1788730000000,
       "tag": "0011_fast_runtime_zone_validation",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789776000000,
+      "tag": "0012_challenge_set_location_mode",
+      "breakpoints": true
     }
   ]
 }

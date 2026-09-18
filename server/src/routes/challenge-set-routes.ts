@@ -37,6 +37,7 @@ const challengeSetBodySchema = {
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 255 },
     description: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    locationMode: { type: 'string', enum: ['portable', 'zone', 'point'] },
     metadata: { type: 'object', additionalProperties: true },
   },
 } as const;
@@ -48,6 +49,7 @@ const challengeSetUpdateBodySchema = {
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 255 },
     description: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    locationMode: { type: 'string', enum: ['portable', 'zone', 'point'] },
     metadata: { type: 'object', additionalProperties: true },
   },
 } as const;
@@ -100,7 +102,7 @@ export const challengeSetRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/challenge-sets', { schema: { body: challengeSetBodySchema } }, async (request, reply) => {
-    const body = request.body as { name: string; description?: string | null; metadata?: JsonObject };
+    const body = request.body as { name: string; description?: string | null; locationMode?: 'portable' | 'zone' | 'point'; metadata?: JsonObject };
     const challengeSet = await createChallengeSet(app.db, body);
     reply.code(201).send({ challengeSet });
   });
@@ -112,7 +114,7 @@ export const challengeSetRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch('/challenge-sets/:id', { schema: { params: idParamsSchema, body: challengeSetUpdateBodySchema } }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = request.body as { name?: string; description?: string | null; metadata?: JsonObject };
+    const body = request.body as { name?: string; description?: string | null; locationMode?: 'portable' | 'zone' | 'point'; metadata?: JsonObject };
     reply.send({ challengeSet: await updateChallengeSet(app.db, id, body) });
   });
 

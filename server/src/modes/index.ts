@@ -5,6 +5,7 @@ import type { DatabaseClient } from '../db/connection.js';
 import { games } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import { createTerritoryModeHandler } from './territory/handler.js';
+import { createPointChallengeModeHandler } from './point-challenge/handler.js';
 import type { ModeHandler } from './types.js';
 
 export interface ModeRegistry {
@@ -13,7 +14,7 @@ export interface ModeRegistry {
   registerRoutes(app: FastifyInstance): void;
 }
 
-export function createModeRegistry(handlers: ModeHandler[] = [createTerritoryModeHandler()]): ModeRegistry {
+export function createModeRegistry(handlers: ModeHandler[] = [createTerritoryModeHandler(), createPointChallengeModeHandler()]): ModeRegistry {
   const handlersByModeKey = new Map<string, ModeHandler>();
 
   for (const handler of handlers) {

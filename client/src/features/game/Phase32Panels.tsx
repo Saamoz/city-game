@@ -15,6 +15,7 @@ export interface ZoneScoreboardEntry {
   zoneCount: number;
   rank: number;
   playerNames: string[];
+  scoreLabel: string;
 }
 
 interface MiniScoreboardCardProps {
@@ -65,9 +66,10 @@ export function buildZoneScoreboard(snapshot: GameStateSnapshot | null): ZoneSco
   return [...snapshot.teams]
     .map((team) => ({
       team,
-      zoneCount: zoneCounts.get(team.id) ?? 0,
+      zoneCount: snapshot.game.modeKey === 'point_challenge' ? (snapshot.teamResources[team.id]?.points ?? 0) : (zoneCounts.get(team.id) ?? 0),
       rank: 0,
       playerNames: playerNamesByTeamId.get(team.id) ?? [],
+      scoreLabel: snapshot.game.modeKey === 'point_challenge' ? ((snapshot.teamResources[team.id]?.points ?? 0) + ' pts') : ((zoneCounts.get(team.id) ?? 0) + ' zones'),
     }))
     .sort((left, right) => {
       const zoneDelta = right.zoneCount - left.zoneCount;
@@ -181,7 +183,7 @@ export function ScoreboardOverlay({ entries, onClose }: ScoreboardOverlayProps) 
               </div>
             </div>
             <p className="shrink-0 text-xs font-semibold uppercase tracking-[0.12em] text-[#24343a]">
-              {entry.zoneCount} zones
+              {entry.scoreLabel}
             </p>
           </article>
         ))}

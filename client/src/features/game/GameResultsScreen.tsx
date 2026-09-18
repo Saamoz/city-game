@@ -27,7 +27,10 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
   const [showFeed, setShowFeed] = useState(false);
   const startedPlaybackAtRef = useRef(0);
   const startedProgressRef = useRef(0);
-  const scoreboard = useMemo(() => withTiedRanks(teams.map((team) => ({ team, zoneCount: zones.filter((zone) => zone.ownerTeamId === team.id).length, rank: 0 })).sort((left, right) => right.zoneCount - left.zoneCount || left.team.name.localeCompare(right.team.name))), [teams, zones]);
+  const scoreboard = useMemo(() => game.modeKey === 'point_challenge'
+    ? withTiedRanks((recap?.scoreboard ?? []).map((entry) => ({ team: entry.team, zoneCount: entry.resources.points ?? 0, rank: entry.rank })))
+    : withTiedRanks(teams.map((team) => ({ team, zoneCount: zones.filter((zone) => zone.ownerTeamId === team.id).length, rank: 0 })).sort((left, right) => right.zoneCount - left.zoneCount || left.team.name.localeCompare(right.team.name))), [game.modeKey, recap, teams, zones]);
+  const scoreNoun = game.modeKey === 'point_challenge' ? 'points' : 'zones';
   const highestZoneCount = scoreboard[0]?.zoneCount ?? 0;
   const winnerIds = useMemo(() => new Set(scoreboard.filter((entry) => entry.zoneCount === highestZoneCount).map((entry) => entry.team.id)), [highestZoneCount, scoreboard]);
   const viewerEntry = scoreboard.find((entry) => entry.team.id === viewerTeam?.id) ?? null;
@@ -89,10 +92,10 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
   const subtitle = viewerTeam
     ? didViewerWin
       ? isTie
-        ? `${viewerTeam.name} tied for first with ${viewerEntry?.zoneCount ?? 0} zones.`
-        : `${viewerTeam.name} finished on top with ${viewerEntry?.zoneCount ?? 0} zones.`
-      : `${viewerTeam.name} placed ${ordinal(viewerEntry?.rank ?? scoreboard.length)} with ${viewerEntry?.zoneCount ?? 0} zones.`
-    : isTie ? `${winnerIds.size} teams tied for first with ${highestZoneCount} zones.` : `${spectatorWinner ?? 'No team'} won with ${highestZoneCount} zones.`;
+        ? `${viewerTeam.name} tied for first with ${viewerEntry?.zoneCount ?? 0} ${scoreNoun}.`
+        : `${viewerTeam.name} finished on top with ${viewerEntry?.zoneCount ?? 0} ${scoreNoun}.`
+      : `${viewerTeam.name} placed ${ordinal(viewerEntry?.rank ?? scoreboard.length)} with ${viewerEntry?.zoneCount ?? 0} ${scoreNoun}.`
+    : isTie ? `${winnerIds.size} teams tied for first with ${highestZoneCount} ${scoreNoun}.` : `${spectatorWinner ?? 'No team'} won with ${highestZoneCount} ${scoreNoun}.`;
 
   return (
     <main className="relative h-[100dvh] overflow-hidden bg-[#d7dedb] text-[#24343a]">
@@ -164,7 +167,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
                     <span className="text-2xl text-[#8d7138]" aria-hidden="true">✦</span>
                     <p className="mt-1 font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#7d6738]">{isTie ? 'First-place tie' : 'Winner'}</p>
                     <h2 className="mt-2 max-w-full font-[Georgia,Times_New_Roman,serif] text-3xl font-semibold leading-tight text-[#203239] sm:text-4xl">{isTie ? scoreboard.filter((entry) => entry.rank === 1).map((entry) => entry.team.name).join(' · ') : scoreboard[0].team.name}</h2>
-                    <p className="mt-2 font-['IBM_Plex_Mono',monospace] text-[10px] uppercase tracking-[0.16em] text-[#667277]">{highestZoneCount} {highestZoneCount === 1 ? 'zone' : 'zones'} held</p>
+                    <p className="mt-2 font-['IBM_Plex_Mono',monospace] text-[10px] uppercase tracking-[0.16em] text-[#667277]">{highestZoneCount} {game.modeKey === 'point_challenge' ? (highestZoneCount === 1 ? 'point' : 'points') : (highestZoneCount === 1 ? 'zone held' : 'zones held')}</p>
                   </div>
                 ) : (
                   <div className="mx-auto mt-6 max-w-sm border-y border-dashed border-[#9e8b62]/55 py-8 text-center text-sm text-[#687579]">No teams reached the final standings.</div>
@@ -176,7 +179,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
                       <p className="font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#866d37]">Score</p>
                       <h2 className="mt-1 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#293a3f]">Final standings</h2>
                     </div>
-                    <span className="font-['IBM_Plex_Mono',monospace] text-[9px] uppercase tracking-[0.13em] text-[#758085]">Zones held</span>
+                    <span className="font-['IBM_Plex_Mono',monospace] text-[9px] uppercase tracking-[0.13em] text-[#758085]">{game.modeKey === 'point_challenge' ? 'Points' : 'Zones held'}</span>
                   </div>
                   <div className="divide-y divide-dashed divide-[#a99a78]/55">
                     {scoreboard.map((entry) => (

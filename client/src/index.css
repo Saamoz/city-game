@@ -281,3 +281,12 @@ input {
   .results-winner-stamp { animation: none; }
   .result-spark { display: none; }
 }
+
+.point-challenge-marker { position: relative; width: 3.25rem; height: 4rem; border: 0; background: transparent; cursor: pointer; filter: drop-shadow(0 10px 12px rgba(24,32,36,.28)); transition: transform .2s ease, filter .2s ease; }
+.point-challenge-marker:hover, .point-challenge-marker.is-selected { transform: translateY(-4px) scale(1.08); filter: drop-shadow(0 14px 18px rgba(24,32,36,.36)); }
+.point-challenge-marker__pin { position: absolute; left: .45rem; top: 0; display: grid; width: 2.35rem; height: 2.35rem; place-items: center; border: 3px solid #fff8eb; border-radius: 50% 50% 50% 12%; background: #d97a37; color: #fff8eb; font-size: .9rem; transform: rotate(-45deg); box-shadow: inset 0 0 0 2px rgba(75,49,25,.18); }
+.point-challenge-marker__pin span { transform: rotate(45deg); }
+.point-challenge-marker__pulse { position: absolute; left: .65rem; bottom: .1rem; width: 2rem; height: .65rem; border-radius: 50%; background: rgba(217,122,55,.25); animation: point-marker-pulse 2s ease-out infinite; }
+.point-challenge-marker.is-selected .point-challenge-marker__pin { background: #24343a; }
+@keyframes point-marker-pulse { 0% { transform: scale(.65); opacity: .85; } 75%,100% { transform: scale(1.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .point-challenge-marker__pulse { animation: none; } }

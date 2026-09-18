@@ -58,6 +58,12 @@ describe('mode registry', () => {
     ]);
   });
 
+  it('loads the point-challenge handler', () => {
+    const handler = createModeRegistry().get('point_challenge');
+    expect(handler.modeKey).toBe('point_challenge');
+    expect(handler.getInitialResources().find((entry) => entry.type === 'points')?.initialBalance).toBe(0);
+  });
+
   it('throws a validation error for unknown modes', async () => {
     const registry = createModeRegistry();
     await testDatabase.db.insert(games).values(createTestGame({ id: GAME_ID, modeKey: 'mystery_mode' }));

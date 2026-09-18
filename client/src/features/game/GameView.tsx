@@ -28,6 +28,7 @@ import {
 } from '../../lib/realtime';
 import { useGameStore, type RealtimeConnectionStatus } from '../../store/gameStore';
 import { ChallengeDeck } from './ChallengeDeck';
+import { PointChallengeCard, PointChallengeLayer, getPointLocation, isPointChallenge } from './PointChallenges';
 import { GameResultsScreen } from './GameResultsScreen';
 import {
   FeedOverlay,
@@ -78,6 +79,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const clearAnimatedChallengesTimerRef = useRef<number | null>(null);
   const [mapForLayer, setMapForLayer] = useState<mapboxgl.Map | null>(null);
   const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
+  const [selectedPointChallengeId, setSelectedPointChallengeId] = useState<string | null>(null);
   const [isDeckOpen, setIsDeckOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showMobileCompleted, setShowMobileCompleted] = useState(false);
@@ -560,6 +562,12 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const currentPoint = gpsPayload ? [gpsPayload.lng, gpsPayload.lat] as [number, number] : null;
   const currentZone = useMemo(() => snapshot ? findContainingZone(snapshot.zones, currentPoint) : null, [currentPoint, snapshot]);
   const broadcastTeamLocations = Boolean(snapshot?.game.settings?.broadcast_team_locations);
+  const pointChallenges = (snapshot?.challenges ?? []).filter((challenge) => challenge.status === 'available' && isPointChallenge(challenge));
+  const selectedPointChallenge = pointChallenges.find((challenge) => challenge.id === selectedPointChallengeId) ?? null;
+  const selectedPointLocation = selectedPointChallenge ? getPointLocation(selectedPointChallenge) : null;
+  const selectedPointDistance = currentPoint && selectedPointLocation
+    ? distanceBetweenLngLat(currentPoint, [selectedPointLocation.coordinates[0] as number, selectedPointLocation.coordinates[1] as number])
+    : null;
 
   useEffect(() => {
     const map = mapRef.current;
@@ -839,6 +847,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,234,215,0.16),transparent_28%),linear-gradient(180deg,rgba(223,230,232,0.04),rgba(223,230,232,0.16))]" />
 
       <ZoneLayer map={mapForLayer} snapshot={snapshot} />
+      <PointChallengeLayer map={mapForLayer} challenges={snapshot?.challenges ?? []} selectedId={selectedPointChallengeId} onSelect={(id) => { setSelectedPointChallengeId(id); const challenge = snapshot?.challenges.find((entry) => entry.id === id); const point = challenge ? getPointLocation(challenge) : null; if (point) mapRef.current?.easeTo({ center: [point.coordinates[0] as number, point.coordinates[1] as number], zoom: Math.max(mapRef.current?.getZoom() ?? 14, 15), duration: 450 }); }} />
+      {selectedPointChallenge ? <PointChallengeCard challenge={selectedPointChallenge} distanceMeters={selectedPointDistance} locationStatus={locationStatus} pending={isPending('capture:' + selectedPointChallenge.id)} onClose={() => setSelectedPointChallengeId(null)} onComplete={() => { handleCaptureChallenge(selectedPointChallenge.id, null); }} /> : null}
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-[linear-gradient(180deg,rgba(243,236,220,0.9),rgba(243,236,220,0))] px-4 pb-10 pt-[calc(env(safe-area-inset-top,0px)+1rem)] lg:px-8">
         <div className="pointer-events-auto mx-auto max-w-7xl">
@@ -902,7 +912,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               />
             </div>
             <div className="grid gap-3 lg:min-w-[23rem]">
-              <StatusCard label="Controlled" value={String(controlledZoneCount)} />
+              <StatusCard label={snapshot?.game.modeKey === 'point_challenge' ? 'Points' : 'Controlled'} value={String(snapshot?.game.modeKey === 'point_challenge' ? (snapshot.teamResources[snapshot.team?.id ?? '']?.points ?? 0) : controlledZoneCount)} />
               <StatusCard label="Deck" value={String(challengeCounts.available)} />
               <StatusCard label="Version" value={String(snapshot?.game.stateVersion ?? 0)} />
             </div>
@@ -1269,6 +1279,10 @@ function getGameViewError(error: unknown): string {
 
 function getBoundsFromSnapshot(snapshot: GameStateSnapshot): mapboxgl.LngLatBoundsLike | null {
   const positions = snapshot.zones.flatMap((zone) => collectGeometryPositions(zone.geometry));
+  for (const challenge of snapshot.challenges) {
+    const point = getPointLocation(challenge);
+    if (point) positions.push([point.coordinates[0] as number, point.coordinates[1] as number]);
+  }
 
   if (!positions.length) {
     return null;
@@ -1313,8 +1327,16 @@ function buildChallengeProgressLabel(counts: ReturnType<typeof buildChallengeCou
 
 function getAvailableDeckChallenges(snapshot: GameStateSnapshot | null) {
   return [...(snapshot?.challenges ?? [])]
-    .filter((challenge) => challenge.status === 'available')
+    .filter((challenge) => challenge.status === 'available' && !isPointChallenge(challenge))
     .sort((left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title));
+}
+
+function distanceBetweenLngLat(left: [number, number], right: [number, number]): number {
+  const radians = (value: number) => value * Math.PI / 180;
+  const lat1 = radians(left[1]); const lat2 = radians(right[1]);
+  const deltaLat = lat2 - lat1; const deltaLng = radians(right[0] - left[0]);
+  const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
+  return 12_742_000 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function buildControlledZoneCount(snapshot: GameStateSnapshot | null, teamId: string | null): number {
