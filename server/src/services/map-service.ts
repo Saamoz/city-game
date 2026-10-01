@@ -218,7 +218,7 @@ export async function getMapPlayability(db: DatabaseClient, mapId: string): Prom
           AND left_zone.id < right_zone.id
           AND left_zone.geometry && right_zone.geometry
         WHERE left_zone.map_id = ${mapId}::uuid
-          AND ST_Area(ST_Intersection(left_zone.geometry, right_zone.geometry)) > 0.000000000001
+          AND zone_overlap_is_significant(left_zone.geometry, right_zone.geometry)
       ) AS "hasOverlaps"
     FROM ${mapZones}
     WHERE ${mapZones.mapId} = ${mapId}::uuid
@@ -731,7 +731,7 @@ export async function checkMapZonePartition(db: DatabaseClient, mapId: string): 
     FROM ${mapZones} a
     JOIN ${mapZones} b ON a.map_id = b.map_id AND a.id < b.id
     WHERE a.map_id = ${mapId}
-      AND ST_Area(ST_Intersection(a.geometry, b.geometry)) > 0.000000000001
+      AND zone_overlap_is_significant(a.geometry, b.geometry)
     ORDER BY "areaSqMeters" DESC NULLS LAST
   `);
 

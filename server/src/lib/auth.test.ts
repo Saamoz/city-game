@@ -96,7 +96,8 @@ describe('auth middleware', () => {
     });
   });
 
-  it('returns 403 when the admin bearer token is missing', async () => {
+  // Local V1 admin surfaces are intentionally unauthenticated (see requireAdmin in auth.ts).
+  it('allows admin routes without a bearer token while admin auth is disabled', async () => {
     app = await createAuthTestApp();
 
     const response = await app.inject({
@@ -104,13 +105,8 @@ describe('auth middleware', () => {
       url: '/test/admin-required',
     });
 
-    expect(response.statusCode).toBe(403);
-    expect(response.json()).toEqual({
-      error: {
-        code: 'ADMIN_REQUIRED',
-        message: 'Admin token required.',
-      },
-    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
   });
 
   it('sets an httpOnly session cookie with strict same-site policy', async () => {

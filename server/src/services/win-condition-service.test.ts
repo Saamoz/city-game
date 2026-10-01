@@ -19,8 +19,9 @@ const BASE_LNG = -97.14;
 const BASE_LAT = 49.894;
 
 function squareGeometry(index: number) {
-  const lng = BASE_LNG + index * 0.01;
-  const lat = BASE_LAT + index * 0.002;
+  // Zones tile a row, sharing edges, so the game's zones stay connected.
+  const lng = BASE_LNG + index * 0.004;
+  const lat = BASE_LAT;
 
   return {
     type: 'Polygon',

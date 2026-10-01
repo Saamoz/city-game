@@ -38,7 +38,8 @@ describe('spatial service', () => {
     await createZone(testDatabase.db, {
       gameId: GAME_ID,
       name: 'Disabled Zone',
-      geometry: createSquarePolygon(),
+      // Shares the active zone's east edge; the query point is well within its GPS buffer.
+      geometry: createSquarePolygon(-97.139),
       isDisabled: true,
     });
 

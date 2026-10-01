@@ -154,7 +154,7 @@ describe('zone routes', () => {
           },
           {
             type: 'Feature',
-            geometry: createSquarePolygon(-97.1410, 49.8955, 0.0004),
+            geometry: createSquarePolygon(-97.1406, 49.8945, 0.0004),
             properties: {},
           },
         ],

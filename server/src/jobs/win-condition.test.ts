@@ -15,8 +15,9 @@ const TEAM_ONE_ID = '22222222-2222-4222-8222-222222222222';
 const TEAM_TWO_ID = 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa';
 
 function squareGeometry(index: number) {
-  const lng = -97.11 + index * 0.01;
-  const lat = 49.89 + index * 0.002;
+  // Zones tile a row, sharing edges, so the game's zones stay connected.
+  const lng = -97.11 + index * 0.004;
+  const lat = 49.89;
 
   return {
     type: 'Polygon',

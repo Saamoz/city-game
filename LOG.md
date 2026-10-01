@@ -192,3 +192,12 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - `server/src/db/scripts/replay-zone-edit.ts <file> [--apply]` replays a logged edit: by default it re-runs `ST_IsValid`/`ST_IsValidReason` on each written geometry (deterministic, no side effects); `--apply` re-runs the full `updateMapZoneGeometries` transaction against the still-existing map.
 - Wired into `updateMapZoneGeometries` (boundary "move" saves) and `createMapZoneCarve` (draw). `validateGeometry` now takes an optional `{ id, name }` and puts the zone name + reason into both the client-facing message ("Zone \"X\" has an invalid shape after this edit: Self-intersection[…]. Nothing was saved.") and the repro `details`.
 - Note: free-hand node dragging can still produce a self-intersecting ring (dragging a corner across the polygon's own edges) — PostGIS rejects it and nothing is saved. The logging rule exists so any such failing move can be handed over and reproduced deterministically rather than re-enacted by hand.
+
+## Zone Partition Tolerance + Playable Seeds (2026-10-01)
+
+**Why:** the exact-geometry partition rules rejected real maps over centimetre slivers (prod "Toronto Fixed": a 0.35 m² overlap, and a zone whose border crosses its neighbour's at a shallow angle so they share only points). Every sample seed was isolated squares, so none could start a game.
+
+- Migration `0013_zone_partition_tolerance.sql`: `zone_overlap_is_significant` ignores overlaps that vanish when shrunk by 0.5 m; `zones_are_adjacent` accepts an exact shared edge or ≥5 m of boundary within 0.5 m. Map and runtime connectivity/overlap functions use both; `getMapPlayability` and `checkMapZonePartition` call the overlap helper too. Player location checks already buffer zones by 40 m, so slivers this thin have no gameplay effect.
+- Seeds: Chicago and Toronto load real neighbourhood boundaries from prod (`server/src/db/scripts/fixtures/`); the Winnipeg dev seed tiles a grid (`gridCellPolygon`).
+- Tests: fixtures that inserted unconnected runtime zones now tile; the admin-auth test now asserts the intentional V1 no-op.
+- The intermittent TRUNCATE deadlock in tests was post-commit hooks (win checks, broadcasts) still running after the response was sent. `executeIdempotentMutation` now tracks them and the app's `onClose` waits for them (`waitForPostCommitWork`).

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { eq, sql } from 'drizzle-orm';
 import type { GameSettings, GeoJsonGeometry, GeoJsonPoint, GeoJsonPolygon, WinConditions } from '@city-game/shared';
 import type { DatabaseClient } from '../connection.js';
@@ -273,6 +274,43 @@ export function squarePolygon(lng: number, lat: number, size: number): GeoJsonPo
       [lng + size, lat + size],
       [lng - size, lat + size],
       [lng - size, lat - size],
+    ]],
+  };
+}
+
+/** Loads `fixtures/<fileName>`: an array of `{ name, geometry }` zones forming a valid partition. */
+export function loadZoneFixture(fileName: string): Array<{ name: string; geometry: GeoJsonGeometry }> {
+  return JSON.parse(readFileSync(new URL('./fixtures/' + fileName, import.meta.url), 'utf8'));
+}
+
+/**
+ * One cell of a rectangular grid anchored at (originLng, originLat), its
+ * south-west corner. Cells built from the same origin and cell size share
+ * edges exactly, so a set of them forms a connected, non-overlapping map.
+ */
+export function gridCellPolygon(
+  originLng: number,
+  originLat: number,
+  cellWidth: number,
+  cellHeight: number,
+  column: number,
+  row: number,
+  columnSpan = 1,
+  rowSpan = 1,
+): GeoJsonPolygon {
+  const west = originLng + column * cellWidth;
+  const east = originLng + (column + columnSpan) * cellWidth;
+  const south = originLat + row * cellHeight;
+  const north = originLat + (row + rowSpan) * cellHeight;
+
+  return {
+    type: 'Polygon',
+    coordinates: [[
+      [west, south],
+      [east, south],
+      [east, north],
+      [west, north],
+      [west, south],
     ]],
   };
 }

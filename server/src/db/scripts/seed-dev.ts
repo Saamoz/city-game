@@ -1,7 +1,12 @@
 import type { GameSettings, WinConditions } from '@city-game/shared';
-import { runSampleSeed, squarePolygon, type SampleSeedConfig } from './seed-sample.js';
+import { gridCellPolygon, runSampleSeed, type SampleSeedConfig } from './seed-sample.js';
 
 const DEV_SEED_KEY = 'dev_sample_v1';
+
+// Zones tile a 3x2 grid over downtown Winnipeg so they share borders and form a
+// playable map (games refuse maps with overlapping or disconnected zones).
+const cell = (column: number, row: number, columnSpan = 1) =>
+  gridCellPolygon(-97.147, 49.883, 0.009, 0.0075, column, row, columnSpan);
 
 const gameSettings: GameSettings = {
   max_concurrent_claims: 2,
@@ -31,34 +36,34 @@ const config: SampleSeedConfig = {
   zones: [
     {
       name: 'The Forks Market',
-      geometry: squarePolygon(-97.1302, 49.8892, 0.0016),
+      geometry: cell(1, 0),
       ownerTeamName: 'Red Team',
       pointValue: 3,
       metadata: { district: 'Downtown' },
     },
     {
       name: 'Union Station',
-      geometry: squarePolygon(-97.1278, 49.8888, 0.00115),
+      geometry: cell(2, 1),
       ownerTeamName: 'Blue Team',
       pointValue: 2,
       metadata: { landmark: true },
     },
     {
       name: 'Legislative Grounds',
-      geometry: squarePolygon(-97.1432, 49.8846, 0.0017),
+      geometry: cell(0, 0),
       ownerTeamName: 'Gold Team',
       pointValue: 4,
       metadata: { district: 'Broadway' },
     },
     {
       name: 'Exchange Square',
-      geometry: squarePolygon(-97.1375, 49.8982, 0.0012),
+      geometry: cell(0, 1, 2),
       pointValue: 2,
       metadata: { district: 'Exchange' },
     },
     {
       name: 'St. Boniface Beacon',
-      geometry: squarePolygon(-97.1188, 49.8899, 0.0012),
+      geometry: cell(2, 0),
       pointValue: 3,
       metadata: { landmark: true },
     },

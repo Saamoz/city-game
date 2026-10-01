@@ -170,7 +170,8 @@ describe('scoreboard routes', () => {
   }
 
   async function seedZone(name: string, ownerTeamId: string, offset: number) {
-    const lngOffset = offset * 0.01;
+    // Zones sit side by side (BASE_GEOMETRY is 0.0042° wide) so the game's zones stay connected.
+    const lngOffset = offset * 0.0042;
     await createZone(testDatabase.db, {
       gameId: GAME_ID,
       name,

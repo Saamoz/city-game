@@ -149,11 +149,30 @@ export async function executeIdempotentMutation(
   sendStoredResponse(reply, result.statusCode, result.body);
 
   if (onCommitted) {
+    const work = (async () => {
+      try {
+        await onCommitted(result);
+      } catch (error) {
+        app.log.error({ err: error }, 'post-commit hook failed');
+      }
+    })();
+    pendingPostCommitWork.add(work);
     try {
-      await onCommitted(result);
-    } catch (error) {
-      app.log.error({ err: error }, 'post-commit hook failed');
+      await work;
+    } finally {
+      pendingPostCommitWork.delete(work);
     }
+  }
+}
+
+// Post-commit hooks run after the response is sent, so a request can look
+// finished while its hook is still querying the database. Tracked so that
+// closing the app waits for them instead of cutting them off mid-query.
+const pendingPostCommitWork = new Set<Promise<void>>();
+
+export async function waitForPostCommitWork(): Promise<void> {
+  while (pendingPostCommitWork.size > 0) {
+    await Promise.all(pendingPostCommitWork);
   }
 }
 

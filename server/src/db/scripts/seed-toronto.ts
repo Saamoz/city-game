@@ -1,5 +1,5 @@
 import type { GameSettings, WinConditions } from '@city-game/shared';
-import { runSampleSeed, squarePolygon, type SampleSeedConfig } from './seed-sample.js';
+import { loadZoneFixture, runSampleSeed, type SampleSeedConfig, type ZoneSeed } from './seed-sample.js';
 
 const gameSettings: GameSettings = {
   max_concurrent_claims: 2,
@@ -12,12 +12,32 @@ const winCondition: WinConditions = [
   { type: 'time_limit', duration_minutes: 90 },
 ];
 
+// Neighbourhood boundaries from the production map; see fixtures/toronto-zones.json.
+const zoneOwners: Record<string, string> = {
+  'Trinity-Bellwoods': 'Scarlet Team',
+  'High Park-Swansea': 'Harbour Team',
+  'Junction Area': 'Signal Team',
+};
+
+const zonePointValues: Record<string, number> = {
+  'High Park-Swansea': 3,
+  'Trinity-Bellwoods': 2,
+  'Roncesvalles': 2,
+};
+
+const zones: ZoneSeed[] = loadZoneFixture('toronto-zones.json').map((zone) => ({
+  name: zone.name,
+  geometry: zone.geometry,
+  ownerTeamName: zoneOwners[zone.name] ?? null,
+  pointValue: zonePointValues[zone.name] ?? 1,
+}));
+
 const config: SampleSeedConfig = {
   seedKey: 'toronto_sample_v1',
   name: 'Toronto Territory Demo',
   mapName: 'Toronto Base Map',
-  centerLat: 43.6532,
-  centerLng: -79.3832,
+  centerLat: 43.6888,
+  centerLng: -79.446,
   defaultZoom: 12,
   settings: gameSettings,
   winCondition,
@@ -26,41 +46,7 @@ const config: SampleSeedConfig = {
     { name: 'Harbour Team', color: '#2563eb', joinCode: 'TORBLUE1' },
     { name: 'Signal Team', color: '#d97706', joinCode: 'TORGOLD1' },
   ],
-  zones: [
-    {
-      name: 'Union Station Concourse',
-      geometry: squarePolygon(-79.3808, 43.6453, 0.0014),
-      ownerTeamName: 'Scarlet Team',
-      pointValue: 3,
-      metadata: { district: 'South Core' },
-    },
-    {
-      name: 'CN Tower Plaza',
-      geometry: squarePolygon(-79.3871, 43.6426, 0.00115),
-      ownerTeamName: 'Harbour Team',
-      pointValue: 2,
-      metadata: { landmark: true },
-    },
-    {
-      name: 'Nathan Phillips Square',
-      geometry: squarePolygon(-79.3842, 43.6526, 0.0016),
-      ownerTeamName: 'Signal Team',
-      pointValue: 4,
-      metadata: { district: 'Old Toronto' },
-    },
-    {
-      name: 'Distillery Courtyard',
-      geometry: squarePolygon(-79.3592, 43.6505, 0.00125),
-      pointValue: 2,
-      metadata: { district: 'Distillery' },
-    },
-    {
-      name: 'Harbourfront Beacon',
-      geometry: squarePolygon(-79.3801, 43.6389, 0.0012),
-      pointValue: 3,
-      metadata: { landmark: true },
-    },
-  ],
+  zones,
   challenges: [
     {
       title: 'Signal Sweep',

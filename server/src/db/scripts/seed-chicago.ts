@@ -1,5 +1,5 @@
 import type { GameSettings, WinConditions } from '@city-game/shared';
-import { runSampleSeed, squarePolygon, type SampleSeedConfig } from './seed-sample.js';
+import { loadZoneFixture, runSampleSeed, type SampleSeedConfig, type ZoneSeed } from './seed-sample.js';
 
 const gameSettings: GameSettings = {
   max_concurrent_claims: 2,
@@ -12,12 +12,34 @@ const winCondition: WinConditions = [
   { type: 'time_limit', duration_minutes: 90 },
 ];
 
+// Neighbourhood boundaries from the production map; see fixtures/chicago-zones.json.
+const zoneOwners: Record<string, string> = {
+  'Loop': 'Lake Team',
+  'West Loop': 'Ember Team',
+  'River North': 'Crown Team',
+};
+
+const zonePointValues: Record<string, number> = {
+  'Loop': 3,
+  'Grant Park': 2,
+  'River North': 2,
+  'Magnificent Mile': 2,
+  'West Loop': 2,
+};
+
+const zones: ZoneSeed[] = loadZoneFixture('chicago-zones.json').map((zone) => ({
+  name: zone.name,
+  geometry: zone.geometry,
+  ownerTeamName: zoneOwners[zone.name] ?? null,
+  pointValue: zonePointValues[zone.name] ?? 1,
+}));
+
 const config: SampleSeedConfig = {
   seedKey: 'chicago_sample_v1',
   name: 'Chicago Territory Demo',
   mapName: 'Chicago Base Map',
-  centerLat: 41.8781,
-  centerLng: -87.6298,
+  centerLat: 41.8895,
+  centerLng: -87.6624,
   defaultZoom: 12,
   settings: gameSettings,
   winCondition,
@@ -26,41 +48,7 @@ const config: SampleSeedConfig = {
     { name: 'Ember Team', color: '#dc2626', joinCode: 'CHIRED01' },
     { name: 'Crown Team', color: '#d97706', joinCode: 'CHIGOLD1' },
   ],
-  zones: [
-    {
-      name: 'Millennium Park Bowl',
-      geometry: squarePolygon(-87.6227, 41.8827, 0.0016),
-      ownerTeamName: 'Lake Team',
-      pointValue: 3,
-      metadata: { district: 'Loop' },
-    },
-    {
-      name: 'Union Station Hall',
-      geometry: squarePolygon(-87.6401, 41.8786, 0.00115),
-      ownerTeamName: 'Ember Team',
-      pointValue: 2,
-      metadata: { landmark: true },
-    },
-    {
-      name: 'Riverwalk Crossing',
-      geometry: squarePolygon(-87.6319, 41.8881, 0.00145),
-      ownerTeamName: 'Crown Team',
-      pointValue: 4,
-      metadata: { district: 'River North' },
-    },
-    {
-      name: 'Grant Park Fieldhouse',
-      geometry: squarePolygon(-87.6248, 41.8721, 0.00135),
-      pointValue: 2,
-      metadata: { district: 'South Loop' },
-    },
-    {
-      name: 'Navy Pier Signal',
-      geometry: squarePolygon(-87.6079, 41.8917, 0.0012),
-      pointValue: 3,
-      metadata: { landmark: true },
-    },
-  ],
+  zones,
   challenges: [
     {
       title: 'Crosswind Check',

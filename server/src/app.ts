@@ -10,6 +10,7 @@ import { registerAppErrorHandler } from './lib/errors.js';
 import { createModeRegistry, type ModeRegistry } from './modes/index.js';
 import { registerGpsValidation } from './middleware/gps-validation.js';
 import { registerIdempotency } from './middleware/idempotency.js';
+import { waitForPostCommitWork } from './services/idempotency-service.js';
 import { adminRoutes } from './routes/admin-routes.js';
 import { annotationRoutes } from './routes/annotation-routes.js';
 import { challengeRoutes } from './routes/challenge-routes.js';
@@ -66,6 +67,12 @@ export function buildApp(options: BuildAppOptions = {}) {
       await database.pool?.end();
     });
   }
+
+  // onClose hooks run in reverse order, so this runs before the pool closes:
+  // let post-commit work (broadcasts, win checks) finish first.
+  app.addHook('onClose', async () => {
+    await waitForPostCommitWork();
+  });
 
   registerAppErrorHandler(app);
   registerAuth(app, {

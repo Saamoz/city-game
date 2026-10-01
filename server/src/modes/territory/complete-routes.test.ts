@@ -40,14 +40,16 @@ const ZONE_GEOMETRY = {
   ]],
 } as unknown as import('@city-game/shared').GeoJsonPolygon;
 
+// East neighbour of ZONE_GEOMETRY (runtime zones must be connected); the
+// default GPS fix is ~150 m from it, well outside its claim buffer.
 const TARGET_ZONE_GEOMETRY = {
   type: 'Polygon',
   coordinates: [[
-    [-97.1505, 49.9044],
-    [-97.1463, 49.9044],
-    [-97.1463, 49.9062],
-    [-97.1505, 49.9062],
-    [-97.1505, 49.9044],
+    [-97.1363, 49.8944],
+    [-97.1321, 49.8944],
+    [-97.1321, 49.8962],
+    [-97.1363, 49.8962],
+    [-97.1363, 49.8944],
   ]],
 } as unknown as import('@city-game/shared').GeoJsonPolygon;
 

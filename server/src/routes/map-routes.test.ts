@@ -243,6 +243,48 @@ describe('map routes', () => {
     ]));
   });
 
+  it('tolerates sub-metre slivers between neighbouring zones but not real overlaps', async () => {
+    app = await createTestApp({ db: testDatabase.db, pool: testDatabase.pool });
+
+    const mapResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/maps',
+      headers: idempotencyHeaders('create-sliver-map'),
+      payload: {
+        name: 'Sliver Map',
+        centerLat: 49.8951,
+        centerLng: -97.1384,
+        defaultZoom: 12,
+      },
+    });
+    const mapId = mapResponse.json().map.id as string;
+
+    const createZone = (key: string, name: string, geometry: ReturnType<typeof createRectangle>) => app.inject({
+      method: 'POST',
+      url: `/api/v1/maps/${mapId}/zones`,
+      headers: idempotencyHeaders(key),
+      payload: { name, geometry },
+    });
+
+    expect((await createZone('sliver-first', 'First', createRectangle(-97.15, 49.88, -97.13, 49.90))).statusCode).toBe(201);
+
+    // At this latitude 0.000002° of longitude is ~14 cm: a hairline overlap.
+    const hairlineOverlap = await createZone('sliver-overlap', 'Hairline overlap', createRectangle(-97.130002, 49.88, -97.11, 49.90));
+    expect(hairlineOverlap.statusCode).toBe(201);
+
+    // ~22 cm gap to First's northern edge: still counts as a shared border.
+    const hairlineGap = await createZone('sliver-gap', 'Hairline gap', createRectangle(-97.15, 49.900002, -97.13, 49.92));
+    expect(hairlineGap.statusCode).toBe(201);
+
+    const playabilityResponse = await app.inject({ method: 'GET', url: '/api/v1/maps/playability' });
+    expect(playabilityResponse.json().maps).toContainEqual({ mapId, isPlayable: true, reason: null });
+
+    // ~2 m of overlap is a real overlap.
+    const realOverlap = await createZone('sliver-real-overlap', 'Real overlap', createRectangle(-97.17, 49.88, -97.14997, 49.90));
+    expect(realOverlap.statusCode).toBe(400);
+    expect(realOverlap.json().error.message).toContain('overlap');
+  });
+
   it('heals a hidden adjacency gap that connectivity validation alone does not catch', async () => {
     app = await createTestApp({ db: testDatabase.db, pool: testDatabase.pool });
 
@@ -280,7 +322,7 @@ describe('map routes', () => {
     });
     expect(zoneCResponse.statusCode).toBe(201);
 
-    // Zone B is shifted north by gapDegrees, so its top edge no longer
+    // Zone B is shifted south by gapDegrees, so its top edge no longer
     // exactly meets zone A's bottom edge. It still passes the connectivity
     // check because it exactly shares its right edge with C, so this gap
     // against A is the kind that stays hidden until explicitly checked for.
@@ -290,7 +332,7 @@ describe('map routes', () => {
       headers: idempotencyHeaders('create-gap-heal-zone-b'),
       payload: {
         name: 'B',
-        geometry: createRectangle(-97.15, 49.88 + gapDegrees, -97.13, 49.90 + gapDegrees),
+        geometry: createRectangle(-97.15, 49.88 - gapDegrees, -97.13, 49.90 - gapDegrees),
       },
     });
     expect(zoneBResponse.statusCode).toBe(201);
