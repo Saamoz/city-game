@@ -285,6 +285,17 @@ describe('territory complete route', () => {
     expect(response.json()).toMatchObject({ challenge: { status: 'completed' }, claim: { locationAtClaim: null }, resourcesAwarded: { points: 2 } });
   });
 
+  it('adds self-reported bonus points to the base award, ignoring bonuses the challenge does not have', async () => {
+    await seedGame({ modeKey: 'point_challenge' }); await seedTeam(); await seedPlayer({ sessionToken: 'bonus-session' });
+    await seedChallenge({ zoneId: null, isDeckActive: true, scoring: { points: 3 }, config: { portable: true, location_mode: 'portable', bonuses: [{ id: 'b-hat', label: 'Wear a hat', points: 2 }, { id: 'b-song', label: 'Sing it', points: 5 }] } });
+    app = await createTestApp({ db: testDatabase.db });
+    const response = await completeRequest({ sessionToken: 'bonus-session', actionId: 'bonus-complete', payload: { gps: null, submission: { bonusIds: ['b-hat', 'b-unknown'] } } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ resourcesAwarded: { points: 5 }, claim: { submission: { bonusIds: ['b-hat', 'b-unknown'] } } });
+    const [ledger] = await testDatabase.db.select().from(resourceLedger).where(eq(resourceLedger.gameId, GAME_ID));
+    expect(ledger).toMatchObject({ teamId: TEAM_ONE_ID, resourceType: 'points', delta: 5 });
+  });
+
   it('does not deal an extra deck card when a pinned point challenge is completed', async () => {
     await seedGame({ modeKey: 'point_challenge' }); await seedTeam(); await seedPlayer({ sessionToken: 'pin-deck-session' });
     await seedChallenge({ zoneId: null, isDeckActive: true, config: { portable: false, location_mode: 'point', source_map_point: { type: 'Point', coordinates: [-97.1384, 49.8951] }, point_radius_meters: 25 } });

@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import {
   errorCodes,
   eventTypes,
+  getClaimedBonuses,
   getJudgedMaxPoints,
   isJudgedChallengeConfig,
   type GameJudgingSheet,
@@ -46,6 +47,7 @@ export async function getJudgingSheet(db: DatabaseClient, gameId: string): Promi
         playerId: claim.playerId,
         submittedAt: (claim.completedAt ?? claim.claimedAt).toISOString(),
         note: getSubmissionNote(claim.submission),
+        bonuses: getClaimedBonuses(row.config, claim.submission),
         points: claim.judgedPoints,
       })),
     })),

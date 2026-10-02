@@ -114,6 +114,12 @@ export function JudgingPanel({ game, teams, onPublished }: JudgingPanelProps) {
                           <span className="text-xs font-normal text-[#64727a]">{new Date(submission.submittedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
                         </p>
                         <p className="mt-1 whitespace-pre-wrap text-sm text-[#44535a]">{submission.note ?? <span className="italic text-[#8a979d]">No note</span>}</p>
+                        {submission.bonuses.length ? (
+                          <p className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
+                            <span className="font-semibold uppercase tracking-[0.12em] text-[#7a5413]">Bonuses claimed:</span>
+                            {submission.bonuses.map((bonus) => <span key={bonus.id} className="rounded-full bg-[#fbecc8] px-2 py-0.5 text-[#7a5413]">{bonus.label} (+{bonus.points})</span>)}
+                          </p>
+                        ) : null}
                       </div>
                       <label className="block">
                         <input

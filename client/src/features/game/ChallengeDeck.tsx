@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
-import type { Challenge, ChallengeRerollState, Zone } from '@city-game/shared';
+import { getChallengeBonuses, type Challenge, type ChallengeRerollState, type Zone } from '@city-game/shared';
 import {
   CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH,
   CHALLENGE_CARD_TITLE_MAX_LENGTH,
   clampChallengeCardText,
 } from '../../lib/challenge-card-limits';
+import { BonusList, CompleteChallengeSheet, ScoreChips, formatPoints, type CompletionExtras } from './ChallengeScoring';
 import type { GeolocationStatus } from './useGeolocation';
 
 interface CompletedChallengeCard {
   challenge: Challenge;
   teamName: string | null;
   teamColor: string | null;
+  pointsEarned?: number | null;
 }
 
 interface ExitingChallengeCard {
@@ -37,7 +39,7 @@ interface ChallengeDeckProps {
   locationMessage: string | null;
   selectedChallengeId: string | null;
   onSelectChallenge(challengeId: string): void;
-  onCaptureChallenge(challengeId: string, targetZoneId: string | null): void;
+  onCaptureChallenge(challengeId: string, targetZoneId: string | null, extras?: CompletionExtras): void;
   onToggleRerollVote(challengeId: string): void;
   onFocusCompletedCard(challengeId: string): void;
   isActionPending(actionKey: string): boolean;
@@ -92,6 +94,8 @@ export function ChallengeDeck({
   const [detailChallengeId, setDetailChallengeId] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
   const [confirmChallengeId, setConfirmChallengeId] = useState<string | null>(null);
+  const [bonusSheetChallengeId, setBonusSheetChallengeId] = useState<string | null>(null);
+  const bonusSheetChallenge = challenges.find((challenge) => challenge.id === bonusSheetChallengeId) ?? null;
   const [exitingChallenges, setExitingChallenges] = useState<ExitingChallengeCard[]>([]);
 
   const currentZone = currentZoneId ? zones.find((zone) => zone.id === currentZoneId) ?? null : null;
@@ -298,6 +302,7 @@ export function ChallengeDeck({
                         ) : null}
                       </div>
 
+                      <div className="mt-1.5"><ScoreChips challenge={challenge} size="xs" /></div>
                       <p className="mt-2 overflow-hidden text-xs leading-5 text-[#4f6168] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:4]">
                         {shortDescription}
                       </p>
@@ -362,7 +367,7 @@ export function ChallengeDeck({
                           ].join(' ')}
                           data-deck-interactive="true"
                           disabled={capturePending || (!isAnywhere && (locationStatus === 'unsupported' || locationStatus === 'requesting'))}
-                          onClick={() => setConfirmChallengeId(challenge.id)}
+                          onClick={() => getChallengeBonuses(challenge.config).length ? setBonusSheetChallengeId(challenge.id) : setConfirmChallengeId(challenge.id)}
                           type="button"
                         >
                           {isAnywhere ? 'Complete' : 'Claim'}
@@ -401,7 +406,7 @@ export function ChallengeDeck({
           {showCompleted ? (
             <div className="-mx-4 mt-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               <div className="flex w-max gap-3 pr-4">
-                {completedCards.map(({ challenge, teamName, teamColor }) => (
+                {completedCards.map(({ challenge, teamName, teamColor, pointsEarned }) => (
                   <button
                     key={challenge.id}
                     className="min-w-[14rem] max-w-[14rem] flex-none rounded-[1.2rem] border border-[#c8b48a]/45 bg-[#f7efdc] p-4 text-left text-[#24343a] shadow-[0_10px_24px_rgba(24,32,36,0.08)] transition hover:bg-[#fbf3e2]"
@@ -417,6 +422,7 @@ export function ChallengeDeck({
                       <p className="truncate text-[11px] uppercase tracking-[0.18em] text-[#7a6a48]">
                         {teamName ?? 'Unknown team'}
                       </p>
+                      {pointsEarned ? <span className="ml-auto shrink-0 text-[11px] font-bold text-[#7a5413]">+{formatPoints(pointsEarned)}</span> : null}
                     </div>
                     <h3
                       className="mt-2 line-clamp-2 font-[Georgia,Times_New_Roman,serif] text-lg font-semibold text-[#24343a]"
@@ -433,6 +439,16 @@ export function ChallengeDeck({
             </div>
           ) : null}
         </section>
+      ) : null}
+
+      {bonusSheetChallenge ? (
+        <CompleteChallengeSheet
+          challenge={bonusSheetChallenge}
+          confirmLabel={isAnywhere ? 'We did it' : 'Confirm claim'}
+          onCancel={() => setBonusSheetChallengeId(null)}
+          onConfirm={(extras) => { onCaptureChallenge(bonusSheetChallenge.id, null, extras); setBonusSheetChallengeId(null); }}
+          pending={isActionPending('capture:' + bonusSheetChallenge.id)}
+        />
       ) : null}
 
       {detailChallenge ? (
@@ -463,7 +479,9 @@ export function ChallengeDeck({
               </button>
             </div>
 
-            <p className="mt-5 text-sm leading-7 text-[#44545c]">{getLongDescription(detailChallenge)}</p>
+            <div className="mt-3"><ScoreChips challenge={detailChallenge} /></div>
+            <p className="mt-4 text-sm leading-7 text-[#44545c]">{getLongDescription(detailChallenge)}</p>
+            <div className="mt-4"><BonusList challenge={detailChallenge} /></div>
 
           </div>
         </div>
@@ -641,7 +659,6 @@ function locationPillClassName(status: GeolocationStatus): string {
 
 function AnywhereTag({ challenge }: { challenge: Challenge }) {
   const hint = getConfigString(challenge, 'location_hint');
-  const points = typeof challenge.scoring?.points === 'number' ? challenge.scoring.points : null;
   return (
     <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-[#647d74]">
       <svg aria-hidden="true" className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24">
@@ -649,7 +666,6 @@ function AnywhereTag({ challenge }: { challenge: Challenge }) {
         <path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17" stroke="currentColor" strokeWidth="1.6" />
       </svg>
       <span className="truncate">{hint ?? 'Anywhere'}</span>
-      {points !== null ? <span className="shrink-0 text-[#936718]">· {points} {points === 1 ? 'pt' : 'pts'}</span> : null}
     </p>
   );
 }

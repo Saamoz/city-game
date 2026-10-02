@@ -467,6 +467,7 @@ export interface JudgingSubmission {
   playerId: Uuid;
   submittedAt: IsoTimestamp;
   note: string | null;
+  bonuses: Array<{ id: string; label: string; points: number }>; // bonus tasks the team says it did
   points: number | null;
 }
 

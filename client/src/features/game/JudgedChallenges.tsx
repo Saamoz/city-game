@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { getJudgedMaxPoints, isJudgedChallengeConfig, type Challenge, type ChallengeClaim, type Team } from '@city-game/shared';
+import { getChallengeBonuses, getJudgedMaxPoints, isJudgedChallengeConfig, type Challenge, type ChallengeClaim, type Team } from '@city-game/shared';
+import { BonusChecklist, BonusList, useBonusSelection, type CompletionExtras } from './ChallengeScoring';
 import { OverlayShell } from './Phase32Panels';
 import { getPointLocation, getPointRadius } from './PointChallenges';
 
@@ -39,15 +40,18 @@ export function SubmittedTeams({ submissions, teams }: SubmittedTeamsProps) {
 }
 
 interface SubmitFormProps {
+  challenge: Challenge;
   pending: boolean;
   disabledReason: string | null;
-  onSubmit(note: string): void;
+  onSubmit(extras: CompletionExtras): void;
 }
 
 // Two steps, because a team only gets one submission.
-export function JudgedSubmitForm({ pending, disabledReason, onSubmit }: SubmitFormProps) {
+export function JudgedSubmitForm({ challenge, pending, disabledReason, onSubmit }: SubmitFormProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [note, setNote] = useState('');
+  const bonuses = getChallengeBonuses(challenge.config);
+  const { selected, toggle } = useBonusSelection();
   const buttonClassName = 'w-full rounded-2xl border border-[#4a3a6b] bg-[#3f3360] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#f4ead7] transition hover:bg-[#33294f] disabled:cursor-not-allowed disabled:border-[#a7a1b5] disabled:bg-[#b3adc0]';
 
   if (disabledReason) {
@@ -65,9 +69,10 @@ export function JudgedSubmitForm({ pending, disabledReason, onSubmit }: SubmitFo
         placeholder="Note for the judges (optional): your answer, or where you posted the photo"
         value={note}
       />
-      <p className="text-[11px] leading-4 text-[#6b777b]">Your team can submit this once. Judges award the points after the game.</p>
+      {bonuses.length ? <BonusChecklist bonuses={bonuses} onToggle={toggle} selected={selected} /> : null}
+      <p className="text-[11px] leading-4 text-[#6b777b]">Your team can submit this once. Judges award the points after the game{bonuses.length ? ', and see which bonuses you ticked' : ''}.</p>
       <div className="grid grid-cols-[1fr_auto] gap-2">
-        <button className={buttonClassName} disabled={pending} onClick={() => onSubmit(note.trim())} type="button">{pending ? 'Submitting…' : 'Confirm submission'}</button>
+        <button className={buttonClassName} disabled={pending} onClick={() => onSubmit({ note: note.trim() || undefined, bonusIds: [...selected] })} type="button">{pending ? 'Submitting…' : 'Confirm submission'}</button>
         <button className="rounded-2xl border border-[#c8b48a]/55 bg-[#efe5cf] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#5d4d33]" onClick={() => setIsOpen(false)} type="button">Cancel</button>
       </div>
     </div>
@@ -101,7 +106,7 @@ interface OverlayProps {
   teamId: string | null;
   distanceTo(challenge: Challenge): number | null;
   isPending(challengeId: string): boolean;
-  onSubmit(challengeId: string, note: string): void;
+  onSubmit(challengeId: string, extras: CompletionExtras): void;
   onLocate(challengeId: string): void;
   onClose(): void;
 }
@@ -132,6 +137,7 @@ export function JudgedChallengesOverlay({ challenges, claims, teams, teamId, dis
               <JudgedTag challenge={challenge} />
               <h3 className="mt-1.5 font-[Georgia,Times_New_Roman,serif] text-lg font-semibold leading-snug text-[#1f2a2f]">{challenge.title}</h3>
               <p className="mt-1 text-sm leading-6 text-[#4f6168]">{longDescription}</p>
+              <div className="mt-3"><BonusList challenge={challenge} /></div>
               <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#647d74]">
                 {isPinned ? '📍 At a pinned spot' + (distance !== null ? ' · ' + Math.round(distance) + ' m away' : '') : hint ?? 'Anywhere'}
               </p>
@@ -144,7 +150,8 @@ export function JudgedChallengesOverlay({ challenges, claims, teams, teamId, dis
                     ) : null}
                     <JudgedSubmitForm
                       disabledReason={!teamId ? 'Join a team to submit' : outOfRange ? 'Get within ' + Math.round(radius ?? 0) + ' m to submit' : null}
-                      onSubmit={(note) => onSubmit(challenge.id, note)}
+                      challenge={challenge}
+                      onSubmit={(extras) => onSubmit(challenge.id, extras)}
                       pending={isPending(challenge.id)}
                     />
                   </div>

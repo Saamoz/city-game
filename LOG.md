@@ -221,3 +221,10 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Judging: `GET /game/:id/judging`, `PUT /judging/submissions/:claimId {points}` (draft, stored in `judged_points`), `POST /game/:id/judging/publish` (completed games only). Publish writes `judged_award` ledger deltas against what was already awarded, so republishing corrects scores; it sets `settings.judging_published_at`.
 - Recap carries `judging: { status: none|pending|published }`. The results screen shows "Judges are scoring" with standings-before-judging while pending and polls every 20 s.
 - Also fixed: `/challenges/:id/complete` rejected `gps: null`, which broke completing anywhere cards without a GPS fix.
+
+## Challenge Points + Bonus Tasks (2026-10-02)
+
+- Every challenge can carry base points (`scoring.points`; the admin field now shows for all set types) and optional bonus tasks in `config.bonuses: [{ id, label, points }]` (shared helpers in `shared/src/scoring.ts`).
+- Teams self-report bonuses when completing: `submission.bonusIds`. `finishChallengeCompletion` adds the points of claimed bonuses that exist on the challenge (unknown ids are ignored) to the `points` award, so it covers every completion path (zone claims, pins, anywhere cards).
+- Judged challenges: teams tick bonuses when submitting; judges see them in the Judging panel. They are not auto-added: the judge's score is the total.
+- UI: cards show "5 pts" / "+5 bonus" chips; completing a deck card with bonuses opens a checklist sheet with a running total; the pin card shows the checklist inline ("Complete · 7 pts"); details list the bonus tasks; completed cards, the toast and the feed show points earned.

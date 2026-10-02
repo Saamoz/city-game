@@ -6,3 +6,4 @@ export * from './constants.js';
 export * from './zone-topology.js';
 export * from './zone-graph.js';
 export * from './judging.js';
+export * from './scoring.js';

@@ -2,12 +2,16 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import mapboxgl from 'mapbox-gl';
 import {
+  getBasePoints,
+  getClaimedBonuses,
   socketServerEventTypes,
+  sumBonusPoints,
   type Challenge,
   type ChallengeClaim,
   type GameEventRecord,
   type GameStateSnapshot,
   type GpsPayload,
+  type ResourceAwardMap,
   type SocketEventPayloadMap,
   type SocketServerEventType,
 } from '@city-game/shared';
@@ -31,6 +35,7 @@ import { useGameStore, type RealtimeConnectionStatus } from '../../store/gameSto
 import { ChallengeDeck } from './ChallengeDeck';
 import { PointChallengeCard, PointChallengeLayer, getPointLocation, isPointChallenge } from './PointChallenges';
 import { GameResultsScreen } from './GameResultsScreen';
+import { formatPoints, type CompletionExtras } from './ChallengeScoring';
 import { JudgedChallengesOverlay, getJudgedSubmissions, isJudgedChallenge } from './JudgedChallenges';
 import {
   FeedOverlay,
@@ -62,6 +67,7 @@ interface CompletedCardViewModel {
   teamName: string | null;
   teamColor: string | null;
   zoneId: string | null;
+  pointsEarned: number;
 }
 
 const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env.MAPBOX_ACCESS_TOKEN ?? '').trim();
@@ -665,7 +671,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     };
   }, [gameId, snapshot?.game.status, snapshot?.player?.teamId]);
 
-  const handleCaptureChallenge = (challengeId: string, targetZoneId: string | null, note?: string) => {
+  const handleCaptureChallenge = (challengeId: string, targetZoneId: string | null, extras: CompletionExtras = {}) => {
     void runAction(`capture:${challengeId}`, async (idempotencyKey) => {
       const challenge = snapshot?.challenges.find((entry) => entry.id === challengeId) ?? null;
       const targetZone = targetZoneId ? snapshot?.zones.find((entry) => entry.id === targetZoneId) ?? null : null;
@@ -684,14 +690,14 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           {
             gps: gps && gpsCapturedAtOverride ? { ...gps, capturedAt: gpsCapturedAtOverride } : gps,
             targetZoneId,
-            ...(note ? { submission: { note } } : {}),
+            ...(extras.note || extras.bonusIds?.length ? { submission: { ...(extras.note ? { note: extras.note } : {}), ...(extras.bonusIds?.length ? { bonusIds: extras.bonusIds } : {}) } } : {}),
           },
           idempotencyKey,
         );
         applyCompletedMutation(gameId, response);
         setToast(response.claim.status === 'submitted'
           ? { tone: 'success', title: 'Submitted for judging', body: 'Judges will score it after the game.' }
-          : { tone: 'success', title: response.zone ? `${response.zone.name} captured` : 'Challenge completed' });
+          : { tone: 'success', title: response.zone ? `${response.zone.name} captured` : 'Challenge completed', body: describeAward(response.resourcesAwarded) });
         return response;
       };
 
@@ -881,7 +887,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           locationStatus={locationStatus}
           pending={isPending('capture:' + selectedPointChallenge.id)}
           onClose={() => setSelectedPointChallengeId(null)}
-          onComplete={(note) => { handleCaptureChallenge(selectedPointChallenge.id, null, note); }}
+          onComplete={(extras) => { handleCaptureChallenge(selectedPointChallenge.id, null, extras); }}
           judged={selectedJudgedSubmissions ? { submissions: selectedJudgedSubmissions, teams: snapshot?.teams ?? [], ownClaim: selectedJudgedSubmissions.find((claim) => claim.teamId === team?.id) ?? null } : null}
         />
       ) : null}
@@ -1120,7 +1126,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               >
                 <div className="mt-3 -mx-1 overflow-x-auto [scrollbar-width:none] [touch-action:pan-x] [&::-webkit-scrollbar]:hidden">
                   <div className="flex w-max gap-3 px-1 pb-1 pr-5">
-                    {completedCards.map(({ challenge, teamName, teamColor }) => (
+                    {completedCards.map(({ challenge, teamName, teamColor, pointsEarned }) => (
                       <button
                         key={challenge.id}
                         className="min-w-[12rem] max-w-[12rem] flex-none rounded-[1.2rem] border border-[#c8b48a]/45 bg-[#f7efdc] p-4 text-left text-[#24343a] shadow-[0_10px_24px_rgba(24,32,36,0.08)] transition hover:bg-[#fbf3e2]"
@@ -1135,6 +1141,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                           <p className="truncate text-[10px] uppercase tracking-[0.18em] text-[#7a6a48]">
                             {teamName ?? 'Unknown team'}
                           </p>
+                          {pointsEarned ? <span className="ml-auto shrink-0 text-[10px] font-bold text-[#7a5413]">+{formatPoints(pointsEarned)}</span> : null}
                         </div>
                         <h3 className="mt-1.5 line-clamp-2 font-[Georgia,Times_New_Roman,serif] text-base font-semibold text-[#24343a]">
                           {challenge.title}
@@ -1233,7 +1240,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           teamId={team?.id ?? null}
           distanceTo={distanceToChallenge}
           isPending={(challengeId) => isPending('capture:' + challengeId)}
-          onSubmit={(challengeId, note) => handleCaptureChallenge(challengeId, null, note)}
+          onSubmit={(challengeId, extras) => handleCaptureChallenge(challengeId, null, extras)}
           onLocate={(challengeId) => { setActiveOverlay(null); focusPointChallenge(challengeId); }}
           onClose={() => setActiveOverlay(null)}
         />
@@ -1478,8 +1485,14 @@ function buildCompletedCards(snapshot: GameStateSnapshot | null): CompletedCardV
         teamName: team?.name ?? null,
         teamColor: team?.color ?? null,
         zoneId: challenge.zoneId ?? null,
+        pointsEarned: getBasePoints(challenge.scoring) + sumBonusPoints(getClaimedBonuses(challenge.config, completedClaim?.submission)),
       };
     });
+}
+
+function describeAward(awards: ResourceAwardMap | undefined): string | undefined {
+  const points = awards?.points;
+  return typeof points === 'number' && points !== 0 ? '+' + formatPoints(points) : undefined;
 }
 
 function focusMapOnZone(map: mapboxgl.Map, zone: GameStateSnapshot['zones'][number]): void {
@@ -1562,6 +1575,7 @@ function buildRealtimeFeedEventRecord(
           claim: { id: completedPayload.claim.id },
           zone: completedPayload.zone ? { id: completedPayload.zone.id, name: completedPayload.zone.name } : null,
           judged: completedPayload.claim.status === 'submitted',
+          resourcesAwarded: completedPayload.resourcesAwarded,
         } as GameEventRecord['meta'],
       };
     }
