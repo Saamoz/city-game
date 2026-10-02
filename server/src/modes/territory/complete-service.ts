@@ -113,6 +113,23 @@ export async function completeChallenge(
   if (
     lockedChallenge.status === 'available' &&
     isPortableChallengeConfig(lockedChallenge.config) &&
+    game.modeKey === 'point_challenge'
+  ) {
+    return completeAnywhereChallengeDirectly(db, {
+      challenge: lockedChallenge,
+      gameId: input.gameId,
+      playerId: input.playerId,
+      teamId: input.teamId,
+      submission: input.submission ?? null,
+      gpsPayload: input.gpsPayload ?? null,
+      now,
+      settings: game.settings as GameSettings,
+    });
+  }
+
+  if (
+    lockedChallenge.status === 'available' &&
+    isPortableChallengeConfig(lockedChallenge.config) &&
     input.gpsPayload
   ) {
     return completePortableChallengeDirectly(db, {
@@ -210,6 +227,14 @@ async function completePointChallengeDirectly(db: DatabaseClient, input: { chall
   const [updatedChallenge] = await db.update(challenges).set({ zoneId: zoneBefore?.id ?? null, status: 'completed', currentClaimId: null, expiresAt: null, isDeckActive: false, updatedAt: input.now }).where(eq(challenges.id, input.challenge.id)).returning();
   if (!updatedClaim || !updatedChallenge) throw new AppError(errorCodes.validationError, { message: 'Challenge completion failed.' });
   return finishChallengeCompletion(db, { gameId: input.gameId, playerId: input.playerId, teamId: input.teamId, now: input.now, lockedChallenge: input.challenge, updatedChallenge, updatedClaim, zoneBefore, settings: input.settings });
+}
+// Point Challenge games have no zones, so "anywhere" cards complete on the team's word and only record where they were.
+async function completeAnywhereChallengeDirectly(db: DatabaseClient, input: { challenge: typeof challenges.$inferSelect; gameId: string; playerId: string; teamId: string; submission: JsonValue | null; gpsPayload: GpsPayload | null; now: Date; settings: GameSettings }): Promise<CompleteChallengeSuccessResult> {
+  const locationAtClaim = input.gpsPayload ? sql`ST_SetSRID(ST_MakePoint(${input.gpsPayload.lng}, ${input.gpsPayload.lat}), 4326)` : null;
+  const [updatedClaim] = await db.insert(challengeClaims).values({ challengeId: input.challenge.id, gameId: input.gameId, teamId: input.teamId, playerId: input.playerId, status: 'completed', expiresAt: input.now, completedAt: input.now, submission: input.submission, locationAtClaim }).returning();
+  const [updatedChallenge] = await db.update(challenges).set({ status: 'completed', currentClaimId: null, expiresAt: null, isDeckActive: false, updatedAt: input.now }).where(eq(challenges.id, input.challenge.id)).returning();
+  if (!updatedClaim || !updatedChallenge) throw new AppError(errorCodes.validationError, { message: 'Challenge completion failed.' });
+  return finishChallengeCompletion(db, { gameId: input.gameId, playerId: input.playerId, teamId: input.teamId, now: input.now, lockedChallenge: input.challenge, updatedChallenge, updatedClaim, zoneBefore: null, settings: input.settings });
 }
 function isPointChallengeConfig(config: unknown): boolean { return getPointLocation(config) !== null; }
 function getPointLocation(config: unknown): GeoJsonPoint | null {
@@ -371,7 +396,8 @@ async function finishChallengeCompletion(
     updatedZone = await getZoneByIdOrThrow(db, input.updatedChallenge.zoneId);
   }
 
-  const activatedChallengeRow = await activateNextQueuedChallenge(db, input.gameId, input.now);
+  // Pinned point challenges sit outside the deck, so finishing one must not deal another card.
+  const activatedChallengeRow = isPointChallengeConfig(input.updatedChallenge.config) ? null : await activateNextQueuedChallenge(db, input.gameId, input.now);
   if (activatedChallengeRow) {
     activatedChallenge = serializeChallenge(activatedChallengeRow);
     if (activatedChallengeRow.zoneId) {

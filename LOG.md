@@ -201,3 +201,12 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Seeds: Chicago and Toronto load real neighbourhood boundaries from prod (`server/src/db/scripts/fixtures/`); the Winnipeg dev seed tiles a grid (`gridCellPolygon`).
 - Tests: fixtures that inserted unconnected runtime zones now tile; the admin-auth test now asserts the intentional V1 no-op.
 - The intermittent TRUNCATE deadlock in tests was post-commit hooks (win checks, broadcasts) still running after the response was sent. `executeIdempotentMutation` now tracks them and the app's `onClose` waits for them (`waitForPostCommitWork`).
+
+## Point Challenges: Pinned + Anywhere (2026-10-02)
+
+**Why:** point-linked sets required every item to have a map point, so a Point Challenge game couldn't include tasks that work anywhere (or at any place of a kind, e.g. "any café").
+
+- Point-linked sets now accept pinned items (map point) and anywhere items (no placement). Zone items are still rejected. Anywhere items can carry an optional `config.location_hint` ("Any café") shown on the card; it is a label only, not GPS-checked.
+- Runtime: pins all start active and show as map markers; anywhere items form the deck (`active_challenge_count` cards dealt, refilled on completion). Completing a pin no longer deals an extra deck card.
+- In `point_challenge` games, anywhere cards complete without a zone (`completeAnywhereChallengeDirectly`); GPS is recorded when available but not required, and the client doesn't block on a GPS failure.
+- UI: admin item editor has a Pinned point / Anywhere toggle; game HUD shows "N on map · N anywhere"; the deck is titled "Anywhere Cards" and hidden entirely for pin-only sets.

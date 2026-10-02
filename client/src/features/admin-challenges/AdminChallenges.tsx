@@ -56,7 +56,12 @@ interface ItemFormState {
   mapPoint: GeoJsonPoint | null;
   pointRadiusMeters: string;
   pointValue: string;
+  placement: ItemPlacement;
+  locationHint: string;
 }
+
+// Within a point-linked set, each item is either pinned to the map or doable anywhere.
+type ItemPlacement = 'pinned' | 'anywhere';
 
 const DIFFICULTY_OPTIONS: Array<{ value: Exclude<ChallengeSetItem['difficulty'], null> | ''; label: string }> = [
   { value: '', label: 'Unset' },
@@ -81,6 +86,8 @@ const INITIAL_ITEM_FORM: ItemFormState = {
   mapPoint: null,
   pointRadiusMeters: '40',
   pointValue: '1',
+  placement: 'pinned',
+  locationHint: '',
 };
 
 export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps) {
@@ -344,25 +351,28 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
       return;
     }
 
-    if (setForm.locationMode === 'point' && (!itemForm.mapId || !itemForm.mapPoint)) {
+    const isPinned = setForm.locationMode === 'point' && itemForm.placement === 'pinned';
+    if (isPinned && (!itemForm.mapId || !itemForm.mapPoint)) {
       setNotice({ tone: 'error', message: 'Choose a source map and place a point.' });
       return;
     }
 
+    const locationHint = itemForm.locationHint.trim();
     const payload = {
       mapZoneId: setForm.locationMode === 'zone' ? itemForm.mapZoneId : null,
-      mapPoint: setForm.locationMode === 'point' ? itemForm.mapPoint : null,
+      mapPoint: isPinned ? itemForm.mapPoint : null,
       title,
       description,
       config: {
         ...(shortDescription ? { short_description: shortDescription } : {}),
         ...(longDescription ? { long_description: longDescription } : {}),
-        ...(setForm.locationMode === 'point' ? { point_radius_meters: Math.max(1, Number(itemForm.pointRadiusMeters) || 40) } : {}),
+        ...(isPinned ? { point_radius_meters: Math.max(1, Number(itemForm.pointRadiusMeters) || 40) } : {}),
+        ...(!isPinned && setForm.locationMode !== 'zone' && locationHint ? { location_hint: locationHint } : {}),
       } satisfies JsonObject,
       scoring: setForm.locationMode === 'point' ? { points: Math.max(0, Number(itemForm.pointValue) || 1) } : {} as Record<string, number>,
       difficulty: itemForm.difficulty || null,
       sortOrder: selectedItem ? selectedItem.sortOrder : items.length,
-      metadata: (setForm.locationMode !== 'portable' && itemForm.mapId ? { sourceMapId: itemForm.mapId } : {}) as JsonObject,
+      metadata: ((setForm.locationMode === 'zone' || isPinned) && itemForm.mapId ? { sourceMapId: itemForm.mapId } : {}) as JsonObject,
     };
 
     setIsSavingItem(true);
@@ -615,9 +625,9 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                   </Field>
                   <Field label="Set Placement">
                     <select className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={setForm.locationMode} onChange={(event) => setSetForm((current) => ({ ...current, locationMode: event.target.value as ChallengeSetItemLocationMode }))}>
-                      <option value="portable">Portable</option><option value="zone">Zone Linked</option><option value="point">Point Linked</option>
+                      <option value="portable">Portable</option><option value="zone">Zone Linked</option><option value="point">Point Linked (pins + anywhere)</option>
                     </select>
-                    <p className="mt-2 text-xs leading-5 text-[#6b777b]">Every challenge in this set uses this placement type. Save the set before editing its items.</p>
+                    <p className="mt-2 text-xs leading-5 text-[#6b777b]">{setForm.locationMode === 'point' ? 'Each challenge is either pinned to a map point or doable anywhere. Pins appear on the map; anywhere challenges are dealt as a deck.' : 'Every challenge in this set uses this placement type.'} Save the set before editing its items.</p>
                     {setForm.locationMode !== currentSet.locationMode ? <p className="mt-2 rounded-xl border border-[#d59b45]/45 bg-[#fff0ce] px-3 py-2 text-xs leading-5 text-[#765018]">Save this placement change before creating or editing challenges.</p> : null}
                   </Field>
                   <Field label="Description">
@@ -629,7 +639,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-[11px] uppercase tracking-[0.24em] text-[#7a6a48]">Items</p>
-                      <p className="mt-1 text-sm text-[#59696f]">All items use the set placement selected on the left.</p>
+                      <p className="mt-1 text-sm text-[#59696f]">{currentSet.locationMode === 'point' ? countPlacements(items) : 'All items use the set placement selected on the left.'}</p>
                     </div>
                     <button className="rounded-full border border-[#24343a] bg-[#24343a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#f4ead7]" onClick={handleCreateItem} type="button">New Item</button>
                   </div>
@@ -650,7 +660,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                               <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="font-semibold text-[#24343a]">{item.title}</h3>
                                 {item.difficulty ? <Badge>{item.difficulty}</Badge> : null}
-                                <Badge tone={currentSet.locationMode === 'portable' ? 'portable' : 'linked'}>{currentSet.locationMode === 'point' ? 'Point linked' : currentSet.locationMode === 'zone' ? 'Zone linked' : 'Portable'}</Badge>
+                                <PlacementBadge item={item} setMode={currentSet.locationMode} />
                               </div>
                               <p className="mt-2 text-sm leading-6 text-[#5a6a70] line-clamp-2">{getShortDescription(item)}</p>
                             </button>
@@ -700,7 +710,31 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                 {DIFFICULTY_OPTIONS.map((option) => <option key={option.label} value={option.value}>{option.label}</option>)}
               </select>
             </Field>
-            {setForm.locationMode !== 'portable' ? (
+            {setForm.locationMode === 'point' ? (
+              <div>
+                <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a6a48]">Where</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button className={placementClassName(itemForm.placement === 'pinned')} onClick={() => setItemForm((current) => ({ ...current, placement: 'pinned' }))} type="button">Pinned point</button>
+                  <button className={placementClassName(itemForm.placement === 'anywhere')} onClick={() => setItemForm((current) => ({ ...current, placement: 'anywhere' }))} type="button">Anywhere</button>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-[#6b777b]">{itemForm.placement === 'pinned' ? 'Players must reach this spot; it shows as a pin on the map.' : 'Players can do this wherever they are; it shows in the deck.'}</p>
+              </div>
+            ) : null}
+
+            {setForm.locationMode === 'point' ? (
+              <Field label="Challenge Points">
+                <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a] outline-none focus:border-[#8f7446]" min="0" onChange={(event) => setItemForm((current) => ({ ...current, pointValue: event.target.value }))} type="number" value={itemForm.pointValue} />
+              </Field>
+            ) : null}
+
+            {setForm.locationMode === 'portable' || (setForm.locationMode === 'point' && itemForm.placement === 'anywhere') ? (
+              <Field label="Kind of Place (optional)">
+                <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a] outline-none focus:border-[#8f7446]" maxLength={40} placeholder="e.g. Any café, Any park, A bridge" value={itemForm.locationHint} onChange={(event) => setItemForm((current) => ({ ...current, locationHint: event.target.value }))} />
+                <p className="mt-1 text-xs leading-5 text-[#6b777b]">Shown on the card so players know what sort of place works. Leave blank for truly anywhere.</p>
+              </Field>
+            ) : null}
+
+            {setForm.locationMode === 'zone' || (setForm.locationMode === 'point' && itemForm.placement === 'pinned') ? (
               <Field label="Source Map">
                 <select className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={itemForm.mapId} onChange={(event) => void handleItemMapChange(event.target.value)}>
                   <option value="">Choose a map</option>
@@ -718,11 +752,8 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
               </Field>
             ) : null}
 
-            {setForm.locationMode === 'point' ? (
+            {setForm.locationMode === 'point' && itemForm.placement === 'pinned' ? (
               <div className="space-y-3">
-                <Field label="Challenge Points">
-                  <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a] outline-none focus:border-[#8f7446]" min="0" onChange={(event) => setItemForm((current) => ({ ...current, pointValue: event.target.value }))} type="number" value={itemForm.pointValue} />
-                </Field>
                 <Field label="Completion Radius (metres)">
                   <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a] outline-none focus:border-[#8f7446]" min="1" onChange={(event) => setItemForm((current) => ({ ...current, pointRadiusMeters: event.target.value }))} type="number" value={itemForm.pointRadiusMeters} />
                 </Field>
@@ -793,7 +824,21 @@ function buildItemForm(item: ChallengeSetItem): ItemFormState {
     mapPoint: item.mapPoint,
     pointRadiusMeters: String(typeof item.config?.point_radius_meters === 'number' ? item.config.point_radius_meters : 40),
     pointValue: String(typeof item.scoring?.points === 'number' ? item.scoring.points : 1),
+    placement: item.mapPoint ? 'pinned' : 'anywhere',
+    locationHint: typeof item.config?.location_hint === 'string' ? item.config.location_hint : '',
   };
+}
+
+function countPlacements(items: ChallengeSetItem[]): string {
+  const pinned = items.filter((item) => item.mapPoint).length;
+  return pinned + ' pinned on the map · ' + (items.length - pinned) + ' doable anywhere';
+}
+
+function PlacementBadge({ item, setMode }: { item: ChallengeSetItem; setMode: ChallengeSetItemLocationMode }) {
+  const hint = typeof item.config?.location_hint === 'string' ? item.config.location_hint : '';
+  if (setMode === 'zone') return <Badge tone="linked">Zone linked</Badge>;
+  if (setMode === 'point' && item.mapPoint) return <Badge tone="linked">Pinned</Badge>;
+  return <Badge tone="portable">{hint || (setMode === 'point' ? 'Anywhere' : 'Portable')}</Badge>;
 }
 
 function getSourceMapId(item: Pick<ChallengeSetItem, 'metadata'>): string {

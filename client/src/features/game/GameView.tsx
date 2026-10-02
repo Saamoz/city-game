@@ -551,6 +551,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
   const missingToken = mapboxToken.length === 0;
   const team = snapshot?.team ?? null;
+  const isPointMode = snapshot?.game.modeKey === 'point_challenge';
   const challengeCounts = useMemo(() => buildChallengeCounts(snapshot), [snapshot]);
   const challengeProgressLabel = useMemo(() => buildChallengeProgressLabel(challengeCounts), [challengeCounts]);
   const completedCards = useMemo(() => buildCompletedCards(snapshot), [snapshot]);
@@ -563,6 +564,11 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const currentZone = useMemo(() => snapshot ? findContainingZone(snapshot.zones, currentPoint) : null, [currentPoint, snapshot]);
   const broadcastTeamLocations = Boolean(snapshot?.game.settings?.broadcast_team_locations);
   const pointChallenges = (snapshot?.challenges ?? []).filter((challenge) => challenge.status === 'available' && isPointChallenge(challenge));
+  const deckChallenges = useMemo(() => (snapshot?.challenges ?? []).filter((challenge) => !isPointChallenge(challenge)), [snapshot?.challenges]);
+  const anywhereAvailableCount = deckChallenges.filter((challenge) => challenge.status === 'available').length;
+  // Pure pin sets have no deck at all; mixed sets keep it for the anywhere cards.
+  const showDeck = !isPointMode || deckChallenges.length > 0;
+  const teamPoints = snapshot?.teamResources[team?.id ?? '']?.points ?? 0;
   const selectedPointChallenge = pointChallenges.find((challenge) => challenge.id === selectedPointChallengeId) ?? null;
   const selectedPointLocation = selectedPointChallenge ? getPointLocation(selectedPointChallenge) : null;
   const selectedPointDistance = currentPoint && selectedPointLocation
@@ -652,12 +658,14 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
         return null;
       }
 
+      // Anywhere cards in Point Challenge games only record location, so a GPS failure must not block them.
+      const gpsIsOptional = isPointMode && !isPointChallenge(challenge);
       const attemptCapture = async (gpsCapturedAtOverride?: string) => {
-        const gps = gpsPayload ?? await refreshLocation();
+        const gps = gpsPayload ?? (gpsIsOptional ? await refreshLocation().catch(() => null) : await refreshLocation());
         const response = await completeChallenge(
           challengeId,
           {
-            gps: gpsCapturedAtOverride ? { ...gps, capturedAt: gpsCapturedAtOverride } : gps,
+            gps: gps && gpsCapturedAtOverride ? { ...gps, capturedAt: gpsCapturedAtOverride } : gps,
             targetZoneId,
           },
           idempotencyKey,
@@ -868,10 +876,15 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 ) : null}
                 {team ? (
                   <span className="rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] backdrop-blur-sm">
-                    {controlledZoneCount} {controlledZoneCount === 1 ? 'zone' : 'zones'}
+                    {isPointMode
+                      ? teamPoints + ' ' + (teamPoints === 1 ? 'pt' : 'pts')
+                      : controlledZoneCount + ' ' + (controlledZoneCount === 1 ? 'zone' : 'zones')}
                   </span>
                 ) : null}
               </div>
+              {isPointMode && snapshot ? (
+                <PointModeLegend pinCount={pointChallenges.length} anywhereCount={anywhereAvailableCount} showAnywhere={showDeck} />
+              ) : null}
               {currentZone ? (
                 <span className="inline-flex max-w-full rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] backdrop-blur-sm">
                   <span className="truncate">{currentZone.name}</span>
@@ -912,9 +925,18 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               />
             </div>
             <div className="grid gap-3 lg:min-w-[23rem]">
-              <StatusCard label={snapshot?.game.modeKey === 'point_challenge' ? 'Points' : 'Controlled'} value={String(snapshot?.game.modeKey === 'point_challenge' ? (snapshot.teamResources[snapshot.team?.id ?? '']?.points ?? 0) : controlledZoneCount)} />
-              <StatusCard label="Deck" value={String(challengeCounts.available)} />
-              <StatusCard label="Version" value={String(snapshot?.game.stateVersion ?? 0)} />
+              <StatusCard label={isPointMode ? 'Points' : 'Controlled'} value={String(isPointMode ? teamPoints : controlledZoneCount)} />
+              {isPointMode ? (
+                <>
+                  <StatusCard label="Pinned on map" value={String(pointChallenges.length)} />
+                  {showDeck ? <StatusCard label="Anywhere cards" value={String(anywhereAvailableCount)} /> : null}
+                </>
+              ) : (
+                <>
+                  <StatusCard label="Deck" value={String(challengeCounts.available)} />
+                  <StatusCard label="Version" value={String(snapshot?.game.stateVersion ?? 0)} />
+                </>
+              )}
             </div>
           </div>
 
@@ -948,13 +970,13 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           ) : null}
 
           {/* Desktop: full section with chrome */}
-          {snapshot && snapshot.game.status !== 'paused' ? (
+          {snapshot && snapshot.game.status !== 'paused' && showDeck ? (
             <section className="hidden rounded-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8]/96 p-4 shadow-[0_22px_60px_rgba(46,58,62,0.18)] backdrop-blur-sm lg:block lg:p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">Field Deck</p>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">{isPointMode ? 'Anywhere Cards' : 'Field Deck'}</p>
                   <p className="mt-2 text-sm leading-6 text-[#44545c]">
-                    {challengeProgressLabel}
+                    {isPointMode ? 'Do these wherever you are. Pinned challenges wait on the map. ' + challengeProgressLabel + '.' : challengeProgressLabel}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -986,7 +1008,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 <ChallengeDeck
                   allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones === true}
                   animatedChallengeIds={animatedChallengeIds}
-                  challenges={snapshot.challenges}
+                  challenges={deckChallenges}
+                  variant={isPointMode ? 'anywhere' : 'zones'}
                   rerollState={snapshot.challengeReroll}
                   teamId={snapshot.team?.id ?? null}
                   completedCards={completedCards}
@@ -1012,7 +1035,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       </div>
 
       {/* Mobile: card fan peek → swipe up to open deck */}
-      {snapshot && snapshot.game.status !== 'paused' ? (
+      {snapshot && snapshot.game.status !== 'paused' && showDeck ? (
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 lg:hidden">
           <div
             className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#f3e2d8]/92 via-[#f3e2d8]/72 to-transparent"
@@ -1037,7 +1060,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
             <ChallengeDeck
               allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones === true}
               animatedChallengeIds={animatedChallengeIds}
-              challenges={snapshot.challenges}
+              challenges={deckChallenges}
+              variant={isPointMode ? 'anywhere' : 'zones'}
               rerollState={snapshot.challengeReroll}
               teamId={snapshot.team?.id ?? null}
               completedCards={completedCards}
@@ -1261,6 +1285,23 @@ function Toast({ tone, title, body, accentColor }: ToastMessage) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function PointModeLegend({ pinCount, anywhereCount, showAnywhere }: { pinCount: number; anywhereCount: number; showAnywhere: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#24343a]">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 backdrop-blur-sm">
+        <span className="h-2.5 w-2.5 rotate-45 rounded-[50%_50%_50%_12%] bg-[#d97a37]" />
+        {pinCount} on map
+      </span>
+      {showAnywhere ? (
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 backdrop-blur-sm">
+          <span className="h-2.5 w-2 rounded-[2px] border border-[#647d74] bg-[#fff8eb]" />
+          {anywhereCount} anywhere
+        </span>
+      ) : null}
     </div>
   );
 }

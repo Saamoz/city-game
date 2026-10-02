@@ -43,6 +43,8 @@ interface ChallengeDeckProps {
   isActionPending(actionKey: string): boolean;
   isPeeking: boolean;
   onOpen(): void;
+  // 'anywhere' = Point Challenge games: cards need no zone and complete wherever the team is.
+  variant?: 'zones' | 'anywhere';
 }
 
 interface DragStateRefs {
@@ -75,7 +77,9 @@ export function ChallengeDeck({
   isActionPending,
   isPeeking,
   onOpen,
+  variant = 'zones',
 }: ChallengeDeckProps) {
+  const isAnywhere = variant === 'anywhere';
   const availableChallenges = [...challenges]
     .filter((challenge) => challenge.status === 'available')
     .sort(compareChallengesForDeck);
@@ -91,7 +95,7 @@ export function ChallengeDeck({
   const [exitingChallenges, setExitingChallenges] = useState<ExitingChallengeCard[]>([]);
 
   const currentZone = currentZoneId ? zones.find((zone) => zone.id === currentZoneId) ?? null : null;
-  const isZoneClaimBlocked = !allowReclaimZones && Boolean(currentZone?.ownerTeamId);
+  const isZoneClaimBlocked = !isAnywhere && !allowReclaimZones && Boolean(currentZone?.ownerTeamId);
   const detailChallenge = challenges.find((challenge) => challenge.id === detailChallengeId) ?? null;
   const availableChallengeKey = availableChallenges.map((challenge) => challenge.id).join('|');
   const renderedChallenges = buildRenderedChallengeCards(availableChallenges, exitingChallenges);
@@ -144,7 +148,9 @@ export function ChallengeDeck({
             {progressLabel}
           </p>
           <span className={locationPillClassName(locationStatus)}>
-            {currentZoneName
+            {isAnywhere
+              ? (locationStatus === 'live' ? 'GPS live' : locationStatus === 'requesting' ? 'Reading GPS' : 'GPS off · still playable')
+              : currentZoneName
               ? currentZoneName
               : locationStatus === 'live'
                 ? 'Zone unresolved'
@@ -252,11 +258,12 @@ export function ChallengeDeck({
                   {isPeeking && index === 0 ? (
                     <div className="flex w-full items-center justify-center">
                       <h3 className="font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#1f2a2f]">
-                        Challenge Deck
+                        {isAnywhere ? 'Anywhere Cards' : 'Challenge Deck'}
                       </h3>
                     </div>
                   ) : (
                     <>
+                      {isAnywhere ? <AnywhereTag challenge={challenge} /> : null}
                       <div className="flex items-start justify-between gap-2">
                         <h3
                           className="min-w-0 font-[Georgia,Times_New_Roman,serif] text-base lg:text-lg font-semibold leading-snug text-[#1f2a2f]"
@@ -300,7 +307,7 @@ export function ChallengeDeck({
 
                   <div className="mt-3 border-t border-[#d8c8a3]/55 pt-3">
                     <p className="hidden lg:block text-[11px] uppercase tracking-[0.18em] text-[#7d6f55]">
-                      {currentZoneName ?? 'No zone'}
+                      {isAnywhere ? 'Do it wherever you are' : (currentZoneName ?? 'No zone')}
                     </p>
 
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -329,14 +336,14 @@ export function ChallengeDeck({
                           <button
                             className="w-full rounded-2xl border border-[#8d2727] bg-[#b83a31] px-3 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#fff6ef] transition hover:bg-[#9e3028] disabled:cursor-not-allowed disabled:opacity-60"
                             data-deck-interactive="true"
-                            disabled={capturePending || locationStatus === 'unsupported' || locationStatus === 'requesting'}
+                            disabled={capturePending || (!isAnywhere && (locationStatus === 'unsupported' || locationStatus === 'requesting'))}
                             onClick={() => {
                               onCaptureChallenge(challenge.id, null);
                               setConfirmChallengeId(null);
                             }}
                             type="button"
                           >
-                            {capturePending ? 'Claiming…' : 'Confirm'}
+                            {capturePending ? (isAnywhere ? 'Completing…' : 'Claiming…') : (isAnywhere ? 'We did it' : 'Confirm')}
                           </button>
                           <button
                             className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#efe5cf] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#5d4d33] transition hover:bg-[#e6d8bc]"
@@ -354,11 +361,11 @@ export function ChallengeDeck({
                             isSelected ? '' : 'invisible pointer-events-none',
                           ].join(' ')}
                           data-deck-interactive="true"
-                          disabled={capturePending || locationStatus === 'unsupported' || locationStatus === 'requesting'}
+                          disabled={capturePending || (!isAnywhere && (locationStatus === 'unsupported' || locationStatus === 'requesting'))}
                           onClick={() => setConfirmChallengeId(challenge.id)}
                           type="button"
                         >
-                          Claim
+                          {isAnywhere ? 'Complete' : 'Claim'}
                         </button>
                       )}
                     </div>
@@ -441,6 +448,7 @@ export function ChallengeDeck({
           >
             <div className="flex items-start justify-between gap-4">
               <div>
+                {isAnywhere ? <AnywhereTag challenge={detailChallenge} /> : null}
                 <h3 className="font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#1f2a2f]">
                   {detailChallenge.title}
                 </h3>
@@ -630,6 +638,21 @@ function locationPillClassName(status: GeolocationStatus): string {
   return 'rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ' + tone;
 }
 
+
+function AnywhereTag({ challenge }: { challenge: Challenge }) {
+  const hint = getConfigString(challenge, 'location_hint');
+  const points = typeof challenge.scoring?.points === 'number' ? challenge.scoring.points : null;
+  return (
+    <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-[#647d74]">
+      <svg aria-hidden="true" className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="2" />
+        <path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+      <span className="truncate">{hint ?? 'Anywhere'}</span>
+      {points !== null ? <span className="shrink-0 text-[#936718]">· {points} {points === 1 ? 'pt' : 'pts'}</span> : null}
+    </p>
+  );
+}
 
 function getShortDescription(challenge: Challenge): string {
   const configured = getConfigString(challenge, 'short_description');

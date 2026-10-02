@@ -226,14 +226,11 @@ export async function cloneChallengeSetToGame(
   if (items.length === 0) {
     return 0;
   }
-  if (items.some((item) => getLocationMode(item) !== challengeSet.locationMode)) {
+  if (items.some((item) => !isPlacementAllowedInSet(challengeSet.locationMode, getLocationMode(item)))) {
     throw new AppError(errorCodes.validationError, { message: 'Every challenge item must match its challenge set placement mode.' });
   }
   if (modeKey === 'point_challenge' && challengeSet.locationMode !== 'point') {
     throw new AppError(errorCodes.validationError, { message: 'Point Challenge games require a point-linked challenge set.' });
-  }
-  if (modeKey === 'point_challenge' && items.some((item) => !item.mapPoint)) {
-    throw new AppError(errorCodes.validationError, { message: 'Point Challenge games require every challenge to have a map point.' });
   }
 
   const shuffledItems = shuffleChallengeSetItems(items);
@@ -349,9 +346,14 @@ function buildPersistedConfig(config: JsonObject, mapZoneId: string | null, mapP
   return nextConfig;
 }
 
+// Point-linked sets mix pinned items with "anywhere" items that have no placement.
+function isPlacementAllowedInSet(setMode: 'portable' | 'zone' | 'point', itemMode: 'portable' | 'zone' | 'point'): boolean {
+  return setMode === 'point' ? itemMode !== 'zone' : itemMode === setMode;
+}
+
 function assertPlacementMatchesSet(mode: 'portable' | 'zone' | 'point', mapZoneId: string | null, mapPoint: GeoJsonPoint | null): void {
-  const valid = mode === 'portable' ? !mapZoneId && !mapPoint : mode === 'zone' ? Boolean(mapZoneId) && !mapPoint : Boolean(mapPoint) && !mapZoneId;
-  if (!valid) throw new AppError(errorCodes.validationError, { message: mode === 'portable' ? 'Portable challenge sets cannot contain placed items.' : mode === 'zone' ? 'Every item in a zone-linked set requires a source zone.' : 'Every item in a point-linked set requires a source point.' });
+  if (mapZoneId && mapPoint) return; // assertPlacementIsValid reports this case.
+  if (!isPlacementAllowedInSet(mode, getLocationMode({ mapZoneId, mapPoint }))) throw new AppError(errorCodes.validationError, { message: mode === 'portable' ? 'Portable challenge sets cannot contain placed items.' : mode === 'zone' ? 'Every item in a zone-linked set requires a source zone.' : 'Point-linked sets accept pinned points or anywhere challenges, not zones.' });
 }
 
 async function assertPlacementIsValid(

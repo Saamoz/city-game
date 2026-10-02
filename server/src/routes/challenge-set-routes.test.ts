@@ -128,6 +128,37 @@ describe('challenge set routes', () => {
     expect(runtimeChallenges).toHaveLength(4);
     expect(runtimeChallenges.every((challenge) => challenge.isDeckActive && challenge.zoneId === null && (challenge.config as { location_mode?: string }).location_mode === 'point')).toBe(true);
   });
+
+  it('mixes pinned and anywhere items in a point-linked set: pins go on the map, anywhere items form the deck', async () => {
+    app = await createChallengeSetTestApp(testDatabase);
+    const authored = await seedAuthoredMap(app);
+    const setResponse = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets', headers: idempotencyHeaders('mixed-set'), payload: { name: 'Mixed Trail', locationMode: 'point' } });
+    const challengeSetId = setResponse.json().challengeSet.id as string;
+    for (let index = 0; index < 2; index += 1) {
+      const response = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets/' + challengeSetId + '/items', headers: idempotencyHeaders('mixed-pin-' + index), payload: { title: 'Pin ' + index, description: 'Visit this point.', mapPoint: { type: 'Point', coordinates: [-79.381 + index * 0.001, 43.647] }, sortOrder: index, metadata: { sourceMapId: authored.mapId } } });
+      expect(response.statusCode).toBe(201);
+    }
+    for (let index = 0; index < 4; index += 1) {
+      const response = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets/' + challengeSetId + '/items', headers: idempotencyHeaders('mixed-anywhere-' + index), payload: { title: 'Anywhere ' + index, description: 'Do this anywhere.', config: { location_hint: 'Any park' }, sortOrder: 2 + index } });
+      expect(response.statusCode).toBe(201);
+      expect(response.json().item.config.location_mode).toBe('portable');
+    }
+    const zoneItemResponse = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets/' + challengeSetId + '/items', headers: idempotencyHeaders('mixed-zone'), payload: { title: 'Zone', description: 'Zone item.', mapZoneId: authored.mapZoneId, metadata: { sourceMapId: authored.mapId } } });
+    expect(zoneItemResponse.statusCode).toBe(400);
+    const gameResponse = await app.inject({ method: 'POST', url: '/api/v1/game', headers: adminHeaders('mixed-game'), payload: { name: 'Mixed Game', modeKey: 'point_challenge', mapId: authored.mapId, challengeSetId, settings: { active_challenge_count: 2 } } });
+    const gameId = gameResponse.json().game.id as string;
+    const startResponse = await app.inject({ method: 'POST', url: '/api/v1/game/' + gameId + '/start', headers: adminHeaders('start-mixed-game') });
+    expect(startResponse.statusCode).toBe(200);
+    const runtimeChallenges = await testDatabase.db.select().from(challenges).where(eq(challenges.gameId, gameId));
+    expect(runtimeChallenges).toHaveLength(6);
+    const pins = runtimeChallenges.filter((challenge) => (challenge.config as { location_mode?: string }).location_mode === 'point');
+    const anywhere = runtimeChallenges.filter((challenge) => (challenge.config as { portable?: boolean }).portable === true);
+    expect(pins).toHaveLength(2);
+    expect(pins.every((challenge) => challenge.isDeckActive)).toBe(true);
+    expect(anywhere).toHaveLength(4);
+    expect(anywhere.filter((challenge) => challenge.isDeckActive)).toHaveLength(2);
+    expect(anywhere.every((challenge) => (challenge.config as { location_hint?: string }).location_hint === 'Any park')).toBe(true);
+  });
 });
 
 async function seedAuthoredMap(app: FastifyInstance) {

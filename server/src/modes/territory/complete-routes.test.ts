@@ -266,6 +266,26 @@ describe('territory complete route', () => {
     expect(await testDatabase.db.select().from(zones).where(eq(zones.gameId, GAME_ID))).toHaveLength(0);
   });
 
+  it('completes an anywhere challenge in point-challenge mode without zones and deals the next card', async () => {
+    await seedGame({ modeKey: 'point_challenge' }); await seedTeam(); await seedPlayer({ sessionToken: 'anywhere-session' });
+    await seedChallenge({ zoneId: null, isDeckActive: true, config: { portable: true, location_mode: 'portable', location_hint: 'Any cafe' }, scoring: { points: 3 } });
+    await testDatabase.db.insert(challenges).values(createTestChallenge({ id: NEXT_CHALLENGE_ID, gameId: GAME_ID, zoneId: null, isDeckActive: false, sortOrder: 1, config: { portable: true, location_mode: 'portable' } }));
+    app = await createTestApp({ db: testDatabase.db });
+    const response = await completeRequest({ sessionToken: 'anywhere-session', actionId: 'anywhere-complete', payload: { gps: validGpsPayload() } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ challenge: { status: 'completed', zoneId: null }, zone: null, resourcesAwarded: { points: 3 }, activatedChallenge: { id: NEXT_CHALLENGE_ID } });
+  });
+
+  it('does not deal an extra deck card when a pinned point challenge is completed', async () => {
+    await seedGame({ modeKey: 'point_challenge' }); await seedTeam(); await seedPlayer({ sessionToken: 'pin-deck-session' });
+    await seedChallenge({ zoneId: null, isDeckActive: true, config: { portable: false, location_mode: 'point', source_map_point: { type: 'Point', coordinates: [-97.1384, 49.8951] }, point_radius_meters: 25 } });
+    await testDatabase.db.insert(challenges).values(createTestChallenge({ id: NEXT_CHALLENGE_ID, gameId: GAME_ID, zoneId: null, isDeckActive: false, sortOrder: 1, config: { portable: true, location_mode: 'portable' } }));
+    app = await createTestApp({ db: testDatabase.db });
+    const response = await completeRequest({ sessionToken: 'pin-deck-session', actionId: 'pin-deck-complete', payload: { gps: validGpsPayload() } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().activatedChallenge).toBeNull();
+  });
+
   it('rejects a point-linked challenge outside its configured radius', async () => {
     await seedGame(); await seedTeam(); await seedPlayer({ sessionToken: 'point-far-session' }); await seedZone();
     await seedChallenge({ zoneId: null, config: { portable: false, location_mode: 'point', source_map_point: { type: 'Point', coordinates: [-97.12, 49.905] }, point_radius_meters: 20 } });
