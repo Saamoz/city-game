@@ -248,7 +248,7 @@ export function FeedOverlay({ entries, isLoading, errorMessage, onClose, onFocus
   );
 }
 
-function OverlayShell({ title, onClose, children }: { title: string; onClose(): void; children: ReactNode }) {
+export function OverlayShell({ title, onClose, children }: { title: string; onClose(): void; children: ReactNode }) {
   const dragRefs = useOverlayDragRefs();
   const closeTimerRef = useRef<number | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
@@ -438,6 +438,9 @@ function formatFeedEntry(
       const zone = asNamedObject(event.meta.zone);
       if (zone) return null;
       const teamName = event.actorTeamId ? teamNameById.get(event.actorTeamId) ?? 'A team' : 'A team';
+      if (event.meta.judged === true) {
+        return { id: event.id, title: `${teamName} submitted ${challenge?.name ?? 'a challenge'} for judging`, body: 'Scored by the judges after the game.', createdAt: event.createdAt, accentColor: event.actorTeamId ? teamColorById.get(event.actorTeamId) : undefined };
+      }
       return { id: event.id, title: `${teamName} completed ${challenge?.name ?? 'a challenge'}`, body: null, createdAt: event.createdAt, accentColor: event.actorTeamId ? teamColorById.get(event.actorTeamId) : undefined };
     }
     case 'CHALLENGE_REROLL_STATE_CHANGED': {

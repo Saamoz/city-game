@@ -118,6 +118,7 @@ export type GameSettings = JsonObject & {
   allow_reclaim_zones?: boolean;
   feature_results_on_home?: boolean;
   reroll_completion_target?: number;
+  judging_published_at?: IsoTimestamp; // set when judges publish scores for judged challenges
 };
 
 export type WinCondition =
@@ -450,4 +451,33 @@ export interface GameRecap {
   paths: TeamRecapPath[];
   moments: GameRecapMoment[];
   events: GameEventRecord[];
+  judging: GameJudgingSummary;
+}
+
+// Judged challenges stay open to every team; points are awarded by judges after the game.
+export interface GameJudgingSummary {
+  status: 'none' | 'pending' | 'published';
+  submissionCount: number;
+  publishedAt: IsoTimestamp | null;
+}
+
+export interface JudgingSubmission {
+  claimId: Uuid;
+  teamId: Uuid;
+  playerId: Uuid;
+  submittedAt: IsoTimestamp;
+  note: string | null;
+  points: number | null;
+}
+
+export interface JudgingChallenge {
+  challenge: Challenge;
+  maxPoints: number | null;
+  submissions: JudgingSubmission[];
+}
+
+export interface GameJudgingSheet {
+  gameId: Uuid;
+  publishedAt: IsoTimestamp | null;
+  challenges: JudgingChallenge[];
 }

@@ -18,6 +18,6 @@ export const GAME_MODE_KEYS = ['territory', 'point_challenge'] as const;
 export const GAME_STATUS_VALUES = ['setup', 'active', 'paused', 'completed'] as const;
 export const CHALLENGE_KIND_VALUES = ['visit', 'text', 'photo', 'quiz', 'multi_step', 'custom'] as const;
 export const CHALLENGE_STATUS_VALUES = ['available', 'claimed', 'completed', 'skipped'] as const;
-export const CLAIM_STATUS_VALUES = ['active', 'completed', 'released', 'expired'] as const;
+export const CLAIM_STATUS_VALUES = ['active', 'completed', 'released', 'expired', 'submitted'] as const;
 export const ANNOTATION_VISIBILITY_VALUES = ['all', 'team'] as const;
 export const PLAYER_LOCATION_SOURCE_VALUES = ['browser'] as const;

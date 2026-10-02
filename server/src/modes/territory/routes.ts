@@ -30,7 +30,7 @@ const completeChallengeBodySchema = {
   additionalProperties: false,
   properties: {
     submission: {},
-    gps: gpsPayloadSchema,
+    gps: { anyOf: [gpsPayloadSchema, { type: 'null' }] },
     targetZoneId: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
   },
 } as const;
@@ -422,7 +422,7 @@ function hasGpsPayload(body: unknown): boolean {
     return false;
   }
 
-  return 'gps' in body || 'playerLocation' in body || ('lat' in body && 'lng' in body && 'capturedAt' in body);
+  return ('gps' in body && (body as { gps?: unknown }).gps != null) || 'playerLocation' in body || ('lat' in body && 'lng' in body && 'capturedAt' in body);
 }
 
 function isTerritoryPostCommitData(value: unknown): value is TerritoryPostCommitData {

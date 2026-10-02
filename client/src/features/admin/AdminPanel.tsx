@@ -37,6 +37,7 @@ import {
   updateGameDefinition,
   updateTeamDefinition,
 } from '../../lib/api';
+import { JudgingPanel } from './JudgingPanel';
 
 interface AdminPanelProps {
   initialGameId: string | null;
@@ -1024,6 +1025,10 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
               </div>
             </PanelCard>
           </div>
+
+          {currentGame && currentGame.status !== 'setup' ? (
+            <JudgingPanel game={currentGame} teams={teams} onPublished={() => { void refreshCurrentGame(); }} />
+          ) : null}
 
           <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <PanelCard title="Overrides" subtitle="Operational fixes. These write straight into live game state and broadcast to connected clients.">

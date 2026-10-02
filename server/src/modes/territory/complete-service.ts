@@ -4,6 +4,7 @@ import {
   DEFAULT_POINT_CHALLENGE_RADIUS_METERS,
   errorCodes,
   eventTypes,
+  isJudgedChallengeConfig,
   type Challenge,
   type ChallengeClaim,
   type ChallengeRerollState,
@@ -30,7 +31,7 @@ import {
   isPointWithinZoneBuffer,
 } from '../../services/spatial-service.js';
 import { activateNextQueuedChallenge } from './deck-service.js';
-import { advanceChallengeRerollCharge } from './reroll-service.js';
+import { advanceChallengeRerollCharge, getChallengeRerollState } from './reroll-service.js';
 import { isPortableChallengeConfig, lockChallenge, serializeChallenge, serializeClaim } from './claim-service.js';
 
 const ACTIVE_CLAIM_STATUS = 'active';
@@ -89,6 +90,19 @@ export async function completeChallenge(
   if (lockedChallenge.gameId !== input.gameId) {
     throw new AppError(errorCodes.validationError, {
       message: 'Challenge not found for the active player game.',
+    });
+  }
+
+  if (isJudgedChallengeConfig(lockedChallenge.config)) {
+    return submitJudgedChallenge(db, {
+      challenge: lockedChallenge,
+      gameId: input.gameId,
+      playerId: input.playerId,
+      teamId: input.teamId,
+      submission: input.submission ?? null,
+      gpsPayload: input.gpsPayload ?? null,
+      now,
+      settings: game.settings as GameSettings,
     });
   }
 
@@ -228,6 +242,47 @@ async function completePointChallengeDirectly(db: DatabaseClient, input: { chall
   if (!updatedClaim || !updatedChallenge) throw new AppError(errorCodes.validationError, { message: 'Challenge completion failed.' });
   return finishChallengeCompletion(db, { gameId: input.gameId, playerId: input.playerId, teamId: input.teamId, now: input.now, lockedChallenge: input.challenge, updatedChallenge, updatedClaim, zoneBefore, settings: input.settings });
 }
+// Judged challenges never complete: each team files one 'submitted' claim, the challenge stays open for
+// everyone else, and no points move until judges publish scores (judging-service).
+async function submitJudgedChallenge(db: DatabaseClient, input: { challenge: typeof challenges.$inferSelect; gameId: string; playerId: string; teamId: string; submission: JsonValue | null; gpsPayload: GpsPayload | null; now: Date; settings: GameSettings }): Promise<CompleteChallengeSuccessResult> {
+  if (input.challenge.status !== 'available') throw new AppError(errorCodes.challengeNotAvailable);
+  const [existing] = await db.select({ id: challengeClaims.id }).from(challengeClaims)
+    .where(and(eq(challengeClaims.challengeId, input.challenge.id), eq(challengeClaims.teamId, input.teamId), eq(challengeClaims.status, 'submitted'))).limit(1);
+  if (existing) throw new AppError(errorCodes.challengeNotAvailable, { message: 'Your team already submitted this challenge for judging.', details: { challengeId: input.challenge.id } });
+
+  const point = getPointLocation(input.challenge.config);
+  if (point) {
+    if (!input.gpsPayload) throw new AppError(errorCodes.validationError, { message: 'GPS location is required for this challenge.' });
+    if (input.settings.require_gps_accuracy) assertGpsAccuracy(null, input.gpsPayload.gpsErrorMeters);
+    const radiusMeters = getPointRadius(input.challenge.config);
+    const distanceMeters = pointDistance([input.gpsPayload.lng, input.gpsPayload.lat], [point.coordinates[0] as number, point.coordinates[1] as number]);
+    if (distanceMeters > radiusMeters) throw new AppError(errorCodes.outsideZone, { message: 'Move closer to this challenge location.', details: { challengeId: input.challenge.id, distanceMeters, radiusMeters } });
+  }
+
+  const locationAtClaim = input.gpsPayload ? sql`ST_SetSRID(ST_MakePoint(${input.gpsPayload.lng}, ${input.gpsPayload.lat}), 4326)` : null;
+  const [insertedClaim] = await db.insert(challengeClaims).values({ challengeId: input.challenge.id, gameId: input.gameId, teamId: input.teamId, playerId: input.playerId, status: 'submitted', expiresAt: input.now, completedAt: input.now, submission: input.submission, locationAtClaim }).returning();
+  if (!insertedClaim) throw new AppError(errorCodes.validationError, { message: 'Challenge submission failed.' });
+
+  // The note is for judges only; everything broadcast to players omits it.
+  const claim = { ...serializeClaim(insertedClaim), submission: null };
+  const challenge = serializeChallenge(input.challenge);
+  const { stateVersion } = await appendEvents(db, {
+    gameId: input.gameId,
+    events: [{
+      eventType: eventTypes.challengeCompleted,
+      entityType: 'challenge_claim',
+      entityId: insertedClaim.id,
+      actorType: 'player',
+      actorId: input.playerId,
+      actorTeamId: input.teamId,
+      afterState: claim as unknown as JsonValue,
+      meta: { challenge, claim, zone: null, resourcesAwarded: {}, judged: true } as unknown as JsonObject,
+    }],
+  });
+  const rerollState = await getChallengeRerollState(db, input.gameId);
+  return { kind: 'completed', gameId: input.gameId, stateVersion, challenge, claim, zone: null, activatedChallenge: null, resourcesAwarded: {}, rerollState, resourceEntries: [] };
+}
+
 // Point Challenge games have no zones, so "anywhere" cards complete on the team's word and only record where they were.
 async function completeAnywhereChallengeDirectly(db: DatabaseClient, input: { challenge: typeof challenges.$inferSelect; gameId: string; playerId: string; teamId: string; submission: JsonValue | null; gpsPayload: GpsPayload | null; now: Date; settings: GameSettings }): Promise<CompleteChallengeSuccessResult> {
   const locationAtClaim = input.gpsPayload ? sql`ST_SetSRID(ST_MakePoint(${input.gpsPayload.lng}, ${input.gpsPayload.lat}), 4326)` : null;

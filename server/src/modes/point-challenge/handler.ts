@@ -1,6 +1,6 @@
-import { asc, eq } from 'drizzle-orm';
-import type { ScoreboardEntry, Team } from '@city-game/shared';
-import { challenges, teams } from '../../db/schema.js';
+import { and, asc, eq } from 'drizzle-orm';
+import { isJudgedChallengeConfig, type ScoreboardEntry, type Team } from '@city-game/shared';
+import { challengeClaims, challenges, teams } from '../../db/schema.js';
 import { getAllBalances } from '../../services/resource-service.js';
 import type { ModeHandler } from '../types.js';
 import { createTerritoryModeHandler } from '../territory/handler.js';
@@ -26,9 +26,23 @@ export function createPointChallengeModeHandler(): ModeHandler {
       })));
     },
     async checkWinCondition({ db, game }) {
-      const rows = await db.select({ status: challenges.status }).from(challenges).where(eq(challenges.gameId, game.id));
-      if (rows.length === 0 || rows.some((row) => row.status === 'available' || row.status === 'claimed')) {
+      const [rows, teamRows, submissions] = await Promise.all([
+        db.select({ id: challenges.id, status: challenges.status, config: challenges.config }).from(challenges).where(eq(challenges.gameId, game.id)),
+        db.select({ id: teams.id }).from(teams).where(eq(teams.gameId, game.id)),
+        db.select({ challengeId: challengeClaims.challengeId }).from(challengeClaims).where(and(eq(challengeClaims.gameId, game.id), eq(challengeClaims.status, 'submitted'))),
+      ]);
+      // Judged challenges never complete; they are finished once every team has submitted them.
+      const submissionCounts = new Map<string, number>();
+      for (const row of submissions) submissionCounts.set(row.challengeId, (submissionCounts.get(row.challengeId) ?? 0) + 1);
+      const isOpen = (row: (typeof rows)[number]) => isJudgedChallengeConfig(row.config)
+        ? row.status === 'available' && (submissionCounts.get(row.id) ?? 0) < teamRows.length
+        : row.status === 'available' || row.status === 'claimed';
+      if (rows.length === 0 || rows.some(isOpen)) {
         return { hasWinner: false };
+      }
+      // Judged points arrive after the game, so no winner can be named yet.
+      if (rows.some((row) => isJudgedChallengeConfig(row.config))) {
+        return { hasWinner: true, winnerTeamId: null, reason: 'awaiting_judging' };
       }
       const scoreboard = await this.computeScoreboard({ db, game });
       const winningPoints = scoreboard[0]?.resources.points ?? 0;

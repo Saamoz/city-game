@@ -58,6 +58,8 @@ interface ItemFormState {
   pointValue: string;
   placement: ItemPlacement;
   locationHint: string;
+  scoringMode: 'instant' | 'judged';
+  judgedMaxPoints: string;
 }
 
 // Within a point-linked set, each item is either pinned to the map or doable anywhere.
@@ -88,6 +90,8 @@ const INITIAL_ITEM_FORM: ItemFormState = {
   pointValue: '1',
   placement: 'pinned',
   locationHint: '',
+  scoringMode: 'instant',
+  judgedMaxPoints: '',
 };
 
 export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps) {
@@ -358,6 +362,8 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
     }
 
     const locationHint = itemForm.locationHint.trim();
+    const isJudged = setForm.locationMode === 'point' && itemForm.scoringMode === 'judged';
+    const judgedMaxPoints = Math.floor(Number(itemForm.judgedMaxPoints));
     const payload = {
       mapZoneId: setForm.locationMode === 'zone' ? itemForm.mapZoneId : null,
       mapPoint: isPinned ? itemForm.mapPoint : null,
@@ -368,8 +374,9 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
         ...(longDescription ? { long_description: longDescription } : {}),
         ...(isPinned ? { point_radius_meters: Math.max(1, Number(itemForm.pointRadiusMeters) || 40) } : {}),
         ...(!isPinned && setForm.locationMode !== 'zone' && locationHint ? { location_hint: locationHint } : {}),
+        ...(isJudged ? { judged: true, ...(judgedMaxPoints > 0 ? { judged_max_points: judgedMaxPoints } : {}) } : {}),
       } satisfies JsonObject,
-      scoring: setForm.locationMode === 'point' ? { points: Math.max(0, Number(itemForm.pointValue) || 1) } : {} as Record<string, number>,
+      scoring: setForm.locationMode === 'point' && !isJudged ? { points: Math.max(0, Number(itemForm.pointValue) || 1) } : {} as Record<string, number>,
       difficulty: itemForm.difficulty || null,
       sortOrder: selectedItem ? selectedItem.sortOrder : items.length,
       metadata: ((setForm.locationMode === 'zone' || isPinned) && itemForm.mapId ? { sourceMapId: itemForm.mapId } : {}) as JsonObject,
@@ -722,8 +729,26 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
             ) : null}
 
             {setForm.locationMode === 'point' ? (
+              <div>
+                <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a6a48]">Scoring</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button className={placementClassName(itemForm.scoringMode === 'instant')} onClick={() => setItemForm((current) => ({ ...current, scoringMode: 'instant' }))} type="button">Instant points</button>
+                  <button className={placementClassName(itemForm.scoringMode === 'judged')} onClick={() => setItemForm((current) => ({ ...current, scoringMode: 'judged' }))} type="button">Judged after game</button>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-[#6b777b]">{itemForm.scoringMode === 'judged' ? 'Stays open all game. Every team can submit it once; you award points per team after the game from the admin panel.' : 'The first team to complete it takes the points, and it disappears for everyone.'}</p>
+              </div>
+            ) : null}
+
+            {setForm.locationMode === 'point' && itemForm.scoringMode === 'instant' ? (
               <Field label="Challenge Points">
                 <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a] outline-none focus:border-[#8f7446]" min="0" onChange={(event) => setItemForm((current) => ({ ...current, pointValue: event.target.value }))} type="number" value={itemForm.pointValue} />
+              </Field>
+            ) : null}
+
+            {setForm.locationMode === 'point' && itemForm.scoringMode === 'judged' ? (
+              <Field label="Max Points (optional)">
+                <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a] outline-none focus:border-[#8f7446]" min="1" onChange={(event) => setItemForm((current) => ({ ...current, judgedMaxPoints: event.target.value }))} placeholder="e.g. 10" type="number" value={itemForm.judgedMaxPoints} />
+                <p className="mt-1 text-xs leading-5 text-[#6b777b]">Shown to players as "up to N pts" and to judges as a guide.</p>
               </Field>
             ) : null}
 
@@ -826,19 +851,23 @@ function buildItemForm(item: ChallengeSetItem): ItemFormState {
     pointValue: String(typeof item.scoring?.points === 'number' ? item.scoring.points : 1),
     placement: item.mapPoint ? 'pinned' : 'anywhere',
     locationHint: typeof item.config?.location_hint === 'string' ? item.config.location_hint : '',
+    scoringMode: item.config?.judged === true ? 'judged' : 'instant',
+    judgedMaxPoints: typeof item.config?.judged_max_points === 'number' ? String(item.config.judged_max_points) : '',
   };
 }
 
 function countPlacements(items: ChallengeSetItem[]): string {
   const pinned = items.filter((item) => item.mapPoint).length;
-  return pinned + ' pinned on the map · ' + (items.length - pinned) + ' doable anywhere';
+  const judged = items.filter((item) => item.config?.judged === true).length;
+  return pinned + ' pinned on the map · ' + (items.length - pinned) + ' doable anywhere' + (judged ? ' · ' + judged + ' judged' : '');
 }
 
 function PlacementBadge({ item, setMode }: { item: ChallengeSetItem; setMode: ChallengeSetItemLocationMode }) {
   const hint = typeof item.config?.location_hint === 'string' ? item.config.location_hint : '';
+  const judged = item.config?.judged === true ? <Badge tone="judged">★ Judged</Badge> : null;
   if (setMode === 'zone') return <Badge tone="linked">Zone linked</Badge>;
-  if (setMode === 'point' && item.mapPoint) return <Badge tone="linked">Pinned</Badge>;
-  return <Badge tone="portable">{hint || (setMode === 'point' ? 'Anywhere' : 'Portable')}</Badge>;
+  if (setMode === 'point' && item.mapPoint) return <>{judged}<Badge tone="linked">Pinned</Badge></>;
+  return <>{judged}<Badge tone="portable">{hint || (setMode === 'point' ? 'Anywhere' : 'Portable')}</Badge></>;
 }
 
 function getSourceMapId(item: Pick<ChallengeSetItem, 'metadata'>): string {
@@ -949,8 +978,10 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Badge({ children, tone = 'default' }: { children: ReactNode; tone?: 'default' | 'portable' | 'linked' }) {
-  const className = tone === 'portable'
+function Badge({ children, tone = 'default' }: { children: ReactNode; tone?: 'default' | 'portable' | 'linked' | 'judged' }) {
+  const className = tone === 'judged'
+    ? 'border-[#8f80b8]/60 bg-[#ece6f6] text-[#3f3360]'
+    : tone === 'portable'
     ? 'border-[#9aa5a7]/55 bg-[#e7ecec] text-[#34464d]'
     : tone === 'linked'
       ? 'border-[#8aa58c]/55 bg-[#dfe9dd] text-[#27412d]'

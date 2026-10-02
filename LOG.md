@@ -210,3 +210,14 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Runtime: pins all start active and show as map markers; anywhere items form the deck (`active_challenge_count` cards dealt, refilled on completion). Completing a pin no longer deals an extra deck card.
 - In `point_challenge` games, anywhere cards complete without a zone (`completeAnywhereChallengeDirectly`); GPS is recorded when available but not required, and the client doesn't block on a GPS failure.
 - UI: admin item editor has a Pinned point / Anywhere toggle; game HUD shows "N on map · N anywhere"; the deck is titled "Anywhere Cards" and hidden entirely for pin-only sets.
+
+## Judged Challenges (2026-10-02)
+
+**Why:** some challenges (best photo, funniest video) should be open to every team and scored by judges after the game, not won by the first team to finish.
+
+- Authoring: in point-linked sets an item's Scoring is "Instant points" or "Judged after game" (`config.judged`, optional `config.judged_max_points`, empty `scoring`). Judged items can be pinned or anywhere.
+- Runtime: judged challenges are active from the start (like pins), outside the deck. Completing one inserts a `challenge_claims` row with status `submitted` and never completes the challenge; a partial unique index (`idx_one_judged_submission_per_team`, migration 0014) allows one per team. Notes in `submission.note` are stripped from snapshots, broadcasts and events (judges only).
+- Win check (point mode): judged challenges count as done once every team has submitted. A game with judged challenges ends with `winnerTeamId: null` / reason `awaiting_judging`.
+- Judging: `GET /game/:id/judging`, `PUT /judging/submissions/:claimId {points}` (draft, stored in `judged_points`), `POST /game/:id/judging/publish` (completed games only). Publish writes `judged_award` ledger deltas against what was already awarded, so republishing corrects scores; it sets `settings.judging_published_at`.
+- Recap carries `judging: { status: none|pending|published }`. The results screen shows "Judges are scoring" with standings-before-judging while pending and polls every 20 s.
+- Also fixed: `/challenges/:id/complete` rejected `gps: null`, which broke completing anywhere cards without a GPS fix.

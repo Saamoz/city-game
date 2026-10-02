@@ -8,6 +8,7 @@ import {
   type ChallengeSetItem,
   type ErrorResponse,
   type Game,
+  type GameJudgingSheet,
   type GameRecap,
   type GameEventRecord,
   type GameEventType,
@@ -45,7 +46,7 @@ export class ApiError extends Error {
 }
 
 interface ApiRequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   headers?: HeadersInit;
   idempotent?: boolean;
@@ -176,6 +177,20 @@ export async function listGames(signal?: AbortSignal): Promise<Game[]> {
 export async function getGameRecap(gameId: string, signal?: AbortSignal): Promise<GameRecap> {
   const response = await apiRequest<GameRecapResponse>('/game/' + gameId + '/recap', { signal });
   return response.recap;
+}
+
+export async function getJudgingSheet(gameId: string, signal?: AbortSignal): Promise<GameJudgingSheet> {
+  const response = await apiRequest<{ judging: GameJudgingSheet }>('/game/' + gameId + '/judging', { signal });
+  return response.judging;
+}
+
+export async function setJudgedSubmissionPoints(claimId: string, points: number | null): Promise<void> {
+  await apiRequest<{ ok: true }>('/judging/submissions/' + claimId, { method: 'PUT', body: { points } });
+}
+
+export async function publishJudgedScores(gameId: string): Promise<GameJudgingSheet> {
+  const response = await apiRequest<{ judging: GameJudgingSheet }>('/game/' + gameId + '/judging/publish', { method: 'POST', body: {} });
+  return response.judging;
 }
 
 export async function getPublicGameRecap(gameId: string, signal?: AbortSignal): Promise<GameRecap> {

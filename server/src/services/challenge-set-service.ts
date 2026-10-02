@@ -6,7 +6,7 @@ import type {
   JsonObject,
   ResourceAwardMap,
 } from '@city-game/shared';
-import { errorCodes } from '@city-game/shared';
+import { errorCodes, isJudgedChallengeConfig } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { challengeSetItems, challengeSets, challenges, mapZones, maps, zones } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
@@ -292,11 +292,13 @@ export async function cloneChallengeSetToGame(
     insertedChallengeIds.push(insertedChallenge.id);
   }
 
+  // Pins and judged challenges are open all game; only the rest are dealt from the deck.
+  const isAlwaysActive = (item: ChallengeSetItem) => Boolean(item.mapPoint) || isJudgedChallengeConfig(item.config);
   const pointChallengeIds = shuffledItems
-    .map((item, index) => item.mapPoint ? insertedChallengeIds[index] : null)
+    .map((item, index) => isAlwaysActive(item) ? insertedChallengeIds[index] : null)
     .filter((id): id is string => Boolean(id));
   const deckChallengeIds = shuffledItems
-    .map((item, index) => item.mapPoint ? null : insertedChallengeIds[index])
+    .map((item, index) => isAlwaysActive(item) ? null : insertedChallengeIds[index])
     .filter((id): id is string => Boolean(id))
     .slice(0, Math.max(1, activeChallengeCount));
   const initialActiveIds = [...new Set([...pointChallengeIds, ...deckChallengeIds])];

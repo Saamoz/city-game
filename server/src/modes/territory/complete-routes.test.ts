@@ -276,6 +276,15 @@ describe('territory complete route', () => {
     expect(response.json()).toMatchObject({ challenge: { status: 'completed', zoneId: null }, zone: null, resourcesAwarded: { points: 3 }, activatedChallenge: { id: NEXT_CHALLENGE_ID } });
   });
 
+  it('completes an anywhere challenge with no GPS fix in point-challenge mode', async () => {
+    await seedGame({ modeKey: 'point_challenge' }); await seedTeam(); await seedPlayer({ sessionToken: 'anywhere-nogps-session' });
+    await seedChallenge({ zoneId: null, isDeckActive: true, config: { portable: true, location_mode: 'portable' }, scoring: { points: 2 } });
+    app = await createTestApp({ db: testDatabase.db });
+    const response = await completeRequest({ sessionToken: 'anywhere-nogps-session', actionId: 'anywhere-nogps', payload: { gps: null } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ challenge: { status: 'completed' }, claim: { locationAtClaim: null }, resourcesAwarded: { points: 2 } });
+  });
+
   it('does not deal an extra deck card when a pinned point challenge is completed', async () => {
     await seedGame({ modeKey: 'point_challenge' }); await seedTeam(); await seedPlayer({ sessionToken: 'pin-deck-session' });
     await seedChallenge({ zoneId: null, isDeckActive: true, config: { portable: false, location_mode: 'point', source_map_point: { type: 'Point', coordinates: [-97.1384, 49.8951] }, point_radius_meters: 25 } });

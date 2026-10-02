@@ -166,7 +166,8 @@ function serializeClaimRow(row: typeof challengeClaims.$inferSelect): ChallengeC
     expiresAt: row.expiresAt.toISOString(),
     completedAt: row.completedAt?.toISOString() ?? null,
     releasedAt: row.releasedAt?.toISOString() ?? null,
-    submission: row.submission as ChallengeClaim['submission'],
+    // Judging notes are for judges only.
+    submission: row.status === 'submitted' ? null : row.submission as ChallengeClaim['submission'],
     locationAtClaim: row.locationAtClaim as ChallengeClaim['locationAtClaim'],
     warningSent: row.warningSent,
     createdAt: row.createdAt.toISOString(),

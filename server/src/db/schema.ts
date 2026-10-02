@@ -230,9 +230,14 @@ export const challengeClaims = pgTable(
     submission: jsonb('submission'),
     locationAtClaim: geometryPoint4326('location_at_claim'),
     warningSent: boolean('warning_sent').notNull().default(false),
+    judgedPoints: integer('judged_points'),
+    judgedAt: timestamp('judged_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
+    oneJudgedSubmissionPerTeam: uniqueIndex('idx_one_judged_submission_per_team')
+      .on(table.challengeId, table.teamId)
+      .where(sql`${table.status} = 'submitted'`),
     claimsChallengeIdx: index('idx_claims_challenge').on(table.challengeId, table.status),
     claimsTeamIdx: index('idx_claims_team').on(table.teamId, table.status),
     oneActiveClaimPerChallenge: uniqueIndex('idx_one_active_claim_per_challenge')

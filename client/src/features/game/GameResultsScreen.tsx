@@ -45,6 +45,17 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
     return () => controller.abort();
   }, [game.id, publicAccess]);
 
+  // While judges score judged challenges, keep checking so the final standings appear without a reload.
+  const isAwaitingJudging = recap?.judging?.status === 'pending';
+  useEffect(() => {
+    if (!isAwaitingJudging) return;
+    const controller = new AbortController();
+    const timer = window.setInterval(() => {
+      void (publicAccess ? getPublicGameRecap : getGameRecap)(game.id, controller.signal).then(setRecap).catch(() => {});
+    }, 20_000);
+    return () => { window.clearInterval(timer); controller.abort(); };
+  }, [game.id, isAwaitingJudging, publicAccess]);
+
   useEffect(() => {
     if (!isPlaying || !recap) return;
     let frame = 0;
@@ -86,10 +97,13 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
 
   const activeMoment = recap ? findActiveMoment(recap, progress) : null;
   const spectatorWinner = scoreboard[0]?.team.name ?? null;
-  const title = viewerTeam
+  const title = isAwaitingJudging ? 'Judges are scoring' : viewerTeam
     ? didViewerWin ? (isTie ? "It's a draw!" : 'Victory!') : 'Game over'
     : isTie ? "It's a draw!" : spectatorWinner ? `${spectatorWinner} won!` : 'Game over';
-  const subtitle = viewerTeam
+  const judgedCount = recap?.judging?.submissionCount ?? 0;
+  const subtitle = isAwaitingJudging
+    ? `${judgedCount} judged ${judgedCount === 1 ? 'submission is' : 'submissions are'} being scored. The winner is announced here once the judges publish their scores.`
+    : viewerTeam
     ? didViewerWin
       ? isTie
         ? `${viewerTeam.name} tied for first with ${viewerEntry?.zoneCount ?? 0} ${scoreNoun}.`
@@ -142,7 +156,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
         </>
       ) : (
         <section className="results-atlas-surface absolute inset-0 z-20 overflow-y-auto overscroll-contain px-3 pb-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] sm:px-6 sm:pt-6">
-          {!isTie && (didViewerWin || (!viewerTeam && Boolean(spectatorWinner))) ? <CelebrationSparks /> : null}
+          {!isAwaitingJudging && !isTie && (didViewerWin || (!viewerTeam && Boolean(spectatorWinner))) ? <CelebrationSparks /> : null}
           <div className="relative z-10 mx-auto w-full max-w-4xl pb-4">
             <header className="flex items-center justify-between gap-4 px-1 text-[#304349]">
               <div className="min-w-0">
@@ -162,7 +176,14 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
                   <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#58666a] sm:text-base">{subtitle}</p>
                 </div>
 
-                {scoreboard[0] ? (
+                {isAwaitingJudging ? (
+                  <div className="results-winner-stamp mx-auto mt-6 flex min-h-44 w-full max-w-sm flex-col items-center justify-center px-6 py-5 text-center" style={{ '--winner-color': '#5b4a86' } as CSSProperties}>
+                    <span className="text-2xl text-[#5b4a86]" aria-hidden="true">★</span>
+                    <p className="mt-1 font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#5b4a86]">Awaiting judges</p>
+                    <h2 className="mt-2 max-w-full font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold leading-tight text-[#203239] sm:text-3xl">Winner to be announced</h2>
+                    <p className="mt-2 font-['IBM_Plex_Mono',monospace] text-[10px] uppercase tracking-[0.16em] text-[#667277]">This page updates on its own</p>
+                  </div>
+                ) : scoreboard[0] ? (
                   <div className="results-winner-stamp mx-auto mt-6 flex min-h-44 w-full max-w-sm flex-col items-center justify-center px-6 py-5 text-center" style={{ '--winner-color': scoreboard[0].team.color } as CSSProperties}>
                     <span className="text-2xl text-[#8d7138]" aria-hidden="true">✦</span>
                     <p className="mt-1 font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#7d6738]">{isTie ? 'First-place tie' : 'Winner'}</p>
@@ -177,7 +198,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
                   <div className="flex items-end justify-between gap-3 border-b border-[#8c7a54]/55 pb-2">
                     <div>
                       <p className="font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#866d37]">Score</p>
-                      <h2 className="mt-1 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#293a3f]">Final standings</h2>
+                      <h2 className="mt-1 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#293a3f]">{isAwaitingJudging ? 'Standings before judging' : 'Final standings'}</h2>
                     </div>
                     <span className="font-['IBM_Plex_Mono',monospace] text-[9px] uppercase tracking-[0.13em] text-[#758085]">{game.modeKey === 'point_challenge' ? 'Points' : 'Zones held'}</span>
                   </div>

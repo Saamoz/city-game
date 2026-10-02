@@ -15,6 +15,7 @@ import { AppError } from '../lib/errors.js';
 import type { ModeRegistry } from '../modes/index.js';
 import { getRecentEvents } from './event-service.js';
 import { getGameById } from './game-service.js';
+import { getJudgingSummary } from './judging-service.js';
 import { getScoreboard } from './scoreboard-service.js';
 
 const MAX_RECAP_EVENTS = 5_000;
@@ -42,7 +43,7 @@ export async function buildGameRecap(
     });
   }
 
-  const [scoreboard, eventRows, locationRows, teamRows] = await Promise.all([
+  const [scoreboard, eventRows, locationRows, teamRows, judging] = await Promise.all([
     getScoreboard(db, registry, gameId),
     getRecentEvents(db, { gameId, limit: MAX_RECAP_EVENTS }),
     db
@@ -56,6 +57,7 @@ export async function buildGameRecap(
       .where(and(eq(playerLocationSamples.gameId, gameId), isNotNull(playerLocationSamples.teamId)))
       .orderBy(asc(playerLocationSamples.recordedAt)),
     db.select({ id: teams.id, name: teams.name }).from(teams).where(eq(teams.gameId, gameId)),
+    getJudgingSummary(db, gameId, game.settings),
   ]);
 
   const startedAtMs = game.startedAt.getTime();
@@ -73,6 +75,7 @@ export async function buildGameRecap(
     paths: buildTeamPaths(locationRows.flatMap((row) => row.teamId ? [{ ...row, teamId: row.teamId }] : []), startedAtMs, endedAtMs),
     moments: buildRecapMoments(events, teamNameById, startedAtMs, gameDurationMs),
     events,
+    judging,
   };
 }
 
@@ -148,6 +151,9 @@ function buildRecapMoments(
       progress: progressAt(new Date(event.createdAt).getTime(), startedAtMs, gameDurationMs),
     };
 
+    if (event.eventType === 'CHALLENGE_COMPLETED' && event.meta.judged === true) {
+      return [{ ...base, type: 'challenge_completed', title: `${teamName ?? 'A team'} submitted ${challenge?.name ?? 'a challenge'} for judging`, detail: null }];
+    }
     if (event.eventType === 'CHALLENGE_COMPLETED') {
       return [{ ...base, type: 'challenge_completed', title: `${teamName ?? 'A team'} completed ${challenge?.name ?? 'a challenge'}`, detail: zone?.name ? `${zone.name} captured` : null }];
     }
