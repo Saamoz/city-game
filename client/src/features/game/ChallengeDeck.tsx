@@ -45,9 +45,18 @@ interface ChallengeDeckProps {
   isActionPending(actionKey: string): boolean;
   isPeeking: boolean;
   onOpen(): void;
-  // 'anywhere' = Point Challenge games: cards need no zone and complete wherever the team is.
+  // 'anywhere' = Point Challenge games: every challenge is a card. Anywhere cards complete in place;
+  // pinned and judged cards hand off to the map pin or the judged sheet.
   variant?: 'zones' | 'anywhere';
+  getCardKind?(challenge: Challenge): CardKind;
+  distanceTo?(challenge: Challenge): number | null;
+  submittedIds?: Set<string>;
+  onLocateChallenge?(challengeId: string): void;
+  onOpenJudged?(challengeId: string): void;
 }
+
+export type CardKind = 'anywhere' | 'pin' | 'judged' | 'judged-pin';
+type DeckFilter = 'all' | 'pin' | 'anywhere' | 'judged';
 
 interface DragStateRefs {
   pointerId: MutableRefObject<number | null>;
@@ -80,11 +89,24 @@ export function ChallengeDeck({
   isPeeking,
   onOpen,
   variant = 'zones',
+  getCardKind = () => 'anywhere',
+  distanceTo = () => null,
+  submittedIds = EMPTY_IDS,
+  onLocateChallenge,
+  onOpenJudged,
 }: ChallengeDeckProps) {
   const isAnywhere = variant === 'anywhere';
-  const availableChallenges = [...challenges]
-    .filter((challenge) => challenge.status === 'available')
-    .sort(compareChallengesForDeck);
+  const [filter, setFilter] = useState<DeckFilter>('all');
+  const allAvailable = challenges.filter((challenge) => challenge.status === 'available');
+  const filterCounts = countByFilter(allAvailable, getCardKind);
+  const showFilters = isAnywhere && (filterCounts.pin > 0 || filterCounts.judged > 0);
+  const activeFilter = showFilters ? filter : 'all';
+  // Cards your team can still do come first; on the map filter, nearest pins lead.
+  const availableChallenges = allAvailable
+    .filter((challenge) => matchesFilter(getCardKind(challenge), activeFilter))
+    .sort((left, right) => Number(submittedIds.has(left.id)) - Number(submittedIds.has(right.id))
+      || (activeFilter === 'pin' ? (distanceTo(left) ?? Infinity) - (distanceTo(right) ?? Infinity) : 0)
+      || compareChallengesForDeck(left, right));
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRefs = useDragRefs();
@@ -104,7 +126,15 @@ export function ChallengeDeck({
   const availableChallengeKey = availableChallenges.map((challenge) => challenge.id).join('|');
   const renderedChallenges = buildRenderedChallengeCards(availableChallenges, exitingChallenges);
 
+  const previousFilterRef = useRef(activeFilter);
   useEffect(() => {
+    // A filter switch is not a card leaving play, so skip the exit animation.
+    if (previousFilterRef.current !== activeFilter) {
+      previousFilterRef.current = activeFilter;
+      previousAvailableChallengesRef.current = availableChallenges;
+      setExitingChallenges([]);
+      return;
+    }
     const previousAvailableChallenges = previousAvailableChallengesRef.current;
     const currentIds = new Set(availableChallenges.map((challenge) => challenge.id));
     const removedChallenges = previousAvailableChallenges
@@ -135,7 +165,7 @@ export function ChallengeDeck({
     }
 
     previousAvailableChallengesRef.current = availableChallenges;
-  }, [availableChallengeKey]);
+  }, [availableChallengeKey, activeFilter]);
 
   useEffect(() => () => {
     for (const timer of exitTimersRef.current.values()) {
@@ -191,6 +221,22 @@ export function ChallengeDeck({
         <p className="mt-3 text-xs leading-5 text-[#8a3c2d]">{locationMessage}</p>
       ) : null}
 
+      {showFilters && !isPeeking ? (
+        <div className="mt-1 flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-deck-interactive="true">
+          {(['all', 'pin', 'anywhere', 'judged'] as const).filter((key) => key === 'all' || filterCounts[key] > 0).map((key) => (
+            <button
+              key={key}
+              className={['shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] transition', activeFilter === key ? 'border-[#24343a] bg-[#24343a] text-[#f4ead7]' : 'border-[#c8b48a]/55 bg-[#fff8eb] text-[#24343a]'].join(' ')}
+              data-deck-interactive="true"
+              onClick={() => { setFilter(key); scrollRef.current?.scrollTo({ left: 0 }); }}
+              type="button"
+            >
+              {FILTER_LABELS[key]} {filterCounts[key]}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {renderedChallenges.length ? (
         <div
           ref={scrollRef}
@@ -225,7 +271,8 @@ export function ChallengeDeck({
               const rerollVoteCount = rerollVote?.teamIds.length ?? 0;
               const hasRerollVote = Boolean(teamId && rerollVote?.teamIds.includes(teamId));
               const rerollPending = !isExiting && isActionPending('reroll:' + challenge.id);
-              const showReroll = !isExiting && rerollState.isAvailable && Boolean(teamId);
+              const cardKind = getCardKind(challenge);
+              const showReroll = !isExiting && rerollState.isAvailable && Boolean(teamId) && cardKind === 'anywhere';
               const shortDescription = getShortDescription(challenge);
 
               return (
@@ -262,12 +309,12 @@ export function ChallengeDeck({
                   {isPeeking && index === 0 ? (
                     <div className="flex w-full items-center justify-center">
                       <h3 className="font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#1f2a2f]">
-                        {isAnywhere ? 'Anywhere Cards' : 'Challenge Deck'}
+                        {isAnywhere ? (showFilters ? 'Challenges' : 'Anywhere Cards') : 'Challenge Deck'}
                       </h3>
                     </div>
                   ) : (
                     <>
-                      {isAnywhere ? <AnywhereTag challenge={challenge} /> : null}
+                      {isAnywhere ? <CardTag challenge={challenge} kind={getCardKind(challenge)} distance={distanceTo(challenge)} submitted={submittedIds.has(challenge.id)} /> : null}
                       <div className="flex items-start justify-between gap-2">
                         <h3
                           className="min-w-0 font-[Georgia,Times_New_Roman,serif] text-base lg:text-lg font-semibold leading-snug text-[#1f2a2f]"
@@ -312,7 +359,7 @@ export function ChallengeDeck({
 
                   <div className="mt-3 border-t border-[#d8c8a3]/55 pt-3">
                     <p className="hidden lg:block text-[11px] uppercase tracking-[0.18em] text-[#7d6f55]">
-                      {isAnywhere ? 'Do it wherever you are' : (currentZoneName ?? 'No zone')}
+                      {isAnywhere ? (cardKind === 'anywhere' || cardKind === 'judged' ? 'Do it wherever you are' : 'Go to the pin on the map') : (currentZoneName ?? 'No zone')}
                     </p>
 
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -327,7 +374,21 @@ export function ChallengeDeck({
                     </div>
 
                     <div className="mt-3 space-y-2">
-                      {isZoneClaimBlocked ? (
+                      {isAnywhere && cardKind !== 'anywhere' ? (
+                        <button
+                          className={[
+                            'w-full rounded-2xl border px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-60',
+                            cardKind === 'pin' ? 'border-[#c76a2c] bg-[#d97a37] text-[#fff8eb] hover:bg-[#c56a2b]' : 'border-[#4a3a6b] bg-[#3f3360] text-[#f4ead7] hover:bg-[#33294f]',
+                            isSelected ? '' : 'invisible pointer-events-none',
+                          ].join(' ')}
+                          data-deck-interactive="true"
+                          disabled={submittedIds.has(challenge.id) && cardKind !== 'pin'}
+                          onClick={() => (cardKind === 'judged' ? onOpenJudged : onLocateChallenge)?.(challenge.id)}
+                          type="button"
+                        >
+                          {submittedIds.has(challenge.id) ? 'Submitted' : cardKind === 'judged' ? 'Submit for judging' : 'Show on map'}
+                        </button>
+                      ) : isZoneClaimBlocked ? (
                         <button
                           className="w-full rounded-2xl border border-[#aeb9bd] bg-[#cbd3d6] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#65757c] disabled:cursor-not-allowed"
                           data-deck-interactive="true"
@@ -656,6 +717,43 @@ function locationPillClassName(status: GeolocationStatus): string {
   return 'rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ' + tone;
 }
 
+
+const EMPTY_IDS = new Set<string>();
+const FILTER_LABELS: Record<DeckFilter, string> = { all: 'All', pin: 'On map', anywhere: 'Anywhere', judged: 'Judged' };
+
+function matchesFilter(kind: CardKind, filter: DeckFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'judged') return kind === 'judged' || kind === 'judged-pin';
+  if (filter === 'pin') return kind === 'pin';
+  return kind === 'anywhere';
+}
+
+function countByFilter(challenges: Challenge[], getCardKind: (challenge: Challenge) => CardKind): Record<DeckFilter, number> {
+  const kinds = challenges.map(getCardKind);
+  return {
+    all: kinds.length,
+    pin: kinds.filter((kind) => kind === 'pin').length,
+    anywhere: kinds.filter((kind) => kind === 'anywhere').length,
+    judged: kinds.filter((kind) => matchesFilter(kind, 'judged')).length,
+  };
+}
+
+function CardTag({ challenge, kind, distance, submitted }: { challenge: Challenge; kind: CardKind; distance: number | null; submitted: boolean }) {
+  if (kind === 'anywhere') return <AnywhereTag challenge={challenge} />;
+  const isJudged = kind === 'judged' || kind === 'judged-pin';
+  const isPinned = kind === 'pin' || kind === 'judged-pin';
+  return (
+    <p className={['mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em]', isJudged ? 'text-[#5b4a86]' : 'text-[#b4602a]'].join(' ')}>
+      <span aria-hidden="true">{isJudged ? '★' : '📍'}</span>
+      <span className="truncate">{isJudged ? 'Judged' : 'On map'}{isJudged && isPinned ? ' · pin' : ''}{isPinned && distance !== null ? ' · ' + formatDistance(distance) : ''}</span>
+      {submitted ? <span className="shrink-0 text-[#39705d]">· ✓ In</span> : null}
+    </p>
+  );
+}
+
+function formatDistance(meters: number): string {
+  return meters < 1000 ? Math.round(meters) + ' m' : (meters / 1000).toFixed(1) + ' km';
+}
 
 function AnywhereTag({ challenge }: { challenge: Challenge }) {
   const hint = getConfigString(challenge, 'location_hint');

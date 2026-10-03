@@ -219,10 +219,11 @@ async function applyLifecycleTransition(
     }
 
     if (runtimeGame.challengeSetId) {
-      const activeChallengeCount = getActiveChallengeCount(runtimeGame.settings as JsonObject);
+      const dealAll = (runtimeGame.settings as JsonObject).deal_all_challenges === true;
+      const activeChallengeCount = dealAll ? Number.MAX_SAFE_INTEGER : getActiveChallengeCount(runtimeGame.settings as JsonObject);
       const challengeTotalCount = await cloneChallengeSetToGame(db, runtimeGame.challengeSetId, runtimeGame.id, activeChallengeCount, runtimeGame.modeKey);
       const nextSettings = normalizeRuntimeSettings(runtimeGame.settings as JsonObject, {
-        activeChallengeCount,
+        activeChallengeCount: dealAll ? Math.max(1, challengeTotalCount) : activeChallengeCount,
         challengeTotalCount,
       });
 

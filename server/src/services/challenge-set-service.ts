@@ -6,7 +6,7 @@ import type {
   JsonObject,
   ResourceAwardMap,
 } from '@city-game/shared';
-import { errorCodes, isJudgedChallengeConfig } from '@city-game/shared';
+import { MAX_CHALLENGE_BONUSES, errorCodes, isJudgedChallengeConfig } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { challengeSetItems, challengeSets, challenges, mapZones, maps, zones } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
@@ -157,6 +157,7 @@ export async function createChallengeSetItem(db: DatabaseClient, input: Challeng
   const nextMapPoint = input.mapPoint ?? null;
 
   assertPlacementMatchesSet(challengeSet.locationMode, nextMapZoneId, nextMapPoint);
+  assertBonusLimit(input.config);
   await assertPlacementIsValid(db, { mapZoneId: nextMapZoneId, mapPoint: nextMapPoint, sourceMapId });
 
   const [inserted] = await db.insert(challengeSetItems).values({
@@ -185,6 +186,7 @@ export async function updateChallengeSetItem(db: DatabaseClient, challengeSetIte
   const nextMapPoint = input.mapPoint === undefined ? existing.mapPoint : input.mapPoint;
 
   assertPlacementMatchesSet(challengeSet.locationMode, nextMapZoneId, nextMapPoint);
+  assertBonusLimit(input.config);
   await assertPlacementIsValid(db, { mapZoneId: nextMapZoneId, mapPoint: nextMapPoint, sourceMapId });
 
   await db.update(challengeSetItems).set({
@@ -346,6 +348,13 @@ function buildPersistedConfig(config: JsonObject, mapZoneId: string | null, mapP
   nextConfig.location_mode = getLocationMode({ mapZoneId, mapPoint });
 
   return nextConfig;
+}
+
+function assertBonusLimit(config: JsonObject | undefined): void {
+  const bonuses = config?.bonuses;
+  if (Array.isArray(bonuses) && bonuses.length > MAX_CHALLENGE_BONUSES) {
+    throw new AppError(errorCodes.validationError, { message: 'A challenge can have at most ' + MAX_CHALLENGE_BONUSES + ' bonus tasks.' });
+  }
 }
 
 // Point-linked sets mix pinned items with "anywhere" items that have no placement.

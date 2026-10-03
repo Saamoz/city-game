@@ -62,6 +62,7 @@ interface GameFormState {
   zoneMajorityThreshold: string;
   timeLimitMinutes: string;
   activeChallengeCount: string;
+  dealAllChallenges: boolean;
   requireGpsAccuracy: boolean;
   broadcastTeamLocations: boolean;
   allowMidgameJoin: boolean;
@@ -82,6 +83,7 @@ const INITIAL_GAME_FORM: GameFormState = {
   zoneMajorityThreshold: '60',
   timeLimitMinutes: '60',
   activeChallengeCount: '3',
+  dealAllChallenges: false,
   requireGpsAccuracy: false,
   broadcastTeamLocations: true,
   allowMidgameJoin: true,
@@ -750,9 +752,19 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                     min={1}
                     step={1}
                     value={gameForm.activeChallengeCount}
+                    disabled={gameForm.dealAllChallenges}
                     onChange={(event) => { setGameForm((current) => ({ ...current, activeChallengeCount: event.target.value })); }}
-                    className={inputClassName}
+                    className={inputClassName + ' disabled:opacity-50'}
                   />
+                  <label className="mt-2 flex items-center gap-2 text-xs font-medium text-[#21313a]">
+                    <input
+                      type="checkbox"
+                      checked={gameForm.dealAllChallenges}
+                      onChange={(event) => { setGameForm((current) => ({ ...current, dealAllChallenges: event.target.checked })); }}
+                      className="h-4 w-4 rounded border-[#9aabb5]"
+                    />
+                    Show every challenge from the start
+                  </label>
                 </Field>
                 <Field label="Win Condition">
                   <select
@@ -1152,6 +1164,7 @@ function buildGameForm(game: Game): GameFormState {
     zoneMajorityThreshold: winCondition.type === 'zone_majority' ? String(winCondition.threshold) : '60',
     timeLimitMinutes: winCondition.type === 'time_limit' ? String(winCondition.duration_minutes) : '60',
     activeChallengeCount: String(settings.active_challenge_count ?? 3),
+    dealAllChallenges: settings.deal_all_challenges === true,
     requireGpsAccuracy: Boolean(settings.require_gps_accuracy),
     broadcastTeamLocations: settings.broadcast_team_locations !== false,
     allowMidgameJoin: settings.allow_midgame_join !== false,
@@ -1188,6 +1201,7 @@ function buildSettings(form: GameFormState, existing: JsonObject): JsonObject {
   const next: JsonObject = { ...existing };
   delete next.claim_timeout_minutes;
   next.active_challenge_count = Math.max(1, Number(form.activeChallengeCount) || 1);
+  next.deal_all_challenges = form.dealAllChallenges;
   next.require_gps_accuracy = form.requireGpsAccuracy;
   next.broadcast_team_locations = form.broadcastTeamLocations;
   next.allow_midgame_join = form.allowMidgameJoin;

@@ -228,3 +228,10 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Teams self-report bonuses when completing: `submission.bonusIds`. `finishChallengeCompletion` adds the points of claimed bonuses that exist on the challenge (unknown ids are ignored) to the `points` award, so it covers every completion path (zone claims, pins, anywhere cards).
 - Judged challenges: teams tick bonuses when submitting; judges see them in the Judging panel. They are not auto-added: the judge's score is the total.
 - UI: cards show "5 pts" / "+5 bonus" chips; completing a deck card with bonuses opens a checklist sheet with a running total; the pin card shows the checklist inline ("Complete · 7 pts"); details list the bonus tasks; completed cards, the toast and the feed show points earned.
+
+## All Challenges as Cards, 1-Point Default, 3-Bonus Cap (2026-10-03)
+
+- Game setting `deal_all_challenges` (admin: "Show every challenge from the start") puts every challenge in play at start; `active_challenge_count` is then stored as the total.
+- Point games show every challenge as a card: anywhere cards complete in place; pinned cards have "Show on map" (opens the pin card, which keeps the radius check); judged cards open the judged sheet or their pin. Filter chips (All / On map / Anywhere / Judged) partition the cards; "On map" sorts nearest first; cards your team has submitted sort last. Fixed: the deck auto-select only knew anywhere cards, so pinned cards could never stay selected.
+- A challenge with no points set is worth 1 (`DEFAULT_CHALLENGE_POINTS`); an explicit 0 stays 0, and the admin now always saves the points field.
+- At most 3 bonus tasks per challenge (`MAX_CHALLENGE_BONUSES`), enforced in the admin editor and the challenge-set API.

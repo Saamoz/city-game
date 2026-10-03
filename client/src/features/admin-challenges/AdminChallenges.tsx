@@ -8,7 +8,7 @@ import type {
   MapDefinition,
   MapZone,
 } from '@city-game/shared';
-import { getBasePoints, getChallengeBonuses, getMaxBonusPoints } from '@city-game/shared';
+import { DEFAULT_CHALLENGE_POINTS, MAX_CHALLENGE_BONUSES, getBasePoints, getChallengeBonuses, getMaxBonusPoints } from '@city-game/shared';
 import {
   ApiError,
   createChallengeSetDefinition,
@@ -373,7 +373,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
     const locationHint = itemForm.locationHint.trim();
     const isJudged = setForm.locationMode === 'point' && itemForm.scoringMode === 'judged';
     const judgedMaxPoints = Math.floor(Number(itemForm.judgedMaxPoints));
-    const basePoints = Math.max(0, Math.floor(Number(itemForm.pointValue) || 0));
+    const basePoints = itemForm.pointValue.trim() === '' ? DEFAULT_CHALLENGE_POINTS : Math.max(0, Math.floor(Number(itemForm.pointValue) || 0));
     const bonuses = itemForm.bonuses
       .map((bonus) => ({ id: bonus.id, label: bonus.label.trim(), points: Math.floor(Number(bonus.points) || 0) }))
       .filter((bonus) => bonus.label);
@@ -390,7 +390,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
         ...(bonuses.length ? { bonuses } : {}),
         ...(isJudged ? { judged: true, ...(judgedMaxPoints > 0 ? { judged_max_points: judgedMaxPoints } : {}) } : {}),
       } satisfies JsonObject,
-      scoring: !isJudged && basePoints > 0 ? { points: basePoints } : {} as Record<string, number>,
+      scoring: !isJudged ? { points: basePoints } : {} as Record<string, number>,
       difficulty: itemForm.difficulty || null,
       sortOrder: selectedItem ? selectedItem.sortOrder : items.length,
       metadata: ((setForm.locationMode === 'zone' || isPinned) && itemForm.mapId ? { sourceMapId: itemForm.mapId } : {}) as JsonObject,
@@ -870,7 +870,7 @@ function buildItemForm(item: ChallengeSetItem): ItemFormState {
     mapZoneId: item.mapZoneId ?? '',
     mapPoint: item.mapPoint,
     pointRadiusMeters: String(typeof item.config?.point_radius_meters === 'number' ? item.config.point_radius_meters : 40),
-    pointValue: String(typeof item.scoring?.points === 'number' ? item.scoring.points : 0),
+    pointValue: String(getBasePoints(item.scoring)),
     bonuses: getChallengeBonuses(item.config).map((bonus) => ({ id: bonus.id, label: bonus.label, points: String(bonus.points) })),
     placement: item.mapPoint ? 'pinned' : 'anywhere',
     locationHint: typeof item.config?.location_hint === 'string' ? item.config.location_hint : '',
@@ -902,8 +902,8 @@ function BonusEditor({ rows, isJudged, onChange }: { rows: BonusFormRow[]; isJud
           </div>
         ))}
       </div>
-      <button className="mt-2 rounded-full border border-dashed border-[#a88c52] bg-[#fff8eb] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#5d4d33]" onClick={() => onChange([...rows, { id: 'bonus-' + crypto.randomUUID().slice(0, 8), label: '', points: '1' }])} type="button">+ Add bonus</button>
-      <p className="mt-1.5 text-xs leading-5 text-[#6b777b]">{isJudged ? 'Teams tick the ones they did when submitting; judges see their picks.' : 'Optional extras. Teams tick the ones they did when completing, and each adds its points.'}</p>
+      {rows.length < MAX_CHALLENGE_BONUSES ? <button className="mt-2 rounded-full border border-dashed border-[#a88c52] bg-[#fff8eb] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#5d4d33]" onClick={() => onChange([...rows, { id: 'bonus-' + crypto.randomUUID().slice(0, 8), label: '', points: '1' }])} type="button">+ Add bonus</button> : null}
+      <p className="mt-1.5 text-xs leading-5 text-[#6b777b]">{isJudged ? 'Teams tick the ones they did when submitting; judges see their picks.' : 'Optional extras, up to ' + MAX_CHALLENGE_BONUSES + '. Teams tick the ones they did when completing, and each adds its points.'}</p>
     </div>
   );
 }

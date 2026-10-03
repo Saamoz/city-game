@@ -296,6 +296,15 @@ describe('territory complete route', () => {
     expect(ledger).toMatchObject({ teamId: TEAM_ONE_ID, resourceType: 'points', delta: 5 });
   });
 
+  it('awards the default 1 point when a challenge has no points set', async () => {
+    await seedGame({ modeKey: 'point_challenge' }); await seedTeam(); await seedPlayer({ sessionToken: 'default-points-session' });
+    await seedChallenge({ zoneId: null, isDeckActive: true, scoring: {}, config: { portable: true, location_mode: 'portable' } });
+    app = await createTestApp({ db: testDatabase.db });
+    const response = await completeRequest({ sessionToken: 'default-points-session', actionId: 'default-points', payload: { gps: null } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().resourcesAwarded).toEqual({ points: 1 });
+  });
+
   it('does not deal an extra deck card when a pinned point challenge is completed', async () => {
     await seedGame({ modeKey: 'point_challenge' }); await seedTeam(); await seedPlayer({ sessionToken: 'pin-deck-session' });
     await seedChallenge({ zoneId: null, isDeckActive: true, config: { portable: false, location_mode: 'point', source_map_point: { type: 'Point', coordinates: [-97.1384, 49.8951] }, point_radius_meters: 25 } });

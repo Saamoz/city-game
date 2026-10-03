@@ -32,7 +32,7 @@ import {
   leaveRealtimeGame,
 } from '../../lib/realtime';
 import { useGameStore, type RealtimeConnectionStatus } from '../../store/gameStore';
-import { ChallengeDeck } from './ChallengeDeck';
+import { ChallengeDeck, type CardKind } from './ChallengeDeck';
 import { PointChallengeCard, PointChallengeLayer, getPointLocation, isPointChallenge } from './PointChallenges';
 import { GameResultsScreen } from './GameResultsScreen';
 import { formatPoints, type CompletionExtras } from './ChallengeScoring';
@@ -573,11 +573,12 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const broadcastTeamLocations = Boolean(snapshot?.game.settings?.broadcast_team_locations);
   const pointChallenges = (snapshot?.challenges ?? []).filter((challenge) => challenge.status === 'available' && isPointChallenge(challenge));
   const regularPinCount = pointChallenges.filter((challenge) => !isJudgedChallenge(challenge)).length;
-  const deckChallenges = useMemo(() => (snapshot?.challenges ?? []).filter((challenge) => !isPointChallenge(challenge) && !isJudgedChallenge(challenge)), [snapshot?.challenges]);
+  // Point games show every challenge as a card (pins and judged ones hand off to the map / judged sheet).
+  const deckChallenges = useMemo(() => (snapshot?.challenges ?? []).filter((challenge) => isPointMode || (!isPointChallenge(challenge) && !isJudgedChallenge(challenge))), [isPointMode, snapshot?.challenges]);
   const judgedChallenges = useMemo(() => (snapshot?.challenges ?? []).filter((challenge) => isJudgedChallenge(challenge) && challenge.status === 'available'), [snapshot?.challenges]);
   const teamSubmittedIds = useMemo(() => new Set((snapshot?.claims ?? []).filter((claim) => claim.status === 'submitted' && claim.teamId === team?.id).map((claim) => claim.challengeId)), [snapshot?.claims, team?.id]);
   const judgedRemainingCount = judgedChallenges.filter((challenge) => !teamSubmittedIds.has(challenge.id)).length;
-  const anywhereAvailableCount = deckChallenges.filter((challenge) => challenge.status === 'available').length;
+  const anywhereAvailableCount = deckChallenges.filter((challenge) => challenge.status === 'available' && getCardKind(challenge) === 'anywhere').length;
   // Pure pin sets have no deck at all; mixed sets keep it for the anywhere cards.
   const showDeck = !isPointMode || deckChallenges.length > 0;
   const teamPoints = snapshot?.teamResources[team?.id ?? '']?.points ?? 0;
@@ -590,6 +591,11 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const distanceToChallenge = (challenge: Challenge) => {
     const point = getPointLocation(challenge);
     return currentPoint && point ? distanceBetweenLngLat(currentPoint, [point.coordinates[0] as number, point.coordinates[1] as number]) : null;
+  };
+  const openJudgedChallenge = (id: string) => {
+    const challenge = snapshot?.challenges.find((entry) => entry.id === id);
+    if (challenge && isPointChallenge(challenge)) focusPointChallenge(id);
+    else setActiveOverlay('judged');
   };
   const focusPointChallenge = (id: string) => {
     setSelectedPointChallengeId(id);
@@ -1011,9 +1017,9 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
             <section className="hidden rounded-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8]/96 p-4 shadow-[0_22px_60px_rgba(46,58,62,0.18)] backdrop-blur-sm lg:block lg:p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">{isPointMode ? 'Anywhere Cards' : 'Field Deck'}</p>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">{isPointMode ? 'Challenges' : 'Field Deck'}</p>
                   <p className="mt-2 text-sm leading-6 text-[#44545c]">
-                    {isPointMode ? 'Do these wherever you are. Pinned challenges wait on the map. ' + challengeProgressLabel + '.' : challengeProgressLabel}
+                    {isPointMode ? 'Anywhere cards complete here; pinned ones open on the map. ' + challengeProgressLabel + '.' : challengeProgressLabel}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -1047,6 +1053,11 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                   animatedChallengeIds={animatedChallengeIds}
                   challenges={deckChallenges}
                   variant={isPointMode ? 'anywhere' : 'zones'}
+                  getCardKind={getCardKind}
+                  distanceTo={distanceToChallenge}
+                  submittedIds={teamSubmittedIds}
+                  onLocateChallenge={focusPointChallenge}
+                  onOpenJudged={openJudgedChallenge}
                   rerollState={snapshot.challengeReroll}
                   teamId={snapshot.team?.id ?? null}
                   completedCards={completedCards}
@@ -1099,6 +1110,11 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               animatedChallengeIds={animatedChallengeIds}
               challenges={deckChallenges}
               variant={isPointMode ? 'anywhere' : 'zones'}
+              getCardKind={getCardKind}
+              distanceTo={distanceToChallenge}
+              submittedIds={teamSubmittedIds}
+              onLocateChallenge={(id) => { setIsDeckOpen(false); focusPointChallenge(id); }}
+              onOpenJudged={(id) => { setIsDeckOpen(false); openJudgedChallenge(id); }}
               rerollState={snapshot.challengeReroll}
               teamId={snapshot.team?.id ?? null}
               completedCards={completedCards}
@@ -1341,6 +1357,12 @@ function Toast({ tone, title, body, accentColor }: ToastMessage) {
   );
 }
 
+function getCardKind(challenge: Challenge): CardKind {
+  const pinned = isPointChallenge(challenge);
+  if (isJudgedChallenge(challenge)) return pinned ? 'judged-pin' : 'judged';
+  return pinned ? 'pin' : 'anywhere';
+}
+
 function PointModeLegend({ pinCount, anywhereCount, showAnywhere, judgedCount, judgedRemaining, onOpenJudged }: { pinCount: number; anywhereCount: number; showAnywhere: boolean; judgedCount: number; judgedRemaining: number; onOpenJudged(): void }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#24343a]">
@@ -1426,7 +1448,8 @@ function buildChallengeProgressLabel(counts: ReturnType<typeof buildChallengeCou
 
 function getAvailableDeckChallenges(snapshot: GameStateSnapshot | null) {
   return [...(snapshot?.challenges ?? [])]
-    .filter((challenge) => challenge.status === 'available' && !isPointChallenge(challenge) && !isJudgedChallenge(challenge))
+    // Point games show every challenge as a card; territory decks leave pins and judged ones out.
+    .filter((challenge) => challenge.status === 'available' && (snapshot?.game.modeKey === 'point_challenge' || (!isPointChallenge(challenge) && !isJudgedChallenge(challenge))))
     .sort((left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title));
 }
 

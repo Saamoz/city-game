@@ -2,6 +2,9 @@
 // Teams self-report which bonuses they did when they complete; the server only counts bonus ids
 // that exist on the challenge.
 
+export const DEFAULT_CHALLENGE_POINTS = 1;
+export const MAX_CHALLENGE_BONUSES = 3;
+
 export interface ChallengeBonus {
   id: string;
   label: string;
@@ -20,9 +23,10 @@ export function getChallengeBonuses(config: unknown): ChallengeBonus[] {
   });
 }
 
+// A challenge with no points set is worth DEFAULT_CHALLENGE_POINTS; an explicit 0 stays 0.
 export function getBasePoints(scoring: unknown): number {
   const value = scoring && typeof scoring === 'object' ? (scoring as { points?: unknown }).points : null;
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  return typeof value === 'number' && Number.isFinite(value) ? value : DEFAULT_CHALLENGE_POINTS;
 }
 
 export function getMaxBonusPoints(config: unknown): number {

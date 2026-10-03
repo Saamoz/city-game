@@ -109,6 +109,7 @@ export type GameSettings = JsonObject & {
   max_concurrent_claims?: number;
   claim_timeout_minutes?: number;
   active_challenge_count?: number;
+  deal_all_challenges?: boolean; // every challenge is in play from the start instead of a dealt hand
   challenge_total_count?: number;
   require_gps_accuracy?: boolean;  // default false. When true, enforces global and per-zone
                                    // GPS error radius checks on claim. Spatial containment

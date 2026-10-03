@@ -4,6 +4,7 @@ import {
   DEFAULT_POINT_CHALLENGE_RADIUS_METERS,
   errorCodes,
   eventTypes,
+  getBasePoints,
   getClaimedBonuses,
   isJudgedChallengeConfig,
   sumBonusPoints,
@@ -469,11 +470,10 @@ async function finishChallengeCompletion(
   });
 
   const resourcesAwarded = normalizeResourceAwards(input.updatedChallenge.scoring as ResourceAwardMap);
-  // Self-reported bonus tasks add to the base points.
-  const claimedBonuses = getClaimedBonuses(input.updatedChallenge.config, input.updatedClaim.submission);
-  if (claimedBonuses.length > 0) {
-    resourcesAwarded.points = (resourcesAwarded.points ?? 0) + sumBonusPoints(claimedBonuses);
-  }
+  // Base points (default 1 when unset) plus the self-reported bonus tasks.
+  const totalPoints = getBasePoints(input.updatedChallenge.scoring) + sumBonusPoints(getClaimedBonuses(input.updatedChallenge.config, input.updatedClaim.submission));
+  if (totalPoints !== 0) resourcesAwarded.points = totalPoints;
+  else delete resourcesAwarded.points;
   const resourceEntries: ResourceLedgerEntry[] = [];
 
   for (const [resourceType, delta] of Object.entries(resourcesAwarded)) {

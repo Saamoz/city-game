@@ -159,6 +159,27 @@ describe('challenge set routes', () => {
     expect(anywhere.filter((challenge) => challenge.isDeckActive)).toHaveLength(2);
     expect(anywhere.every((challenge) => (challenge.config as { location_hint?: string }).location_hint === 'Any park')).toBe(true);
   });
+
+  it('caps bonus tasks at three and deals every challenge at start when deal_all_challenges is set', async () => {
+    app = await createChallengeSetTestApp(testDatabase);
+    const authored = await seedAuthoredMap(app);
+    const setResponse = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets', headers: idempotencyHeaders('deal-all-set'), payload: { name: 'Deal All', locationMode: 'point' } });
+    const challengeSetId = setResponse.json().challengeSet.id as string;
+    const bonus = (id: string) => ({ id, label: 'Bonus ' + id, points: 1 });
+    const tooMany = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets/' + challengeSetId + '/items', headers: idempotencyHeaders('too-many-bonuses'), payload: { title: 'Busy', description: 'Too many bonuses.', config: { bonuses: [bonus('a'), bonus('b'), bonus('c'), bonus('d')] } } });
+    expect(tooMany.statusCode).toBe(400);
+    for (let index = 0; index < 6; index += 1) {
+      const response = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets/' + challengeSetId + '/items', headers: idempotencyHeaders('deal-all-item-' + index), payload: { title: 'Anywhere ' + index, description: 'Do it.', config: { bonuses: [bonus('a'), bonus('b'), bonus('c')] }, sortOrder: index } });
+      expect(response.statusCode).toBe(201);
+    }
+    const gameResponse = await app.inject({ method: 'POST', url: '/api/v1/game', headers: adminHeaders('deal-all-game'), payload: { name: 'Deal All Game', modeKey: 'point_challenge', mapId: authored.mapId, challengeSetId, settings: { active_challenge_count: 2, deal_all_challenges: true } } });
+    const gameId = gameResponse.json().game.id as string;
+    const startResponse = await app.inject({ method: 'POST', url: '/api/v1/game/' + gameId + '/start', headers: adminHeaders('start-deal-all') });
+    expect(startResponse.statusCode).toBe(200);
+    expect(startResponse.json().game.settings.active_challenge_count).toBe(6);
+    const runtimeChallenges = await testDatabase.db.select().from(challenges).where(eq(challenges.gameId, gameId));
+    expect(runtimeChallenges.filter((challenge) => challenge.isDeckActive)).toHaveLength(6);
+  });
 });
 
 async function seedAuthoredMap(app: FastifyInstance) {
