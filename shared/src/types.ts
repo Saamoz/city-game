@@ -470,11 +470,15 @@ export interface JudgingSubmission {
   note: string | null;
   bonuses: Array<{ id: string; label: string; points: number }>; // bonus tasks the team says it did
   points: number | null;
+  decision: { verdict: 'pass' | 'fail' | 'winner' | 'points'; bonusIds?: string[]; points?: number } | null;
 }
 
 export interface JudgingChallenge {
   challenge: Challenge;
   maxPoints: number | null;
+  judgingType: 'pass_fail' | 'best_wins' | 'points';
+  basePoints: number;
+  bonuses: Array<{ id: string; label: string; points: number }>;
   submissions: JudgingSubmission[];
 }
 

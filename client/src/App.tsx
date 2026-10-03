@@ -13,6 +13,10 @@ const AdminZoneEditor = lazy(async () => {
   return { default: module.AdminZoneEditor };
 });
 
+const AdminJudging = lazy(async () => {
+  const module = await import('./features/admin/AdminJudging');
+  return { default: module.AdminJudging };
+});
 const AdminChallenges = lazy(async () => {
   const module = await import('./features/admin-challenges/AdminChallenges');
   return { default: module.AdminChallenges };
@@ -80,6 +84,14 @@ export function App() {
     return (
       <Suspense fallback={<MapViewLoading />}>
         <AdminChallenges initialChallengeSetId={route.challengeSetId} />
+      </Suspense>
+    );
+  }
+
+  if (route.kind === 'admin-judging') {
+    return (
+      <Suspense fallback={<MapViewLoading />}>
+        <AdminJudging initialGameId={route.gameId} />
       </Suspense>
     );
   }

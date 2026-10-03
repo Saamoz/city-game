@@ -235,3 +235,10 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Point games show every challenge as a card: anywhere cards complete in place; pinned cards have "Show on map" (opens the pin card, which keeps the radius check); judged cards open the judged sheet or their pin. Filter chips (All / On map / Anywhere / Judged) partition the cards; "On map" sorts nearest first; cards your team has submitted sort last. Fixed: the deck auto-select only knew anywhere cards, so pinned cards could never stay selected.
 - A challenge with no points set is worth 1 (`DEFAULT_CHALLENGE_POINTS`); an explicit 0 stays 0, and the admin now always saves the points field.
 - At most 3 bonus tasks per challenge (`MAX_CHALLENGE_BONUSES`), enforced in the admin editor and the challenge-set API.
+
+## Judging Page + Judging Types (2026-10-03)
+
+- Judged challenges have `config.judging_type`: `pass_fail` (yes/no per team; judges also approve each claimed bonus), `best_wins` (judges pick the winner or tied winners; they get the points), or `points` (judge enters any number; the earlier judged challenges, which had `judged_max_points`, map to this). The editor offers the three; the challenge's points are what a yes / the winner earns.
+- Migration 0015 adds `challenge_claims.judged_decision` ({ verdict, bonusIds?, points? }). `PUT /judging/submissions/:id` takes a decision (or `{ decision: null }` to clear; `{ points }` still works) and the server computes `judged_points` from it.
+- New page `/admin/judging?gameId=` (linked from the admin panel): To judge / Judged tabs, per-type controls, auto-refresh every 15 s while the game runs, sticky Publish bar. Cards you judge stay put until you switch tabs. The old inline Judging section in the admin panel is now a link.
+- Players: judged challenges play exactly like normal ones (same card and pin UI, same Complete flow) with a small "★ Judged" marker; once a team submits, the challenge disappears from that team's cards and map. The separate judged sheet, purple pins and "judged to do" chip are gone.

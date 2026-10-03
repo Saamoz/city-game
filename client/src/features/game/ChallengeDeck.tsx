@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
-import { getChallengeBonuses, type Challenge, type ChallengeRerollState, type Zone } from '@city-game/shared';
+import { getChallengeBonuses, isJudgedChallengeConfig, type Challenge, type ChallengeRerollState, type Zone } from '@city-game/shared';
 import {
   CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH,
   CHALLENGE_CARD_TITLE_MAX_LENGTH,
   clampChallengeCardText,
 } from '../../lib/challenge-card-limits';
+import { JudgedMark } from './JudgedChallenges';
 import { BonusList, CompleteChallengeSheet, ScoreChips, formatPoints, type CompletionExtras } from './ChallengeScoring';
 import type { GeolocationStatus } from './useGeolocation';
 
@@ -46,17 +47,15 @@ interface ChallengeDeckProps {
   isPeeking: boolean;
   onOpen(): void;
   // 'anywhere' = Point Challenge games: every challenge is a card. Anywhere cards complete in place;
-  // pinned and judged cards hand off to the map pin or the judged sheet.
+  // pinned cards hand off to the map pin. Judged cards behave the same, with a small marker.
   variant?: 'zones' | 'anywhere';
   getCardKind?(challenge: Challenge): CardKind;
   distanceTo?(challenge: Challenge): number | null;
-  submittedIds?: Set<string>;
   onLocateChallenge?(challengeId: string): void;
-  onOpenJudged?(challengeId: string): void;
 }
 
-export type CardKind = 'anywhere' | 'pin' | 'judged' | 'judged-pin';
-type DeckFilter = 'all' | 'pin' | 'anywhere' | 'judged';
+export type CardKind = 'anywhere' | 'pin';
+type DeckFilter = 'all' | 'pin' | 'anywhere';
 
 interface DragStateRefs {
   pointerId: MutableRefObject<number | null>;
@@ -91,21 +90,18 @@ export function ChallengeDeck({
   variant = 'zones',
   getCardKind = () => 'anywhere',
   distanceTo = () => null,
-  submittedIds = EMPTY_IDS,
   onLocateChallenge,
-  onOpenJudged,
 }: ChallengeDeckProps) {
   const isAnywhere = variant === 'anywhere';
   const [filter, setFilter] = useState<DeckFilter>('all');
   const allAvailable = challenges.filter((challenge) => challenge.status === 'available');
   const filterCounts = countByFilter(allAvailable, getCardKind);
-  const showFilters = isAnywhere && (filterCounts.pin > 0 || filterCounts.judged > 0);
+  const showFilters = isAnywhere && filterCounts.pin > 0 && filterCounts.anywhere > 0;
   const activeFilter = showFilters ? filter : 'all';
-  // Cards your team can still do come first; on the map filter, nearest pins lead.
+  // On the map filter, nearest pins lead.
   const availableChallenges = allAvailable
-    .filter((challenge) => matchesFilter(getCardKind(challenge), activeFilter))
-    .sort((left, right) => Number(submittedIds.has(left.id)) - Number(submittedIds.has(right.id))
-      || (activeFilter === 'pin' ? (distanceTo(left) ?? Infinity) - (distanceTo(right) ?? Infinity) : 0)
+    .filter((challenge) => activeFilter === 'all' || getCardKind(challenge) === activeFilter)
+    .sort((left, right) => (activeFilter === 'pin' ? (distanceTo(left) ?? Infinity) - (distanceTo(right) ?? Infinity) : 0)
       || compareChallengesForDeck(left, right));
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -223,7 +219,7 @@ export function ChallengeDeck({
 
       {showFilters && !isPeeking ? (
         <div className="mt-1 flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-deck-interactive="true">
-          {(['all', 'pin', 'anywhere', 'judged'] as const).filter((key) => key === 'all' || filterCounts[key] > 0).map((key) => (
+          {(['all', 'pin', 'anywhere'] as const).map((key) => (
             <button
               key={key}
               className={['shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] transition', activeFilter === key ? 'border-[#24343a] bg-[#24343a] text-[#f4ead7]' : 'border-[#c8b48a]/55 bg-[#fff8eb] text-[#24343a]'].join(' ')}
@@ -272,7 +268,7 @@ export function ChallengeDeck({
               const hasRerollVote = Boolean(teamId && rerollVote?.teamIds.includes(teamId));
               const rerollPending = !isExiting && isActionPending('reroll:' + challenge.id);
               const cardKind = getCardKind(challenge);
-              const showReroll = !isExiting && rerollState.isAvailable && Boolean(teamId) && cardKind === 'anywhere';
+              const showReroll = !isExiting && rerollState.isAvailable && Boolean(teamId) && cardKind === 'anywhere' && !isJudgedChallengeConfig(challenge.config);
               const shortDescription = getShortDescription(challenge);
 
               return (
@@ -314,7 +310,7 @@ export function ChallengeDeck({
                     </div>
                   ) : (
                     <>
-                      {isAnywhere ? <CardTag challenge={challenge} kind={getCardKind(challenge)} distance={distanceTo(challenge)} submitted={submittedIds.has(challenge.id)} /> : null}
+                      {isAnywhere ? <CardTag challenge={challenge} kind={getCardKind(challenge)} distance={distanceTo(challenge)} /> : null}
                       <div className="flex items-start justify-between gap-2">
                         <h3
                           className="min-w-0 font-[Georgia,Times_New_Roman,serif] text-base lg:text-lg font-semibold leading-snug text-[#1f2a2f]"
@@ -359,7 +355,7 @@ export function ChallengeDeck({
 
                   <div className="mt-3 border-t border-[#d8c8a3]/55 pt-3">
                     <p className="hidden lg:block text-[11px] uppercase tracking-[0.18em] text-[#7d6f55]">
-                      {isAnywhere ? (cardKind === 'anywhere' || cardKind === 'judged' ? 'Do it wherever you are' : 'Go to the pin on the map') : (currentZoneName ?? 'No zone')}
+                      {isAnywhere ? (cardKind === 'anywhere' ? 'Do it wherever you are' : 'Go to the pin on the map') : (currentZoneName ?? 'No zone')}
                     </p>
 
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -374,19 +370,17 @@ export function ChallengeDeck({
                     </div>
 
                     <div className="mt-3 space-y-2">
-                      {isAnywhere && cardKind !== 'anywhere' ? (
+                      {isAnywhere && cardKind === 'pin' ? (
                         <button
                           className={[
-                            'w-full rounded-2xl border px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-60',
-                            cardKind === 'pin' ? 'border-[#c76a2c] bg-[#d97a37] text-[#fff8eb] hover:bg-[#c56a2b]' : 'border-[#4a3a6b] bg-[#3f3360] text-[#f4ead7] hover:bg-[#33294f]',
+                            'w-full rounded-2xl border border-[#c76a2c] bg-[#d97a37] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#fff8eb] transition hover:bg-[#c56a2b]',
                             isSelected ? '' : 'invisible pointer-events-none',
                           ].join(' ')}
                           data-deck-interactive="true"
-                          disabled={submittedIds.has(challenge.id) && cardKind !== 'pin'}
-                          onClick={() => (cardKind === 'judged' ? onOpenJudged : onLocateChallenge)?.(challenge.id)}
+                          onClick={() => onLocateChallenge?.(challenge.id)}
                           type="button"
                         >
-                          {submittedIds.has(challenge.id) ? 'Submitted' : cardKind === 'judged' ? 'Submit for judging' : 'Show on map'}
+                          Show on map
                         </button>
                       ) : isZoneClaimBlocked ? (
                         <button
@@ -540,7 +534,8 @@ export function ChallengeDeck({
               </button>
             </div>
 
-            <div className="mt-3"><ScoreChips challenge={detailChallenge} /></div>
+            <div className="mt-3 flex flex-wrap items-center gap-2"><ScoreChips challenge={detailChallenge} />{isJudgedChallengeConfig(detailChallenge.config) ? <JudgedMark challenge={detailChallenge} /> : null}</div>
+            {isJudgedChallengeConfig(detailChallenge.config) ? <p className="mt-2 text-xs text-[#6b777b]">Judged: complete it like any challenge; the judges award the points after the game.</p> : null}
             <p className="mt-4 text-sm leading-7 text-[#44545c]">{getLongDescription(detailChallenge)}</p>
             <div className="mt-4"><BonusList challenge={detailChallenge} /></div>
 
@@ -718,36 +713,24 @@ function locationPillClassName(status: GeolocationStatus): string {
 }
 
 
-const EMPTY_IDS = new Set<string>();
-const FILTER_LABELS: Record<DeckFilter, string> = { all: 'All', pin: 'On map', anywhere: 'Anywhere', judged: 'Judged' };
-
-function matchesFilter(kind: CardKind, filter: DeckFilter): boolean {
-  if (filter === 'all') return true;
-  if (filter === 'judged') return kind === 'judged' || kind === 'judged-pin';
-  if (filter === 'pin') return kind === 'pin';
-  return kind === 'anywhere';
-}
+const FILTER_LABELS: Record<DeckFilter, string> = { all: 'All', pin: 'On map', anywhere: 'Anywhere' };
 
 function countByFilter(challenges: Challenge[], getCardKind: (challenge: Challenge) => CardKind): Record<DeckFilter, number> {
   const kinds = challenges.map(getCardKind);
-  return {
-    all: kinds.length,
-    pin: kinds.filter((kind) => kind === 'pin').length,
-    anywhere: kinds.filter((kind) => kind === 'anywhere').length,
-    judged: kinds.filter((kind) => matchesFilter(kind, 'judged')).length,
-  };
+  return { all: kinds.length, pin: kinds.filter((kind) => kind === 'pin').length, anywhere: kinds.filter((kind) => kind === 'anywhere').length };
 }
 
-function CardTag({ challenge, kind, distance, submitted }: { challenge: Challenge; kind: CardKind; distance: number | null; submitted: boolean }) {
-  if (kind === 'anywhere') return <AnywhereTag challenge={challenge} />;
-  const isJudged = kind === 'judged' || kind === 'judged-pin';
-  const isPinned = kind === 'pin' || kind === 'judged-pin';
+function CardTag({ challenge, kind, distance }: { challenge: Challenge; kind: CardKind; distance: number | null }) {
+  const judged = isJudgedChallengeConfig(challenge.config) ? <JudgedMark challenge={challenge} compact /> : null;
+  if (kind === 'anywhere') return <div className="flex items-center justify-between gap-2"><AnywhereTag challenge={challenge} />{judged}</div>;
   return (
-    <p className={['mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em]', isJudged ? 'text-[#5b4a86]' : 'text-[#b4602a]'].join(' ')}>
-      <span aria-hidden="true">{isJudged ? '★' : '📍'}</span>
-      <span className="truncate">{isJudged ? 'Judged' : 'On map'}{isJudged && isPinned ? ' · pin' : ''}{isPinned && distance !== null ? ' · ' + formatDistance(distance) : ''}</span>
-      {submitted ? <span className="shrink-0 text-[#39705d]">· ✓ In</span> : null}
-    </p>
+    <div className="mb-1.5 flex items-center justify-between gap-2">
+      <p className="flex min-w-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#b4602a]">
+        <span aria-hidden="true">📍</span>
+        <span className="truncate">On map{distance !== null ? ' · ' + formatDistance(distance) : ''}</span>
+      </p>
+      {judged}
+    </div>
   );
 }
 

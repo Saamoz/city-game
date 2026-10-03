@@ -36,7 +36,7 @@ import { ChallengeDeck, type CardKind } from './ChallengeDeck';
 import { PointChallengeCard, PointChallengeLayer, getPointLocation, isPointChallenge } from './PointChallenges';
 import { GameResultsScreen } from './GameResultsScreen';
 import { formatPoints, type CompletionExtras } from './ChallengeScoring';
-import { JudgedChallengesOverlay, getJudgedSubmissions, isJudgedChallenge } from './JudgedChallenges';
+import { isJudgedChallenge } from './JudgedChallenges';
 import {
   FeedOverlay,
   MiniScoreboardCard,
@@ -97,7 +97,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const deckWrapperHeightRef = useRef(320);
   const deckSwipeRef = useRef({ active: false, startX: 0, startY: 0, startTime: 0, committed: false });
   const feedAbortRef = useRef<AbortController | null>(null);
-  const [activeOverlay, setActiveOverlay] = useState<'scoreboard' | 'feed' | 'judged' | null>(null);
+  const [activeOverlay, setActiveOverlay] = useState<'scoreboard' | 'feed' | null>(null);
   const [recentEvents, setRecentEvents] = useState<GameEventRecord[]>([]);
   const [feedStatus, setFeedStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [feedErrorMessage, setFeedErrorMessage] = useState<string | null>(null);
@@ -571,13 +571,13 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const currentPoint = gpsPayload ? [gpsPayload.lng, gpsPayload.lat] as [number, number] : null;
   const currentZone = useMemo(() => snapshot ? findContainingZone(snapshot.zones, currentPoint) : null, [currentPoint, snapshot]);
   const broadcastTeamLocations = Boolean(snapshot?.game.settings?.broadcast_team_locations);
-  const pointChallenges = (snapshot?.challenges ?? []).filter((challenge) => challenge.status === 'available' && isPointChallenge(challenge));
-  const regularPinCount = pointChallenges.filter((challenge) => !isJudgedChallenge(challenge)).length;
-  // Point games show every challenge as a card (pins and judged ones hand off to the map / judged sheet).
-  const deckChallenges = useMemo(() => (snapshot?.challenges ?? []).filter((challenge) => isPointMode || (!isPointChallenge(challenge) && !isJudgedChallenge(challenge))), [isPointMode, snapshot?.challenges]);
-  const judgedChallenges = useMemo(() => (snapshot?.challenges ?? []).filter((challenge) => isJudgedChallenge(challenge) && challenge.status === 'available'), [snapshot?.challenges]);
-  const teamSubmittedIds = useMemo(() => new Set((snapshot?.claims ?? []).filter((claim) => claim.status === 'submitted' && claim.teamId === team?.id).map((claim) => claim.challengeId)), [snapshot?.claims, team?.id]);
-  const judgedRemainingCount = judgedChallenges.filter((challenge) => !teamSubmittedIds.has(challenge.id)).length;
+  const teamSubmittedIds = useMemo(() => getTeamSubmittedIds(snapshot), [snapshot]);
+  // Your team's view: a judged challenge you already submitted is done for you, like a completed one.
+  const teamChallenges = useMemo(() => (snapshot?.challenges ?? []).filter((challenge) => !teamSubmittedIds.has(challenge.id)), [snapshot?.challenges, teamSubmittedIds]);
+  const pointChallenges = teamChallenges.filter((challenge) => challenge.status === 'available' && isPointChallenge(challenge));
+  const regularPinCount = pointChallenges.length;
+  // Point games show every challenge as a card; pinned ones hand off to the map.
+  const deckChallenges = useMemo(() => teamChallenges.filter((challenge) => isPointMode || (!isPointChallenge(challenge) && !isJudgedChallenge(challenge))), [isPointMode, teamChallenges]);
   const anywhereAvailableCount = deckChallenges.filter((challenge) => challenge.status === 'available' && getCardKind(challenge) === 'anywhere').length;
   // Pure pin sets have no deck at all; mixed sets keep it for the anywhere cards.
   const showDeck = !isPointMode || deckChallenges.length > 0;
@@ -587,15 +587,9 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const selectedPointDistance = currentPoint && selectedPointLocation
     ? distanceBetweenLngLat(currentPoint, [selectedPointLocation.coordinates[0] as number, selectedPointLocation.coordinates[1] as number])
     : null;
-  const selectedJudgedSubmissions = selectedPointChallenge && isJudgedChallenge(selectedPointChallenge) ? getJudgedSubmissions(snapshot?.claims ?? [], selectedPointChallenge.id) : null;
   const distanceToChallenge = (challenge: Challenge) => {
     const point = getPointLocation(challenge);
     return currentPoint && point ? distanceBetweenLngLat(currentPoint, [point.coordinates[0] as number, point.coordinates[1] as number]) : null;
-  };
-  const openJudgedChallenge = (id: string) => {
-    const challenge = snapshot?.challenges.find((entry) => entry.id === id);
-    if (challenge && isPointChallenge(challenge)) focusPointChallenge(id);
-    else setActiveOverlay('judged');
   };
   const focusPointChallenge = (id: string) => {
     setSelectedPointChallengeId(id);
@@ -702,7 +696,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
         );
         applyCompletedMutation(gameId, response);
         setToast(response.claim.status === 'submitted'
-          ? { tone: 'success', title: 'Submitted for judging', body: 'Judges will score it after the game.' }
+          ? { tone: 'success', title: 'Challenge submitted', body: '★ Judged: points are awarded after the game.' }
           : { tone: 'success', title: response.zone ? `${response.zone.name} captured` : 'Challenge completed', body: describeAward(response.resourcesAwarded) });
         return response;
       };
@@ -884,7 +878,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,234,215,0.16),transparent_28%),linear-gradient(180deg,rgba(223,230,232,0.04),rgba(223,230,232,0.16))]" />
 
       <ZoneLayer map={mapForLayer} snapshot={snapshot} />
-      <PointChallengeLayer map={mapForLayer} challenges={snapshot?.challenges ?? []} selectedId={selectedPointChallengeId} submittedIds={teamSubmittedIds} onSelect={focusPointChallenge} />
+      <PointChallengeLayer map={mapForLayer} challenges={teamChallenges} selectedId={selectedPointChallengeId} onSelect={focusPointChallenge} />
       {selectedPointChallenge ? (
         <PointChallengeCard
           key={selectedPointChallenge.id}
@@ -894,7 +888,6 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           pending={isPending('capture:' + selectedPointChallenge.id)}
           onClose={() => setSelectedPointChallengeId(null)}
           onComplete={(extras) => { handleCaptureChallenge(selectedPointChallenge.id, null, extras); }}
-          judged={selectedJudgedSubmissions ? { submissions: selectedJudgedSubmissions, teams: snapshot?.teams ?? [], ownClaim: selectedJudgedSubmissions.find((claim) => claim.teamId === team?.id) ?? null } : null}
         />
       ) : null}
 
@@ -923,7 +916,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 ) : null}
               </div>
               {isPointMode && snapshot ? (
-                <PointModeLegend pinCount={regularPinCount} anywhereCount={anywhereAvailableCount} showAnywhere={showDeck} judgedCount={judgedChallenges.length} judgedRemaining={judgedRemainingCount} onOpenJudged={() => setActiveOverlay('judged')} />
+                <PointModeLegend pinCount={regularPinCount} anywhereCount={anywhereAvailableCount} showAnywhere={showDeck} />
               ) : null}
               {currentZone ? (
                 <span className="inline-flex max-w-full rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] backdrop-blur-sm">
@@ -958,7 +951,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 </p>
               </div>
               {isPointMode && snapshot ? (
-                <PointModeLegend pinCount={regularPinCount} anywhereCount={anywhereAvailableCount} showAnywhere={showDeck} judgedCount={judgedChallenges.length} judgedRemaining={judgedRemainingCount} onOpenJudged={() => setActiveOverlay('judged')} />
+                <PointModeLegend pinCount={regularPinCount} anywhereCount={anywhereAvailableCount} showAnywhere={showDeck} />
               ) : null}
               <MiniScoreboardCard
                 entries={scoreboardEntries}
@@ -1055,9 +1048,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                   variant={isPointMode ? 'anywhere' : 'zones'}
                   getCardKind={getCardKind}
                   distanceTo={distanceToChallenge}
-                  submittedIds={teamSubmittedIds}
                   onLocateChallenge={focusPointChallenge}
-                  onOpenJudged={openJudgedChallenge}
                   rerollState={snapshot.challengeReroll}
                   teamId={snapshot.team?.id ?? null}
                   completedCards={completedCards}
@@ -1112,9 +1103,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               variant={isPointMode ? 'anywhere' : 'zones'}
               getCardKind={getCardKind}
               distanceTo={distanceToChallenge}
-              submittedIds={teamSubmittedIds}
               onLocateChallenge={(id) => { setIsDeckOpen(false); focusPointChallenge(id); }}
-              onOpenJudged={(id) => { setIsDeckOpen(false); openJudgedChallenge(id); }}
               rerollState={snapshot.challengeReroll}
               teamId={snapshot.team?.id ?? null}
               completedCards={completedCards}
@@ -1248,20 +1237,6 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
         />
       ) : null}
 
-      {activeOverlay === 'judged' && snapshot ? (
-        <JudgedChallengesOverlay
-          challenges={judgedChallenges}
-          claims={snapshot.claims}
-          teams={snapshot.teams}
-          teamId={team?.id ?? null}
-          distanceTo={distanceToChallenge}
-          isPending={(challengeId) => isPending('capture:' + challengeId)}
-          onSubmit={(challengeId, extras) => handleCaptureChallenge(challengeId, null, extras)}
-          onLocate={(challengeId) => { setActiveOverlay(null); focusPointChallenge(challengeId); }}
-          onClose={() => setActiveOverlay(null)}
-        />
-      ) : null}
-
       {activeOverlay === 'feed' ? (
         <FeedOverlay
           entries={feedEntries}
@@ -1358,12 +1333,15 @@ function Toast({ tone, title, body, accentColor }: ToastMessage) {
 }
 
 function getCardKind(challenge: Challenge): CardKind {
-  const pinned = isPointChallenge(challenge);
-  if (isJudgedChallenge(challenge)) return pinned ? 'judged-pin' : 'judged';
-  return pinned ? 'pin' : 'anywhere';
+  return isPointChallenge(challenge) ? 'pin' : 'anywhere';
 }
 
-function PointModeLegend({ pinCount, anywhereCount, showAnywhere, judgedCount, judgedRemaining, onOpenJudged }: { pinCount: number; anywhereCount: number; showAnywhere: boolean; judgedCount: number; judgedRemaining: number; onOpenJudged(): void }) {
+function getTeamSubmittedIds(snapshot: GameStateSnapshot | null): Set<string> {
+  const teamId = snapshot?.team?.id;
+  return new Set((snapshot?.claims ?? []).filter((claim) => claim.status === 'submitted' && claim.teamId === teamId).map((claim) => claim.challengeId));
+}
+
+function PointModeLegend({ pinCount, anywhereCount, showAnywhere }: { pinCount: number; anywhereCount: number; showAnywhere: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#24343a]">
       <span className="inline-flex items-center gap-1.5 rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 backdrop-blur-sm">
@@ -1375,12 +1353,6 @@ function PointModeLegend({ pinCount, anywhereCount, showAnywhere, judgedCount, j
           <span className="h-2.5 w-2 rounded-[2px] border border-[#647d74] bg-[#fff8eb]" />
           {anywhereCount} anywhere
         </span>
-      ) : null}
-      {judgedCount > 0 ? (
-        <button className="inline-flex items-center gap-1.5 rounded-full border border-[#8f80b8]/70 bg-[#ece6f6]/95 px-3 py-1.5 font-semibold uppercase text-[#3f3360] backdrop-blur-sm" onClick={onOpenJudged} type="button">
-          <span aria-hidden="true">★</span>
-          {judgedRemaining > 0 ? judgedRemaining + ' judged to do' : 'Judged: all in'}
-        </button>
       ) : null}
     </div>
   );
@@ -1447,9 +1419,10 @@ function buildChallengeProgressLabel(counts: ReturnType<typeof buildChallengeCou
 }
 
 function getAvailableDeckChallenges(snapshot: GameStateSnapshot | null) {
+  const submittedIds = getTeamSubmittedIds(snapshot);
   return [...(snapshot?.challenges ?? [])]
     // Point games show every challenge as a card; territory decks leave pins and judged ones out.
-    .filter((challenge) => challenge.status === 'available' && (snapshot?.game.modeKey === 'point_challenge' || (!isPointChallenge(challenge) && !isJudgedChallenge(challenge))))
+    .filter((challenge) => challenge.status === 'available' && !submittedIds.has(challenge.id) && (snapshot?.game.modeKey === 'point_challenge' || (!isPointChallenge(challenge) && !isJudgedChallenge(challenge))))
     .sort((left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title));
 }
 

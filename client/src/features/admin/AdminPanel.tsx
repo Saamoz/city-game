@@ -37,7 +37,6 @@ import {
   updateGameDefinition,
   updateTeamDefinition,
 } from '../../lib/api';
-import { JudgingPanel } from './JudgingPanel';
 
 interface AdminPanelProps {
   initialGameId: string | null;
@@ -692,6 +691,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                     <AnchorPill href={'/game/' + selectedGameId} label="Open Game" />
                     {currentGame?.mapId ? <AnchorPill href={'/admin/zones?mapId=' + currentGame.mapId} label="Map" /> : null}
                     {currentGame?.challengeSetId ? <AnchorPill href={'/admin/challenges?setId=' + currentGame.challengeSetId} label="Challenges" /> : null}
+                    {currentGame?.modeKey === 'point_challenge' ? <AnchorPill href={'/admin/judging?gameId=' + selectedGameId} label="★ Judging" /> : null}
                   </div>
                 ) : null
               }
@@ -1038,8 +1038,14 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
             </PanelCard>
           </div>
 
-          {currentGame && currentGame.status !== 'setup' ? (
-            <JudgingPanel game={currentGame} teams={teams} onPublished={() => { void refreshCurrentGame(); }} />
+          {currentGame && currentGame.status !== 'setup' && currentGame.modeKey === 'point_challenge' ? (
+            <a href={'/admin/judging?gameId=' + currentGame.id} className="flex items-center justify-between gap-4 rounded-[1.75rem] border border-[#cbc3dc] bg-white p-5 shadow-[0_20px_50px_rgba(21,31,37,0.08)] transition hover:border-[#8f80b8]">
+              <div>
+                <h2 className="text-lg font-semibold text-[#182126]">★ Judging</h2>
+                <p className="mt-1 text-sm text-[#5d6a72]">Judge the challenges teams have completed and publish the scores.</p>
+              </div>
+              <span className="shrink-0 rounded-full bg-[#3f3360] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white">Open</span>
+            </a>
           ) : null}
 
           <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

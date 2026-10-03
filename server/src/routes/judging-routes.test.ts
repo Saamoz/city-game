@@ -13,6 +13,7 @@ const TEAM_TWO_ID = 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa';
 const PLAYER_TWO_ID = 'bbbbbbbb-3333-4333-8333-bbbbbbbbbbbb';
 const JUDGED_ID = '55555555-5555-4555-8555-555555555555';
 const REGULAR_ID = '88888888-8888-4888-8888-888888888888';
+const BEST_ID = '66666666-6666-4666-8666-666666666666';
 
 describe('judged challenges', () => {
   let app: FastifyInstance;
@@ -95,6 +96,52 @@ describe('judged challenges', () => {
     expect(await pointsFor(TEAM_ONE_ID)).toBe(2);
     expect(await pointsFor(TEAM_TWO_ID)).toBe(3);
   });
+
+  it('scores yes/no and best-team judging from the judge decision', async () => {
+    await seedPointGame();
+    await testDatabase.db.update(challenges).set({
+      scoring: { points: 4 },
+      config: { portable: true, location_mode: 'portable', judged: true, judging_type: 'pass_fail', bonuses: [{ id: 'b1', label: 'In costume', points: 2 }, { id: 'b2', label: 'Sang it', points: 3 }] },
+    }).where(eq(challenges.id, JUDGED_ID));
+    await testDatabase.db.insert(challenges).values(createTestChallenge({ id: BEST_ID, zoneId: null, isDeckActive: true, scoring: { points: 5 }, config: { portable: true, location_mode: 'portable', judged: true, judging_type: 'best_wins' } }));
+    app = await createTestApp({ db: testDatabase.db });
+
+    expect((await submit('team-one-session', 'pf-1', { bonusIds: ['b1', 'b2'] })).statusCode).toBe(200);
+    expect((await submit('team-two-session', 'pf-2', null)).statusCode).toBe(200);
+    expect((await submitTo(BEST_ID, 'team-one-session', 'best-1')).statusCode).toBe(200);
+    expect((await submitTo(BEST_ID, 'team-two-session', 'best-2')).statusCode).toBe(200);
+    await waitFor(async () => (await getGameStatus()) === 'completed');
+
+    const sheet = (await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/judging' })).json().judging;
+    const passFail = sheet.challenges.find((entry: { challenge: { id: string } }) => entry.challenge.id === JUDGED_ID);
+    const best = sheet.challenges.find((entry: { challenge: { id: string } }) => entry.challenge.id === BEST_ID);
+    expect(passFail).toMatchObject({ judgingType: 'pass_fail', basePoints: 4 });
+    expect(best).toMatchObject({ judgingType: 'best_wins', basePoints: 5 });
+    const claimOf = (entry: { submissions: Array<{ claimId: string; teamId: string }> }, teamId: string) => entry.submissions.find((submission) => submission.teamId === teamId)!.claimId;
+
+    // Team one passes and the judge approves only one of the two bonuses it claimed; team two fails.
+    const pass = await decide(claimOf(passFail, TEAM_ONE_ID), { verdict: 'pass', bonusIds: ['b1'] });
+    expect(pass.json().points).toBe(6);
+    expect((await decide(claimOf(passFail, TEAM_TWO_ID), { verdict: 'fail' })).json().points).toBe(0);
+    // Team two is the best on the other challenge.
+    expect((await decide(claimOf(best, TEAM_TWO_ID), { verdict: 'winner' })).json().points).toBe(5);
+    expect((await decide(claimOf(best, TEAM_ONE_ID), { verdict: 'pass' })).statusCode).toBe(400);
+
+    const refreshed = (await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/judging' })).json().judging;
+    expect(refreshed.challenges.find((entry: { challenge: { id: string } }) => entry.challenge.id === JUDGED_ID).submissions.find((entry: { teamId: string }) => entry.teamId === TEAM_ONE_ID).decision).toEqual({ verdict: 'pass', bonusIds: ['b1'] });
+
+    expect((await app.inject({ method: 'POST', url: '/api/v1/game/' + GAME_ID + '/judging/publish', headers: { 'idempotency-key': 'publish-decisions' } })).statusCode).toBe(200);
+    expect(await pointsFor(TEAM_ONE_ID)).toBe(6);
+    expect(await pointsFor(TEAM_TWO_ID)).toBe(5);
+  });
+
+  function submitTo(challengeId: string, sessionToken: string, actionId: string) {
+    return app.inject({ method: 'POST', url: '/api/v1/challenges/' + challengeId + '/complete', cookies: { [SESSION_COOKIE_NAME]: sessionToken }, headers: { 'idempotency-key': actionId }, payload: { gps: null } });
+  }
+
+  function decide(claimId: string, payload: Record<string, unknown>) {
+    return app.inject({ method: 'PUT', url: '/api/v1/judging/submissions/' + claimId, headers: { 'idempotency-key': 'decide-' + claimId + '-' + JSON.stringify(payload) }, payload });
+  }
 
   async function seedPointGame() {
     await testDatabase.db.insert(games).values(createTestGame({ status: 'active', modeKey: 'point_challenge', startedAt: new Date(Date.now() - 60_000) }));

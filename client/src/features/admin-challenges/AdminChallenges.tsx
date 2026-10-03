@@ -8,7 +8,13 @@ import type {
   MapDefinition,
   MapZone,
 } from '@city-game/shared';
-import { DEFAULT_CHALLENGE_POINTS, MAX_CHALLENGE_BONUSES, getBasePoints, getChallengeBonuses, getMaxBonusPoints } from '@city-game/shared';
+import { DEFAULT_CHALLENGE_POINTS, JUDGING_TYPES, JUDGING_TYPE_LABELS, MAX_CHALLENGE_BONUSES, getBasePoints, getChallengeBonuses, getJudgingType, getMaxBonusPoints, type JudgingType } from '@city-game/shared';
+
+const JUDGING_TYPE_HELP: Record<JudgingType, string> = {
+  pass_fail: 'Judges decide yes or no for each team that did it. Yes earns the points.',
+  best_wins: 'Judges pick the best team (or tied teams). Only they earn the points.',
+  points: 'Judges give each team any number of points.',
+};
 import {
   ApiError,
   createChallengeSetDefinition,
@@ -61,6 +67,7 @@ interface ItemFormState {
   placement: ItemPlacement;
   locationHint: string;
   scoringMode: 'instant' | 'judged';
+  judgingType: JudgingType;
   judgedMaxPoints: string;
 }
 
@@ -100,6 +107,7 @@ const INITIAL_ITEM_FORM: ItemFormState = {
   placement: 'pinned',
   locationHint: '',
   scoringMode: 'instant',
+  judgingType: 'pass_fail',
   judgedMaxPoints: '',
 };
 
@@ -388,9 +396,9 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
         ...(isPinned ? { point_radius_meters: Math.max(1, Number(itemForm.pointRadiusMeters) || 40) } : {}),
         ...(!isPinned && setForm.locationMode !== 'zone' && locationHint ? { location_hint: locationHint } : {}),
         ...(bonuses.length ? { bonuses } : {}),
-        ...(isJudged ? { judged: true, ...(judgedMaxPoints > 0 ? { judged_max_points: judgedMaxPoints } : {}) } : {}),
+        ...(isJudged ? { judged: true, judging_type: itemForm.judgingType, ...(itemForm.judgingType === 'points' && judgedMaxPoints > 0 ? { judged_max_points: judgedMaxPoints } : {}) } : {}),
       } satisfies JsonObject,
-      scoring: !isJudged ? { points: basePoints } : {} as Record<string, number>,
+      scoring: !isJudged || itemForm.judgingType !== 'points' ? { points: basePoints } : {} as Record<string, number>,
       difficulty: itemForm.difficulty || null,
       sortOrder: selectedItem ? selectedItem.sortOrder : items.length,
       metadata: ((setForm.locationMode === 'zone' || isPinned) && itemForm.mapId ? { sourceMapId: itemForm.mapId } : {}) as JsonObject,
@@ -750,14 +758,26 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                   <button className={placementClassName(itemForm.scoringMode === 'instant')} onClick={() => setItemForm((current) => ({ ...current, scoringMode: 'instant' }))} type="button">Instant points</button>
                   <button className={placementClassName(itemForm.scoringMode === 'judged')} onClick={() => setItemForm((current) => ({ ...current, scoringMode: 'judged' }))} type="button">Judged after game</button>
                 </div>
-                <p className="mt-2 text-xs leading-5 text-[#6b777b]">{itemForm.scoringMode === 'judged' ? 'Stays open all game. Every team can submit it once; you award points per team after the game from the admin panel.' : 'The first team to complete it takes the points, and it disappears for everyone.'}</p>
+                <p className="mt-2 text-xs leading-5 text-[#6b777b]">{itemForm.scoringMode === 'judged' ? 'Every team can complete it once; it disappears for a team once they have. You award the points on the Judging page after the game.' : 'The first team to complete it takes the points, and it disappears for everyone.'}</p>
               </div>
             ) : null}
 
-            {setForm.locationMode !== 'point' || itemForm.scoringMode === 'instant' ? (
+            {setForm.locationMode === 'point' && itemForm.scoringMode === 'judged' ? (
+              <div>
+                <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a6a48]">How it's judged</span>
+                <div className="grid grid-cols-3 gap-2">
+                  {JUDGING_TYPES.map((type) => (
+                    <button key={type} className={placementClassName(itemForm.judgingType === type)} onClick={() => setItemForm((current) => ({ ...current, judgingType: type }))} type="button">{JUDGING_TYPE_LABELS[type]}</button>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs leading-5 text-[#6b777b]">{JUDGING_TYPE_HELP[itemForm.judgingType]}</p>
+              </div>
+            ) : null}
+
+            {setForm.locationMode !== 'point' || itemForm.scoringMode === 'instant' || itemForm.judgingType !== 'points' ? (
               <Field label="Challenge Points">
                 <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a] outline-none focus:border-[#8f7446]" min="0" onChange={(event) => setItemForm((current) => ({ ...current, pointValue: event.target.value }))} type="number" value={itemForm.pointValue} />
-                <p className="mt-1 text-xs leading-5 text-[#6b777b]">Base points the team earns for completing it. Bonus tasks add on top.</p>
+                <p className="mt-1 text-xs leading-5 text-[#6b777b]">{itemForm.scoringMode === 'judged' && setForm.locationMode === 'point' ? (itemForm.judgingType === 'best_wins' ? 'Points the winning team gets.' : 'Points a team gets when judged a yes. Approved bonuses add on top.') : 'Base points the team earns for completing it. Bonus tasks add on top.'}</p>
               </Field>
             ) : null}
 
@@ -767,7 +787,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
               onChange={(bonuses) => setItemForm((current) => ({ ...current, bonuses }))}
             />
 
-            {setForm.locationMode === 'point' && itemForm.scoringMode === 'judged' ? (
+            {setForm.locationMode === 'point' && itemForm.scoringMode === 'judged' && itemForm.judgingType === 'points' ? (
               <Field label="Max Points (optional)">
                 <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a] outline-none focus:border-[#8f7446]" min="1" onChange={(event) => setItemForm((current) => ({ ...current, judgedMaxPoints: event.target.value }))} placeholder="e.g. 10" type="number" value={itemForm.judgedMaxPoints} />
                 <p className="mt-1 text-xs leading-5 text-[#6b777b]">Shown to players as "up to N pts" and to judges as a guide.</p>
@@ -875,6 +895,7 @@ function buildItemForm(item: ChallengeSetItem): ItemFormState {
     placement: item.mapPoint ? 'pinned' : 'anywhere',
     locationHint: typeof item.config?.location_hint === 'string' ? item.config.location_hint : '',
     scoringMode: item.config?.judged === true ? 'judged' : 'instant',
+    judgingType: getJudgingType(item.config),
     judgedMaxPoints: typeof item.config?.judged_max_points === 'number' ? String(item.config.judged_max_points) : '',
   };
 }
@@ -903,7 +924,7 @@ function BonusEditor({ rows, isJudged, onChange }: { rows: BonusFormRow[]; isJud
         ))}
       </div>
       {rows.length < MAX_CHALLENGE_BONUSES ? <button className="mt-2 rounded-full border border-dashed border-[#a88c52] bg-[#fff8eb] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#5d4d33]" onClick={() => onChange([...rows, { id: 'bonus-' + crypto.randomUUID().slice(0, 8), label: '', points: '1' }])} type="button">+ Add bonus</button> : null}
-      <p className="mt-1.5 text-xs leading-5 text-[#6b777b]">{isJudged ? 'Teams tick the ones they did when submitting; judges see their picks.' : 'Optional extras, up to ' + MAX_CHALLENGE_BONUSES + '. Teams tick the ones they did when completing, and each adds its points.'}</p>
+      <p className="mt-1.5 text-xs leading-5 text-[#6b777b]">{isJudged ? 'Up to ' + MAX_CHALLENGE_BONUSES + '. Teams tick the ones they did when completing; judges approve each one.' : 'Optional extras, up to ' + MAX_CHALLENGE_BONUSES + '. Teams tick the ones they did when completing, and each adds its points.'}</p>
     </div>
   );
 }
@@ -916,7 +937,7 @@ function countPlacements(items: ChallengeSetItem[]): string {
 
 function PlacementBadge({ item, setMode }: { item: ChallengeSetItem; setMode: ChallengeSetItemLocationMode }) {
   const hint = typeof item.config?.location_hint === 'string' ? item.config.location_hint : '';
-  const judged = item.config?.judged === true ? <Badge tone="judged">★ Judged</Badge> : null;
+  const judged = item.config?.judged === true ? <Badge tone="judged">★ {JUDGING_TYPE_LABELS[getJudgingType(item.config)]}</Badge> : null;
   if (setMode === 'zone') return <Badge tone="linked">Zone linked</Badge>;
   if (setMode === 'point' && item.mapPoint) return <>{judged}<Badge tone="linked">Pinned</Badge></>;
   return <>{judged}<Badge tone="portable">{hint || (setMode === 'point' ? 'Anywhere' : 'Portable')}</Badge></>;

@@ -232,6 +232,7 @@ export const challengeClaims = pgTable(
     warningSent: boolean('warning_sent').notNull().default(false),
     judgedPoints: integer('judged_points'),
     judgedAt: timestamp('judged_at', { withTimezone: true }),
+    judgedDecision: jsonb('judged_decision'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({

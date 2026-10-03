@@ -1,5 +1,5 @@
 export interface ParsedRoute {
-  kind: 'landing' | 'game' | 'admin-zones' | 'admin-challenges' | 'admin';
+  kind: 'landing' | 'game' | 'admin-zones' | 'admin-challenges' | 'admin-judging' | 'admin';
   gameId: string | null;
   mapId: string | null;
   challengeSetId: string | null;
@@ -8,6 +8,7 @@ export interface ParsedRoute {
 const GAME_PATH_PATTERN = /^\/game\/([0-9a-fA-F-]+)$/;
 const ADMIN_ZONES_PATH = '/admin/zones';
 const ADMIN_CHALLENGES_PATH = '/admin/challenges';
+const ADMIN_JUDGING_PATH = '/admin/judging';
 const ADMIN_PATH = '/admin';
 const SUPPRESS_AUTO_ENTER_KEY = 'city-game:suppress-auto-enter';
 
@@ -41,6 +42,16 @@ export function parseRoute(pathname: string): ParsedRoute {
       gameId: null,
       mapId: null,
       challengeSetId: searchParams.get('setId'),
+    };
+  }
+
+  if (normalizedPathname === ADMIN_JUDGING_PATH) {
+    const searchParams = new URLSearchParams(window.location.search);
+    return {
+      kind: 'admin-judging',
+      gameId: searchParams.get('gameId'),
+      mapId: null,
+      challengeSetId: null,
     };
   }
 

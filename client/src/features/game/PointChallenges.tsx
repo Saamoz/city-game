@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
-import { DEFAULT_POINT_CHALLENGE_RADIUS_METERS, getBasePoints, getChallengeBonuses, isJudgedChallengeConfig, type Challenge, type ChallengeClaim, type GeoJsonPoint, type Team } from '@city-game/shared';
+import { DEFAULT_POINT_CHALLENGE_RADIUS_METERS, getBasePoints, getChallengeBonuses, isJudgedChallengeConfig, type Challenge, type GeoJsonPoint } from '@city-game/shared';
 import { BonusChecklist, BonusList, PointsTotal, ScoreChips, formatPoints, useBonusSelection, type CompletionExtras } from './ChallengeScoring';
-import { JudgedSubmitForm, JudgedTag, SubmittedBadge, SubmittedTeams } from './JudgedChallenges';
+import { JudgedMark } from './JudgedChallenges';
 import type { GeolocationStatus } from './useGeolocation';
 
 export function getPointLocation(challenge: Challenge): GeoJsonPoint | null {
@@ -19,9 +19,9 @@ export function getPointRadius(challenge: Challenge): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : DEFAULT_POINT_CHALLENGE_RADIUS_METERS;
 }
 
-interface LayerProps { map: mapboxgl.Map | null; challenges: Challenge[]; selectedId: string | null; submittedIds: Set<string>; onSelect(id: string): void }
+interface LayerProps { map: mapboxgl.Map | null; challenges: Challenge[]; selectedId: string | null; onSelect(id: string): void }
 
-export function PointChallengeLayer({ map, challenges, selectedId, submittedIds, onSelect }: LayerProps) {
+export function PointChallengeLayer({ map, challenges, selectedId, onSelect }: LayerProps) {
   const markers = useRef(new Map<string, mapboxgl.Marker>());
   useEffect(() => {
     if (!map) return;
@@ -37,17 +37,15 @@ export function PointChallengeLayer({ map, challenges, selectedId, submittedIds,
         button.className = 'point-challenge-marker';
         button.setAttribute('aria-label', challenge.title);
         const judged = isJudgedChallengeConfig(challenge.config);
-        button.classList.toggle('is-judged', judged);
         button.innerHTML = '<span class="point-challenge-marker__pulse"></span><span class="point-challenge-marker__pin"><span>' + (judged ? '★' : '!') + '</span></span>';
         button.addEventListener('click', (event) => { event.stopPropagation(); onSelect(challenge.id); });
         marker = new mapboxgl.Marker({ element: button, anchor: 'bottom' }).setLngLat([point.coordinates[0] as number, point.coordinates[1] as number]).addTo(map);
         markers.current.set(challenge.id, marker);
       }
       marker.getElement().classList.toggle('is-selected', challenge.id === selectedId);
-      marker.getElement().classList.toggle('is-done', submittedIds.has(challenge.id));
     }
     return () => {};
-  }, [map, challenges, selectedId, submittedIds, onSelect]);
+  }, [map, challenges, selectedId, onSelect]);
   useEffect(() => () => { for (const marker of markers.current.values()) marker.remove(); markers.current.clear(); }, []);
   return null;
 }
@@ -55,10 +53,10 @@ export function PointChallengeLayer({ map, challenges, selectedId, submittedIds,
 interface CardProps {
   challenge: Challenge; distanceMeters: number | null; locationStatus: GeolocationStatus;
   pending: boolean; onClose(): void; onComplete(extras?: CompletionExtras): void;
-  judged?: { submissions: ChallengeClaim[]; teams: Team[]; ownClaim: ChallengeClaim | null } | null;
 }
 
-export function PointChallengeCard({ challenge, distanceMeters, locationStatus, pending, onClose, onComplete, judged = null }: CardProps) {
+export function PointChallengeCard({ challenge, distanceMeters, locationStatus, pending, onClose, onComplete }: CardProps) {
+  const judged = isJudgedChallengeConfig(challenge.config);
   const radius = getPointRadius(challenge);
   const inRange = distanceMeters !== null && distanceMeters <= radius;
   const short = typeof challenge.config?.short_description === 'string' ? challenge.config.short_description : challenge.description;
@@ -71,9 +69,9 @@ export function PointChallengeCard({ challenge, distanceMeters, locationStatus, 
       <div className="h-1.5 bg-gradient-to-r from-[#d97a37] via-[#c9ae6d] to-[#647d74]" />
       <div className="max-h-[72dvh] overflow-y-auto p-5">
         <div className="flex items-start justify-between gap-4">
-          <div>{judged ? <JudgedTag challenge={challenge} /> : <p className="text-[10px] font-bold uppercase tracking-[.28em] text-[#936718]">On-location challenge</p>}
+          <div><p className="flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-[.28em] text-[#936718]">On-location challenge{judged ? <JudgedMark challenge={challenge} /> : null}</p>
           <h2 className="mt-2 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold leading-tight text-[#1f2a2f]">{challenge.title}</h2>
-          <div className="mt-2"><ScoreChips challenge={challenge} showBase={!judged} /></div></div>
+          <div className="mt-2"><ScoreChips challenge={challenge} /></div></div>
           <button className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#eee4cf] text-lg text-[#44545c]" onClick={onClose} aria-label="Close" type="button">x</button>
         </div>
         <p className="mt-3 text-sm leading-6 text-[#526269]">{short}</p>
@@ -83,28 +81,17 @@ export function PointChallengeCard({ challenge, distanceMeters, locationStatus, 
             {distanceMeters === null ? 'Locating...' : inRange ? 'You are here' : Math.round(distanceMeters) + ' m away'}
           </span>
         </div>
-        {judged ? (
-          <div className="mt-4 space-y-3">
-            <SubmittedTeams submissions={judged.submissions} teams={judged.teams} />
-            {judged.ownClaim ? <BonusList challenge={challenge} /> : null}
-            {judged.ownClaim ? <SubmittedBadge claim={judged.ownClaim} /> : (
-              <JudgedSubmitForm challenge={challenge} disabledReason={inRange ? null : 'Get closer to unlock'} onSubmit={(extras) => onComplete(extras)} pending={pending} />
-            )}
+        {bonuses.length ? (
+          <div className="mt-4 space-y-2">
+            <BonusChecklist bonuses={bonuses} onToggle={toggle} selected={selected} />
+            <PointsTotal base={base} bonuses={bonuses} selected={selected} />
           </div>
-        ) : (
-          <>
-          {bonuses.length ? (
-            <div className="mt-4 space-y-2">
-              <BonusChecklist bonuses={bonuses} onToggle={toggle} selected={selected} />
-              <PointsTotal base={base} bonuses={bonuses} selected={selected} />
-            </div>
-          ) : null}
-          <button className="mt-4 w-full rounded-2xl border border-[#29414b] bg-[#24343a] px-4 py-3.5 text-sm font-semibold uppercase tracking-[.13em] text-[#f4ead7] transition hover:bg-[#1d2b30] disabled:cursor-not-allowed disabled:bg-[#9aa7aa]"
-            disabled={!inRange || pending || locationStatus === 'requesting' || locationStatus === 'unsupported'} onClick={() => onComplete({ bonusIds: [...selected] })} type="button">
-            {pending ? 'Completing...' : inRange ? 'Complete · ' + formatPoints(total) : 'Get closer to unlock'}
-          </button>
-          </>
-        )}
+        ) : null}
+        <button className="mt-4 w-full rounded-2xl border border-[#29414b] bg-[#24343a] px-4 py-3.5 text-sm font-semibold uppercase tracking-[.13em] text-[#f4ead7] transition hover:bg-[#1d2b30] disabled:cursor-not-allowed disabled:bg-[#9aa7aa]"
+          disabled={!inRange || pending || locationStatus === 'requesting' || locationStatus === 'unsupported'} onClick={() => onComplete({ bonusIds: [...selected] })} type="button">
+          {pending ? 'Completing...' : inRange ? 'Complete · ' + formatPoints(total) : 'Get closer to unlock'}
+        </button>
+        {judged ? <p className="mt-2 text-center text-[11px] text-[#6b777b]">Judged: points are awarded after the game.</p> : null}
       </div>
     </article>
   </div>;

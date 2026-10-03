@@ -288,10 +288,6 @@ input {
 .point-challenge-marker__pin span { transform: rotate(45deg); }
 .point-challenge-marker__pulse { position: absolute; left: .65rem; bottom: .1rem; width: 2rem; height: .65rem; border-radius: 50%; background: rgba(217,122,55,.25); animation: point-marker-pulse 2s ease-out infinite; }
 .point-challenge-marker.is-selected .point-challenge-marker__pin { background: #24343a; }
-.point-challenge-marker.is-judged .point-challenge-marker__pin { background: #5b4a86; }
-.point-challenge-marker.is-judged .point-challenge-marker__pulse { background: rgba(91,74,134,.25); }
-.point-challenge-marker.is-done { opacity: .55; }
-.point-challenge-marker.is-done .point-challenge-marker__pulse { animation: none; opacity: 0; }
 .point-challenge-marker.is-selected .point-challenge-marker__pin { background: #24343a; }
 @keyframes point-marker-pulse { 0% { transform: scale(.65); opacity: .85; } 75%,100% { transform: scale(1.4); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .point-challenge-marker__pulse { animation: none; } }

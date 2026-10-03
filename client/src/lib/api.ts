@@ -9,6 +9,7 @@ import {
   type ErrorResponse,
   type Game,
   type GameJudgingSheet,
+  type JudgingDecision,
   type GameRecap,
   type GameEventRecord,
   type GameEventType,
@@ -184,8 +185,9 @@ export async function getJudgingSheet(gameId: string, signal?: AbortSignal): Pro
   return response.judging;
 }
 
-export async function setJudgedSubmissionPoints(claimId: string, points: number | null): Promise<void> {
-  await apiRequest<{ ok: true }>('/judging/submissions/' + claimId, { method: 'PUT', body: { points } });
+export async function setJudgingDecision(claimId: string, decision: JudgingDecision | null): Promise<number | null> {
+  const response = await apiRequest<{ ok: true; points: number | null }>('/judging/submissions/' + claimId, { method: 'PUT', body: decision ?? { decision: null } });
+  return response.points;
 }
 
 export async function publishJudgedScores(gameId: string): Promise<GameJudgingSheet> {

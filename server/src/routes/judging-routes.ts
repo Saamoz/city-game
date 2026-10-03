@@ -1,8 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { STATE_VERSION_HEADER, socketServerEventTypes, type ResourceLedgerEntry } from '@city-game/shared';
+import { STATE_VERSION_HEADER, socketServerEventTypes, type JudgingVerdict, type ResourceLedgerEntry } from '@city-game/shared';
 import { executeIdempotentMutation } from '../services/idempotency-service.js';
 import { getGameById } from '../services/game-service.js';
-import { getJudgingSheet, publishJudging, setSubmissionPoints } from '../services/judging-service.js';
+import { getJudgingSheet, publishJudging, setSubmissionDecision } from '../services/judging-service.js';
 
 const idParamsSchema = {
   type: 'object',
@@ -10,12 +10,15 @@ const idParamsSchema = {
   properties: { id: { type: 'string', format: 'uuid' } },
 } as const;
 
-const pointsBodySchema = {
+// Either a decision ({ verdict, bonusIds?, points? }), { decision: null } to clear, or the older { points }.
+const decisionBodySchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['points'],
   properties: {
+    verdict: { type: 'string', enum: ['pass', 'fail', 'winner', 'points'] },
+    bonusIds: { type: 'array', items: { type: 'string' }, maxItems: 10 },
     points: { anyOf: [{ type: 'integer', minimum: -100000, maximum: 100000 }, { type: 'null' }] },
+    decision: { type: 'null' },
   },
 } as const;
 
@@ -26,11 +29,14 @@ export const judgingRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // Draft scores stay private until published, so this does not touch game state or broadcast.
-  app.put('/judging/submissions/:id', { preHandler: [app.requireAdmin], schema: { params: idParamsSchema, body: pointsBodySchema } }, async (request, reply) => {
+  app.put('/judging/submissions/:id', { preHandler: [app.requireAdmin], schema: { params: idParamsSchema, body: decisionBodySchema } }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { points } = request.body as { points: number | null };
-    await setSubmissionPoints(app.db, id, points);
-    reply.send({ ok: true });
+    const body = request.body as { verdict?: JudgingVerdict; bonusIds?: string[]; points?: number | null; decision?: null };
+    const decision = body.verdict
+      ? { verdict: body.verdict, bonusIds: body.bonusIds, ...(typeof body.points === 'number' ? { points: body.points } : {}) }
+      : typeof body.points === 'number' ? { verdict: 'points' as const, points: body.points } : null;
+    const points = await setSubmissionDecision(app.db, id, decision);
+    reply.send({ ok: true, points });
   });
 
   app.post('/game/:id/judging/publish', { preHandler: [app.requireAdmin], schema: { params: idParamsSchema } }, async (request, reply) => {

@@ -2,11 +2,15 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import {
   errorCodes,
   eventTypes,
+  getBasePoints,
+  getChallengeBonuses,
   getClaimedBonuses,
   getJudgedMaxPoints,
+  getJudgingType,
   isJudgedChallengeConfig,
   type GameJudgingSheet,
   type GameJudgingSummary,
+  type JudgingDecision,
   type JsonObject,
   type JsonValue,
   type ResourceLedgerEntry,
@@ -41,6 +45,9 @@ export async function getJudgingSheet(db: DatabaseClient, gameId: string): Promi
     challenges: challengeRows.map((row) => ({
       challenge: serializeChallenge(row),
       maxPoints: getJudgedMaxPoints(row.config),
+      judgingType: getJudgingType(row.config),
+      basePoints: getBasePoints(row.scoring),
+      bonuses: getChallengeBonuses(row.config),
       submissions: claimRows.filter((claim) => claim.challengeId === row.id).map((claim) => ({
         claimId: claim.id,
         teamId: claim.teamId,
@@ -49,17 +56,40 @@ export async function getJudgingSheet(db: DatabaseClient, gameId: string): Promi
         note: getSubmissionNote(claim.submission),
         bonuses: getClaimedBonuses(row.config, claim.submission),
         points: claim.judgedPoints,
+        decision: (claim.judgedDecision as JudgingDecision | null) ?? null,
       })),
     })),
   };
 }
 
-export async function setSubmissionPoints(db: DatabaseClient, claimId: string, points: number | null): Promise<void> {
-  const [claim] = await db.select({ id: challengeClaims.id, status: challengeClaims.status }).from(challengeClaims).where(eq(challengeClaims.id, claimId)).limit(1);
-  if (!claim || claim.status !== 'submitted') {
+// Records the judge's decision and stores the points it is worth. Null clears the decision.
+export async function setSubmissionDecision(db: DatabaseClient, claimId: string, decision: JudgingDecision | null): Promise<number | null> {
+  const [row] = await db.select({ claim: challengeClaims, challenge: challenges })
+    .from(challengeClaims).innerJoin(challenges, eq(challenges.id, challengeClaims.challengeId))
+    .where(eq(challengeClaims.id, claimId)).limit(1);
+  if (!row || row.claim.status !== 'submitted') {
     throw new AppError(errorCodes.validationError, { message: 'Judged submission not found.' });
   }
-  await db.update(challengeClaims).set({ judgedPoints: points, judgedAt: new Date() }).where(eq(challengeClaims.id, claimId));
+  const points = decision ? computeDecisionPoints(row.challenge, decision) : null;
+  const stored = decision ? { ...decision, bonusIds: getChallengeBonuses(row.challenge.config).filter((bonus) => decision.bonusIds?.includes(bonus.id)).map((bonus) => bonus.id) } : null;
+  await db.update(challengeClaims).set({ judgedPoints: points, judgedDecision: stored, judgedAt: new Date() }).where(eq(challengeClaims.id, claimId));
+  return points;
+}
+
+function computeDecisionPoints(challenge: typeof challenges.$inferSelect, decision: JudgingDecision): number {
+  const type = getJudgingType(challenge.config);
+  const base = getBasePoints(challenge.scoring);
+  const approvedBonus = getChallengeBonuses(challenge.config).filter((bonus) => decision.bonusIds?.includes(bonus.id)).reduce((total, bonus) => total + bonus.points, 0);
+  if (type === 'points' || decision.verdict === 'points') {
+    if (typeof decision.points !== 'number' || !Number.isFinite(decision.points)) throw new AppError(errorCodes.validationError, { message: 'Enter the points to award.' });
+    return Math.round(decision.points);
+  }
+  if (type === 'best_wins') {
+    if (decision.verdict !== 'winner' && decision.verdict !== 'fail') throw new AppError(errorCodes.validationError, { message: 'Pick this team as a winner or not.' });
+    return decision.verdict === 'winner' ? base + approvedBonus : 0;
+  }
+  if (decision.verdict !== 'pass' && decision.verdict !== 'fail') throw new AppError(errorCodes.validationError, { message: 'Mark this submission as yes or no.' });
+  return decision.verdict === 'pass' ? base + approvedBonus : 0;
 }
 
 export async function publishJudging(db: DatabaseClient, gameId: string, now = new Date()): Promise<{ stateVersion: number; resourceEntries: ResourceLedgerEntry[] }> {
