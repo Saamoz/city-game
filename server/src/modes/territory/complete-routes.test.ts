@@ -305,6 +305,22 @@ describe('territory complete route', () => {
     expect(response.json().resourcesAwarded).toEqual({ points: 1 });
   });
 
+  it('completes an area challenge from inside its drawn area and rejects it from outside', async () => {
+    const square = (west: number, south: number, size: number) => ({ type: 'Polygon', coordinates: [[[west, south], [west + size, south], [west + size, south + size], [west, south + size], [west, south]]] });
+    await seedGame({ modeKey: 'point_challenge' }); await seedTeam(); await seedPlayer({ sessionToken: 'area-session' });
+    await seedChallenge({ zoneId: null, isDeckActive: true, scoring: { points: 3 }, config: { portable: false, location_mode: 'area', area: square(-97.1400, 49.8940, 0.003) } });
+    await testDatabase.db.insert(challenges).values(createTestChallenge({ id: NEXT_CHALLENGE_ID, gameId: GAME_ID, zoneId: null, isDeckActive: true, config: { portable: false, location_mode: 'area', area: square(-97.1000, 49.9000, 0.002) } }));
+    app = await createTestApp({ db: testDatabase.db });
+
+    const inside = await completeRequest({ sessionToken: 'area-session', actionId: 'area-inside', payload: { gps: validGpsPayload() } });
+    expect(inside.statusCode).toBe(200);
+    expect(inside.json()).toMatchObject({ challenge: { status: 'completed', zoneId: null }, resourcesAwarded: { points: 3 }, activatedChallenge: null });
+
+    const outside = await app.inject({ method: 'POST', url: '/api/v1/challenges/' + NEXT_CHALLENGE_ID + '/complete', cookies: { [SESSION_COOKIE_NAME]: 'area-session' }, headers: { 'idempotency-key': 'area-outside' }, payload: { gps: validGpsPayload() } });
+    expect(outside.statusCode).toBe(422);
+    expect(outside.json()).toMatchObject({ error: { code: 'OUTSIDE_ZONE', message: 'Head into the challenge area to complete this.' } });
+  });
+
   it('does not deal an extra deck card when a pinned point challenge is completed', async () => {
     await seedGame({ modeKey: 'point_challenge' }); await seedTeam(); await seedPlayer({ sessionToken: 'pin-deck-session' });
     await seedChallenge({ zoneId: null, isDeckActive: true, config: { portable: false, location_mode: 'point', source_map_point: { type: 'Point', coordinates: [-97.1384, 49.8951] }, point_radius_meters: 25 } });

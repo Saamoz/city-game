@@ -1,10 +1,12 @@
 import { and, eq, sql } from 'drizzle-orm';
 import {
   DEFAULT_GPS_BUFFER_METERS,
+  CHALLENGE_AREA_EDGE_TOLERANCE_METERS,
   DEFAULT_POINT_CHALLENGE_RADIUS_METERS,
   errorCodes,
   eventTypes,
   getBasePoints,
+  getChallengeArea,
   getClaimedBonuses,
   isJudgedChallengeConfig,
   sumBonusPoints,
@@ -98,6 +100,19 @@ export async function completeChallenge(
 
   if (isJudgedChallengeConfig(lockedChallenge.config)) {
     return submitJudgedChallenge(db, {
+      challenge: lockedChallenge,
+      gameId: input.gameId,
+      playerId: input.playerId,
+      teamId: input.teamId,
+      submission: input.submission ?? null,
+      gpsPayload: input.gpsPayload ?? null,
+      now,
+      settings: game.settings as GameSettings,
+    });
+  }
+
+  if (lockedChallenge.status === 'available' && getChallengeArea(lockedChallenge.config)) {
+    return completeAreaChallengeDirectly(db, {
       challenge: lockedChallenge,
       gameId: input.gameId,
       playerId: input.playerId,
@@ -245,6 +260,34 @@ async function completePointChallengeDirectly(db: DatabaseClient, input: { chall
   if (!updatedClaim || !updatedChallenge) throw new AppError(errorCodes.validationError, { message: 'Challenge completion failed.' });
   return finishChallengeCompletion(db, { gameId: input.gameId, playerId: input.playerId, teamId: input.teamId, now: input.now, lockedChallenge: input.challenge, updatedChallenge, updatedClaim, zoneBefore, settings: input.settings });
 }
+// Area challenges complete from anywhere inside their drawn area (with a little slack at the edge).
+async function completeAreaChallengeDirectly(db: DatabaseClient, input: { challenge: typeof challenges.$inferSelect; gameId: string; playerId: string; teamId: string; submission: JsonValue | null; gpsPayload: GpsPayload | null; now: Date; settings: GameSettings }): Promise<CompleteChallengeSuccessResult> {
+  const gpsPayload = await assertInsideChallengeArea(db, input.challenge, input.gpsPayload, input.settings);
+  const locationAtClaim = sql`ST_SetSRID(ST_MakePoint(${gpsPayload.lng}, ${gpsPayload.lat}), 4326)`;
+  const [updatedClaim] = await db.insert(challengeClaims).values({ challengeId: input.challenge.id, gameId: input.gameId, teamId: input.teamId, playerId: input.playerId, status: 'completed', expiresAt: input.now, completedAt: input.now, submission: input.submission, locationAtClaim }).returning();
+  const [updatedChallenge] = await db.update(challenges).set({ status: 'completed', currentClaimId: null, expiresAt: null, isDeckActive: false, updatedAt: input.now }).where(eq(challenges.id, input.challenge.id)).returning();
+  if (!updatedClaim || !updatedChallenge) throw new AppError(errorCodes.validationError, { message: 'Challenge completion failed.' });
+  return finishChallengeCompletion(db, { gameId: input.gameId, playerId: input.playerId, teamId: input.teamId, now: input.now, lockedChallenge: input.challenge, updatedChallenge, updatedClaim, zoneBefore: null, settings: input.settings });
+}
+
+async function assertInsideChallengeArea(db: DatabaseClient, challenge: typeof challenges.$inferSelect, gpsPayload: GpsPayload | null, settings: GameSettings): Promise<GpsPayload> {
+  const area = getChallengeArea(challenge.config);
+  if (!area) throw new AppError(errorCodes.validationError, { message: 'Challenge has no valid area.' });
+  if (!gpsPayload) throw new AppError(errorCodes.validationError, { message: 'GPS location is required for this challenge.' });
+  if (settings.require_gps_accuracy) assertGpsAccuracy(null, gpsPayload.gpsErrorMeters);
+  const result = await db.execute<{ distance: number }>(sql`
+    SELECT ST_Distance(
+      ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(area)}), 4326)::geography,
+      ST_SetSRID(ST_MakePoint(${gpsPayload.lng}, ${gpsPayload.lat}), 4326)::geography
+    ) AS distance
+  `);
+  const distanceMeters = Number(result.rows[0]?.distance ?? Infinity);
+  if (distanceMeters > CHALLENGE_AREA_EDGE_TOLERANCE_METERS) {
+    throw new AppError(errorCodes.outsideZone, { message: 'Head into the challenge area to complete this.', details: { challengeId: challenge.id, distanceMeters: Math.round(distanceMeters) } });
+  }
+  return gpsPayload;
+}
+
 // Judged challenges never complete: each team files one 'submitted' claim, the challenge stays open for
 // everyone else, and no points move until judges publish scores (judging-service).
 async function submitJudgedChallenge(db: DatabaseClient, input: { challenge: typeof challenges.$inferSelect; gameId: string; playerId: string; teamId: string; submission: JsonValue | null; gpsPayload: GpsPayload | null; now: Date; settings: GameSettings }): Promise<CompleteChallengeSuccessResult> {
@@ -253,6 +296,7 @@ async function submitJudgedChallenge(db: DatabaseClient, input: { challenge: typ
     .where(and(eq(challengeClaims.challengeId, input.challenge.id), eq(challengeClaims.teamId, input.teamId), eq(challengeClaims.status, 'submitted'))).limit(1);
   if (existing) throw new AppError(errorCodes.challengeNotAvailable, { message: 'Your team already submitted this challenge for judging.', details: { challengeId: input.challenge.id } });
 
+  if (getChallengeArea(input.challenge.config)) await assertInsideChallengeArea(db, input.challenge, input.gpsPayload, input.settings);
   const point = getPointLocation(input.challenge.config);
   if (point) {
     if (!input.gpsPayload) throw new AppError(errorCodes.validationError, { message: 'GPS location is required for this challenge.' });
@@ -454,8 +498,8 @@ async function finishChallengeCompletion(
     updatedZone = await getZoneByIdOrThrow(db, input.updatedChallenge.zoneId);
   }
 
-  // Pinned point challenges sit outside the deck, so finishing one must not deal another card.
-  const activatedChallengeRow = isPointChallengeConfig(input.updatedChallenge.config) ? null : await activateNextQueuedChallenge(db, input.gameId, input.now);
+  // Pinned and area challenges sit outside the deck, so finishing one must not deal another card.
+  const activatedChallengeRow = isPointChallengeConfig(input.updatedChallenge.config) || getChallengeArea(input.updatedChallenge.config) ? null : await activateNextQueuedChallenge(db, input.gameId, input.now);
   if (activatedChallengeRow) {
     activatedChallenge = serializeChallenge(activatedChallengeRow);
     if (activatedChallengeRow.zoneId) {

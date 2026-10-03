@@ -1,4 +1,4 @@
-import { asc, eq, inArray } from 'drizzle-orm';
+import { asc, eq, inArray, sql } from 'drizzle-orm';
 import type {
   ChallengeSet,
   ChallengeSetItem,
@@ -6,7 +6,7 @@ import type {
   JsonObject,
   ResourceAwardMap,
 } from '@city-game/shared';
-import { MAX_CHALLENGE_BONUSES, errorCodes, isJudgedChallengeConfig } from '@city-game/shared';
+import { MAX_CHALLENGE_BONUSES, errorCodes, getChallengeArea, isAreaGeometry, isJudgedChallengeConfig } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { challengeSetItems, challengeSets, challenges, mapZones, maps, zones } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
@@ -158,6 +158,7 @@ export async function createChallengeSetItem(db: DatabaseClient, input: Challeng
 
   assertPlacementMatchesSet(challengeSet.locationMode, nextMapZoneId, nextMapPoint);
   assertBonusLimit(input.config);
+  await assertAreaIsValid(db, challengeSet.locationMode, input.config ?? {}, nextMapZoneId, nextMapPoint);
   await assertPlacementIsValid(db, { mapZoneId: nextMapZoneId, mapPoint: nextMapPoint, sourceMapId });
 
   const [inserted] = await db.insert(challengeSetItems).values({
@@ -187,6 +188,7 @@ export async function updateChallengeSetItem(db: DatabaseClient, challengeSetIte
 
   assertPlacementMatchesSet(challengeSet.locationMode, nextMapZoneId, nextMapPoint);
   assertBonusLimit(input.config);
+  await assertAreaIsValid(db, challengeSet.locationMode, input.config ?? existing.config, nextMapZoneId, nextMapPoint);
   await assertPlacementIsValid(db, { mapZoneId: nextMapZoneId, mapPoint: nextMapPoint, sourceMapId });
 
   await db.update(challengeSetItems).set({
@@ -275,8 +277,8 @@ export async function cloneChallengeSetToGame(
       kind: item.kind,
       config: {
         ...item.config,
-        portable: !item.mapZoneId && !item.mapPoint,
-        location_mode: getLocationMode(item),
+        portable: !item.mapZoneId && !item.mapPoint && !getChallengeArea(item.config),
+        location_mode: getChallengeArea(item.config) ? 'area' : getLocationMode(item),
         source_challenge_set_id: challengeSetId,
         source_challenge_set_item_id: item.id,
         source_map_zone_id: item.mapZoneId,
@@ -294,8 +296,8 @@ export async function cloneChallengeSetToGame(
     insertedChallengeIds.push(insertedChallenge.id);
   }
 
-  // Pins and judged challenges are open all game; only the rest are dealt from the deck.
-  const isAlwaysActive = (item: ChallengeSetItem) => Boolean(item.mapPoint) || isJudgedChallengeConfig(item.config);
+  // Pins, areas and judged challenges are open all game; only the rest are dealt from the deck.
+  const isAlwaysActive = (item: ChallengeSetItem) => Boolean(item.mapPoint) || Boolean(getChallengeArea(item.config)) || isJudgedChallengeConfig(item.config);
   const pointChallengeIds = shuffledItems
     .map((item, index) => isAlwaysActive(item) ? insertedChallengeIds[index] : null)
     .filter((id): id is string => Boolean(id));
@@ -348,6 +350,15 @@ function buildPersistedConfig(config: JsonObject, mapZoneId: string | null, mapP
   nextConfig.location_mode = getLocationMode({ mapZoneId, mapPoint });
 
   return nextConfig;
+}
+
+async function assertAreaIsValid(db: DatabaseClient, setMode: 'portable' | 'zone' | 'point', config: JsonObject, mapZoneId: string | null, mapPoint: GeoJsonPoint | null): Promise<void> {
+  if (config.area === undefined || config.area === null) return;
+  if (!isAreaGeometry(config.area)) throw new AppError(errorCodes.validationError, { message: 'The challenge area must be a drawn polygon.' });
+  if (setMode !== 'point') throw new AppError(errorCodes.validationError, { message: 'Challenge areas are only available in point-linked sets.' });
+  if (mapZoneId || mapPoint) throw new AppError(errorCodes.validationError, { message: 'Choose either a pinned point or an area, not both.' });
+  const result = await db.execute<{ valid: boolean }>(sql`SELECT ST_IsValid(ST_GeomFromGeoJSON(${JSON.stringify(config.area)})) AS valid`);
+  if (!result.rows[0]?.valid) throw new AppError(errorCodes.validationError, { message: 'The challenge area crosses itself. Redraw it without overlapping edges.' });
 }
 
 function assertBonusLimit(config: JsonObject | undefined): void {

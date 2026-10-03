@@ -7,3 +7,4 @@ export * from './zone-topology.js';
 export * from './zone-graph.js';
 export * from './judging.js';
 export * from './scoring.js';
+export * from './challenge-area.js';

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
-import { getChallengeBonuses, isJudgedChallengeConfig, type Challenge, type ChallengeRerollState, type Zone } from '@city-game/shared';
+import { CHALLENGE_AREA_EDGE_TOLERANCE_METERS, getChallengeBonuses, isJudgedChallengeConfig, type Challenge, type ChallengeRerollState, type Zone } from '@city-game/shared';
 import {
   CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH,
   CHALLENGE_CARD_TITLE_MAX_LENGTH,
@@ -54,7 +54,7 @@ interface ChallengeDeckProps {
   onLocateChallenge?(challengeId: string): void;
 }
 
-export type CardKind = 'anywhere' | 'pin';
+export type CardKind = 'anywhere' | 'pin' | 'area';
 type DeckFilter = 'all' | 'pin' | 'anywhere';
 
 interface DragStateRefs {
@@ -100,7 +100,7 @@ export function ChallengeDeck({
   const activeFilter = showFilters ? filter : 'all';
   // On the map filter, nearest pins lead.
   const availableChallenges = allAvailable
-    .filter((challenge) => activeFilter === 'all' || getCardKind(challenge) === activeFilter)
+    .filter((challenge) => activeFilter === 'all' || (activeFilter === 'pin' ? getCardKind(challenge) !== 'anywhere' : getCardKind(challenge) === 'anywhere'))
     .sort((left, right) => (activeFilter === 'pin' ? (distanceTo(left) ?? Infinity) - (distanceTo(right) ?? Infinity) : 0)
       || compareChallengesForDeck(left, right));
 
@@ -355,7 +355,7 @@ export function ChallengeDeck({
 
                   <div className="mt-3 border-t border-[#d8c8a3]/55 pt-3">
                     <p className="hidden lg:block text-[11px] uppercase tracking-[0.18em] text-[#7d6f55]">
-                      {isAnywhere ? (cardKind === 'anywhere' ? 'Do it wherever you are' : 'Go to the pin on the map') : (currentZoneName ?? 'No zone')}
+                      {isAnywhere ? (cardKind === 'anywhere' ? 'Do it wherever you are' : cardKind === 'area' ? 'Go into the area on the map' : 'Go to the pin on the map') : (currentZoneName ?? 'No zone')}
                     </p>
 
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -370,7 +370,7 @@ export function ChallengeDeck({
                     </div>
 
                     <div className="mt-3 space-y-2">
-                      {isAnywhere && cardKind === 'pin' ? (
+                      {isAnywhere && cardKind !== 'anywhere' ? (
                         <button
                           className={[
                             'w-full rounded-2xl border border-[#c76a2c] bg-[#d97a37] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#fff8eb] transition hover:bg-[#c56a2b]',
@@ -717,7 +717,7 @@ const FILTER_LABELS: Record<DeckFilter, string> = { all: 'All', pin: 'On map', a
 
 function countByFilter(challenges: Challenge[], getCardKind: (challenge: Challenge) => CardKind): Record<DeckFilter, number> {
   const kinds = challenges.map(getCardKind);
-  return { all: kinds.length, pin: kinds.filter((kind) => kind === 'pin').length, anywhere: kinds.filter((kind) => kind === 'anywhere').length };
+  return { all: kinds.length, pin: kinds.filter((kind) => kind !== 'anywhere').length, anywhere: kinds.filter((kind) => kind === 'anywhere').length };
 }
 
 function CardTag({ challenge, kind, distance }: { challenge: Challenge; kind: CardKind; distance: number | null }) {
@@ -726,8 +726,8 @@ function CardTag({ challenge, kind, distance }: { challenge: Challenge; kind: Ca
   return (
     <div className="mb-1.5 flex items-center justify-between gap-2">
       <p className="flex min-w-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#b4602a]">
-        <span aria-hidden="true">📍</span>
-        <span className="truncate">On map{distance !== null ? ' · ' + formatDistance(distance) : ''}</span>
+        <span aria-hidden="true">{kind === 'area' ? '▧' : '📍'}</span>
+        <span className="truncate">{kind === 'area' ? 'Area' : 'On map'}{distance === null ? '' : kind === 'area' && distance <= CHALLENGE_AREA_EDGE_TOLERANCE_METERS ? " · you're in it" : ' · ' + formatDistance(distance)}</span>
       </p>
       {judged}
     </div>

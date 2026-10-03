@@ -242,3 +242,10 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Migration 0015 adds `challenge_claims.judged_decision` ({ verdict, bonusIds?, points? }). `PUT /judging/submissions/:id` takes a decision (or `{ decision: null }` to clear; `{ points }` still works) and the server computes `judged_points` from it.
 - New page `/admin/judging?gameId=` (linked from the admin panel): To judge / Judged tabs, per-type controls, auto-refresh every 15 s while the game runs, sticky Publish bar. Cards you judge stay put until you switch tabs. The old inline Judging section in the admin panel is now a link.
 - Players: judged challenges play exactly like normal ones (same card and pin UI, same Complete flow) with a small "★ Judged" marker; once a team submits, the challenge disappears from that team's cards and map. The separate judged sheet, purple pins and "judged to do" chip are gone.
+
+## Challenge Areas (2026-10-03)
+
+- In point-linked sets a challenge can be tied to a custom area drawn in the editor (Where: Pinned point / Area / Anywhere). Stored as `config.area` (GeoJSON Polygon/MultiPolygon) with `metadata.sourceMapId`; validated with `ST_IsValid` (self-crossing shapes are rejected) and only allowed without a point or zone. Shared helpers in `shared/src/challenge-area.ts`.
+- Runtime: area challenges are always active (like pins), `portable: false`, `location_mode: 'area'`. Completing (and judged submissions) require GPS within `CHALLENGE_AREA_EDGE_TOLERANCE_METERS` (20 m) of the area, checked with PostGIS geography distance. Completing one doesn't deal a deck card.
+- Game map: `ChallengeAreaLayer` draws dashed, shaded areas with name labels; tapping one opens the location card ("Anywhere in the shaded area · You're in it / 120 m away"). Cards show "▧ Area · you're in it"; the "On map" filter includes areas. The layer retries until the style accepts it (the map can already be idle when it mounts, so neither 'load' nor 'idle' fires again).
+- Editor: `ChallengeAreaPicker` uses mapbox-gl-draw (Draw area / Redraw / Clear, drag corners to adjust, shows the area size).

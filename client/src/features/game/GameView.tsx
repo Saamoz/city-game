@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import mapboxgl from 'mapbox-gl';
 import {
   getBasePoints,
+  getChallengeArea,
   getClaimedBonuses,
   socketServerEventTypes,
   sumBonusPoints,
@@ -34,6 +35,7 @@ import {
 import { useGameStore, type RealtimeConnectionStatus } from '../../store/gameStore';
 import { ChallengeDeck, type CardKind } from './ChallengeDeck';
 import { PointChallengeCard, PointChallengeLayer, getPointLocation, isPointChallenge } from './PointChallenges';
+import { ChallengeAreaLayer, getAreaBounds, getAreaDistance, isAreaChallenge } from './ChallengeAreas';
 import { GameResultsScreen } from './GameResultsScreen';
 import { formatPoints, type CompletionExtras } from './ChallengeScoring';
 import { isJudgedChallenge } from './JudgedChallenges';
@@ -574,26 +576,30 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const teamSubmittedIds = useMemo(() => getTeamSubmittedIds(snapshot), [snapshot]);
   // Your team's view: a judged challenge you already submitted is done for you, like a completed one.
   const teamChallenges = useMemo(() => (snapshot?.challenges ?? []).filter((challenge) => !teamSubmittedIds.has(challenge.id)), [snapshot?.challenges, teamSubmittedIds]);
-  const pointChallenges = teamChallenges.filter((challenge) => challenge.status === 'available' && isPointChallenge(challenge));
+  // Challenges shown on the map: pins and drawn areas.
+  const pointChallenges = teamChallenges.filter((challenge) => challenge.status === 'available' && isMapChallenge(challenge));
   const regularPinCount = pointChallenges.length;
-  // Point games show every challenge as a card; pinned ones hand off to the map.
-  const deckChallenges = useMemo(() => teamChallenges.filter((challenge) => isPointMode || (!isPointChallenge(challenge) && !isJudgedChallenge(challenge))), [isPointMode, teamChallenges]);
+  // Point games show every challenge as a card; pinned and area ones hand off to the map.
+  const deckChallenges = useMemo(() => teamChallenges.filter((challenge) => isPointMode || (!isMapChallenge(challenge) && !isJudgedChallenge(challenge))), [isPointMode, teamChallenges]);
   const anywhereAvailableCount = deckChallenges.filter((challenge) => challenge.status === 'available' && getCardKind(challenge) === 'anywhere').length;
   // Pure pin sets have no deck at all; mixed sets keep it for the anywhere cards.
   const showDeck = !isPointMode || deckChallenges.length > 0;
   const teamPoints = snapshot?.teamResources[team?.id ?? '']?.points ?? 0;
   const selectedPointChallenge = pointChallenges.find((challenge) => challenge.id === selectedPointChallengeId) ?? null;
-  const selectedPointLocation = selectedPointChallenge ? getPointLocation(selectedPointChallenge) : null;
-  const selectedPointDistance = currentPoint && selectedPointLocation
-    ? distanceBetweenLngLat(currentPoint, [selectedPointLocation.coordinates[0] as number, selectedPointLocation.coordinates[1] as number])
-    : null;
   const distanceToChallenge = (challenge: Challenge) => {
+    if (isAreaChallenge(challenge)) return getAreaDistance(challenge, currentPoint);
     const point = getPointLocation(challenge);
     return currentPoint && point ? distanceBetweenLngLat(currentPoint, [point.coordinates[0] as number, point.coordinates[1] as number]) : null;
   };
+  const selectedPointDistance = selectedPointChallenge ? distanceToChallenge(selectedPointChallenge) : null;
   const focusPointChallenge = (id: string) => {
     setSelectedPointChallengeId(id);
     const challenge = snapshot?.challenges.find((entry) => entry.id === id);
+    const area = challenge ? getChallengeArea(challenge.config) : null;
+    if (area) {
+      mapRef.current?.fitBounds(getAreaBounds(area), { padding: { top: 140, bottom: 380, left: 40, right: 40 }, maxZoom: 17, duration: 450 });
+      return;
+    }
     const point = challenge ? getPointLocation(challenge) : null;
     if (point) mapRef.current?.easeTo({ center: [point.coordinates[0] as number, point.coordinates[1] as number], zoom: Math.max(mapRef.current?.getZoom() ?? 14, 15), duration: 450 });
   };
@@ -682,7 +688,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       }
 
       // Anywhere cards in Point Challenge games only record location, so a GPS failure must not block them.
-      const gpsIsOptional = !isPointChallenge(challenge) && (isPointMode || isJudgedChallenge(challenge));
+      const gpsIsOptional = !isMapChallenge(challenge) && (isPointMode || isJudgedChallenge(challenge));
       const attemptCapture = async (gpsCapturedAtOverride?: string) => {
         const gps = gpsPayload ?? (gpsIsOptional ? await refreshLocation().catch(() => null) : await refreshLocation());
         const response = await completeChallenge(
@@ -878,6 +884,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,234,215,0.16),transparent_28%),linear-gradient(180deg,rgba(223,230,232,0.04),rgba(223,230,232,0.16))]" />
 
       <ZoneLayer map={mapForLayer} snapshot={snapshot} />
+      <ChallengeAreaLayer map={mapForLayer} challenges={teamChallenges} selectedId={selectedPointChallengeId} onSelect={focusPointChallenge} />
       <PointChallengeLayer map={mapForLayer} challenges={teamChallenges} selectedId={selectedPointChallengeId} onSelect={focusPointChallenge} />
       {selectedPointChallenge ? (
         <PointChallengeCard
@@ -1333,7 +1340,12 @@ function Toast({ tone, title, body, accentColor }: ToastMessage) {
 }
 
 function getCardKind(challenge: Challenge): CardKind {
+  if (isAreaChallenge(challenge)) return 'area';
   return isPointChallenge(challenge) ? 'pin' : 'anywhere';
+}
+
+function isMapChallenge(challenge: Challenge): boolean {
+  return isPointChallenge(challenge) || isAreaChallenge(challenge);
 }
 
 function getTeamSubmittedIds(snapshot: GameStateSnapshot | null): Set<string> {
@@ -1375,6 +1387,8 @@ function getBoundsFromSnapshot(snapshot: GameStateSnapshot): mapboxgl.LngLatBoun
   for (const challenge of snapshot.challenges) {
     const point = getPointLocation(challenge);
     if (point) positions.push([point.coordinates[0] as number, point.coordinates[1] as number]);
+    const area = getChallengeArea(challenge.config);
+    if (area) positions.push(...collectGeometryPositions(area));
   }
 
   if (!positions.length) {
@@ -1422,7 +1436,7 @@ function getAvailableDeckChallenges(snapshot: GameStateSnapshot | null) {
   const submittedIds = getTeamSubmittedIds(snapshot);
   return [...(snapshot?.challenges ?? [])]
     // Point games show every challenge as a card; territory decks leave pins and judged ones out.
-    .filter((challenge) => challenge.status === 'available' && !submittedIds.has(challenge.id) && (snapshot?.game.modeKey === 'point_challenge' || (!isPointChallenge(challenge) && !isJudgedChallenge(challenge))))
+    .filter((challenge) => challenge.status === 'available' && !submittedIds.has(challenge.id) && (snapshot?.game.modeKey === 'point_challenge' || (!isMapChallenge(challenge) && !isJudgedChallenge(challenge))))
     .sort((left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title));
 }
 

@@ -3,12 +3,14 @@ import type {
   ChallengeSet,
   ChallengeSetItem,
   ChallengeSetItemLocationMode,
+  GeoJsonMultiPolygon,
   GeoJsonPoint,
+  GeoJsonPolygon,
   JsonObject,
   MapDefinition,
   MapZone,
 } from '@city-game/shared';
-import { DEFAULT_CHALLENGE_POINTS, JUDGING_TYPES, JUDGING_TYPE_LABELS, MAX_CHALLENGE_BONUSES, getBasePoints, getChallengeBonuses, getJudgingType, getMaxBonusPoints, type JudgingType } from '@city-game/shared';
+import { DEFAULT_CHALLENGE_POINTS, getChallengeArea, JUDGING_TYPES, JUDGING_TYPE_LABELS, MAX_CHALLENGE_BONUSES, getBasePoints, getChallengeBonuses, getJudgingType, getMaxBonusPoints, type JudgingType } from '@city-game/shared';
 
 const JUDGING_TYPE_HELP: Record<JudgingType, string> = {
   pass_fail: 'Judges decide yes or no for each team that did it. Yes earns the points.',
@@ -34,6 +36,7 @@ import {
   CHALLENGE_CARD_TITLE_MAX_LENGTH,
   normalizeChallengeCardText,
 } from '../../lib/challenge-card-limits';
+import { ChallengeAreaPicker } from './ChallengeAreaPicker';
 import { ChallengePointPicker } from './ChallengePointPicker';
 
 interface AdminChallengesProps {
@@ -65,6 +68,7 @@ interface ItemFormState {
   pointValue: string;
   bonuses: BonusFormRow[];
   placement: ItemPlacement;
+  area: GeoJsonPolygon | GeoJsonMultiPolygon | null;
   locationHint: string;
   scoringMode: 'instant' | 'judged';
   judgingType: JudgingType;
@@ -78,7 +82,7 @@ interface BonusFormRow {
 }
 
 // Within a point-linked set, each item is either pinned to the map or doable anywhere.
-type ItemPlacement = 'pinned' | 'anywhere';
+type ItemPlacement = 'pinned' | 'area' | 'anywhere';
 
 const DIFFICULTY_OPTIONS: Array<{ value: Exclude<ChallengeSetItem['difficulty'], null> | ''; label: string }> = [
   { value: '', label: 'Unset' },
@@ -105,6 +109,7 @@ const INITIAL_ITEM_FORM: ItemFormState = {
   pointValue: '1',
   bonuses: [],
   placement: 'pinned',
+  area: null,
   locationHint: '',
   scoringMode: 'instant',
   judgingType: 'pass_fail',
@@ -373,6 +378,11 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
     }
 
     const isPinned = setForm.locationMode === 'point' && itemForm.placement === 'pinned';
+    const isArea = setForm.locationMode === 'point' && itemForm.placement === 'area';
+    if (isArea && (!itemForm.mapId || !itemForm.area)) {
+      setNotice({ tone: 'error', message: 'Choose a source map and draw the challenge area.' });
+      return;
+    }
     if (isPinned && (!itemForm.mapId || !itemForm.mapPoint)) {
       setNotice({ tone: 'error', message: 'Choose a source map and place a point.' });
       return;
@@ -394,14 +404,15 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
         ...(shortDescription ? { short_description: shortDescription } : {}),
         ...(longDescription ? { long_description: longDescription } : {}),
         ...(isPinned ? { point_radius_meters: Math.max(1, Number(itemForm.pointRadiusMeters) || 40) } : {}),
-        ...(!isPinned && setForm.locationMode !== 'zone' && locationHint ? { location_hint: locationHint } : {}),
+        ...(!isPinned && !isArea && setForm.locationMode !== 'zone' && locationHint ? { location_hint: locationHint } : {}),
+        ...(isArea && itemForm.area ? { area: itemForm.area as unknown as JsonObject } : {}),
         ...(bonuses.length ? { bonuses } : {}),
         ...(isJudged ? { judged: true, judging_type: itemForm.judgingType, ...(itemForm.judgingType === 'points' && judgedMaxPoints > 0 ? { judged_max_points: judgedMaxPoints } : {}) } : {}),
       } satisfies JsonObject,
       scoring: !isJudged || itemForm.judgingType !== 'points' ? { points: basePoints } : {} as Record<string, number>,
       difficulty: itemForm.difficulty || null,
       sortOrder: selectedItem ? selectedItem.sortOrder : items.length,
-      metadata: ((setForm.locationMode === 'zone' || isPinned) && itemForm.mapId ? { sourceMapId: itemForm.mapId } : {}) as JsonObject,
+      metadata: ((setForm.locationMode === 'zone' || isPinned || isArea) && itemForm.mapId ? { sourceMapId: itemForm.mapId } : {}) as JsonObject,
     };
 
     setIsSavingItem(true);
@@ -573,7 +584,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
   };
 
   const handleItemMapChange = async (mapId: string) => {
-    setItemForm((current) => ({ ...current, mapId, mapZoneId: '', mapPoint: null }));
+    setItemForm((current) => ({ ...current, mapId, mapZoneId: '', mapPoint: null, area: null }));
     if (mapId) {
       await loadZoneOptions(mapId);
     }
@@ -654,9 +665,9 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                   </Field>
                   <Field label="Set Placement">
                     <select className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={setForm.locationMode} onChange={(event) => setSetForm((current) => ({ ...current, locationMode: event.target.value as ChallengeSetItemLocationMode }))}>
-                      <option value="portable">Portable</option><option value="zone">Zone Linked</option><option value="point">Point Linked (pins + anywhere)</option>
+                      <option value="portable">Portable</option><option value="zone">Zone Linked</option><option value="point">Point Linked (pins, areas, anywhere)</option>
                     </select>
-                    <p className="mt-2 text-xs leading-5 text-[#6b777b]">{setForm.locationMode === 'point' ? 'Each challenge is either pinned to a map point or doable anywhere. Pins appear on the map; anywhere challenges are dealt as a deck.' : 'Every challenge in this set uses this placement type.'} Save the set before editing its items.</p>
+                    <p className="mt-2 text-xs leading-5 text-[#6b777b]">{setForm.locationMode === 'point' ? 'Each challenge is pinned to a map point, tied to an area you draw, or doable anywhere. Pins and areas appear on the map.' : 'Every challenge in this set uses this placement type.'} Save the set before editing its items.</p>
                     {setForm.locationMode !== currentSet.locationMode ? <p className="mt-2 rounded-xl border border-[#d59b45]/45 bg-[#fff0ce] px-3 py-2 text-xs leading-5 text-[#765018]">Save this placement change before creating or editing challenges.</p> : null}
                   </Field>
                   <Field label="Description">
@@ -743,11 +754,12 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
             {setForm.locationMode === 'point' ? (
               <div>
                 <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a6a48]">Where</span>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <button className={placementClassName(itemForm.placement === 'pinned')} onClick={() => setItemForm((current) => ({ ...current, placement: 'pinned' }))} type="button">Pinned point</button>
+                  <button className={placementClassName(itemForm.placement === 'area')} onClick={() => setItemForm((current) => ({ ...current, placement: 'area' }))} type="button">Area</button>
                   <button className={placementClassName(itemForm.placement === 'anywhere')} onClick={() => setItemForm((current) => ({ ...current, placement: 'anywhere' }))} type="button">Anywhere</button>
                 </div>
-                <p className="mt-2 text-xs leading-5 text-[#6b777b]">{itemForm.placement === 'pinned' ? 'Players must reach this spot; it shows as a pin on the map.' : 'Players can do this wherever they are; it shows in the deck.'}</p>
+                <p className="mt-2 text-xs leading-5 text-[#6b777b]">{itemForm.placement === 'pinned' ? 'Players must reach this spot; it shows as a pin on the map.' : itemForm.placement === 'area' ? 'Players can do it anywhere inside an area you draw; it shows as a shaded area on the map.' : 'Players can do this wherever they are; it shows in the deck.'}</p>
               </div>
             ) : null}
 
@@ -801,7 +813,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
               </Field>
             ) : null}
 
-            {setForm.locationMode === 'zone' || (setForm.locationMode === 'point' && itemForm.placement === 'pinned') ? (
+            {setForm.locationMode === 'zone' || (setForm.locationMode === 'point' && itemForm.placement !== 'anywhere') ? (
               <Field label="Source Map">
                 <select className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={itemForm.mapId} onChange={(event) => void handleItemMapChange(event.target.value)}>
                   <option value="">Choose a map</option>
@@ -836,6 +848,18 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                   <span>{itemForm.mapPoint ? formatPoint(itemForm.mapPoint) : 'No point placed yet.'}</span>
                   <button className="rounded-full border border-[#c8b48a]/55 bg-white/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-[#24343a]" onClick={() => setItemForm((current) => ({ ...current, mapPoint: null }))} type="button">Clear</button>
                 </div>
+              </div>
+            ) : null}
+
+            {setForm.locationMode === 'point' && itemForm.placement === 'area' ? (
+              <div>
+                <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a6a48]">Challenge Area</span>
+                <ChallengeAreaPicker
+                  key={(selectedItem?.id ?? 'new') + ':' + itemForm.mapId}
+                  mapDefinition={selectedMap}
+                  onChange={(area) => setItemForm((current) => ({ ...current, area }))}
+                  value={itemForm.area}
+                />
               </div>
             ) : null}
 
@@ -892,7 +916,8 @@ function buildItemForm(item: ChallengeSetItem): ItemFormState {
     pointRadiusMeters: String(typeof item.config?.point_radius_meters === 'number' ? item.config.point_radius_meters : 40),
     pointValue: String(getBasePoints(item.scoring)),
     bonuses: getChallengeBonuses(item.config).map((bonus) => ({ id: bonus.id, label: bonus.label, points: String(bonus.points) })),
-    placement: item.mapPoint ? 'pinned' : 'anywhere',
+    placement: item.mapPoint ? 'pinned' : getChallengeArea(item.config) ? 'area' : 'anywhere',
+    area: getChallengeArea(item.config),
     locationHint: typeof item.config?.location_hint === 'string' ? item.config.location_hint : '',
     scoringMode: item.config?.judged === true ? 'judged' : 'instant',
     judgingType: getJudgingType(item.config),
@@ -931,8 +956,9 @@ function BonusEditor({ rows, isJudged, onChange }: { rows: BonusFormRow[]; isJud
 
 function countPlacements(items: ChallengeSetItem[]): string {
   const pinned = items.filter((item) => item.mapPoint).length;
+  const areas = items.filter((item) => getChallengeArea(item.config)).length;
   const judged = items.filter((item) => item.config?.judged === true).length;
-  return pinned + ' pinned on the map · ' + (items.length - pinned) + ' doable anywhere' + (judged ? ' · ' + judged + ' judged' : '');
+  return pinned + ' pinned · ' + areas + ' areas · ' + (items.length - pinned - areas) + ' anywhere' + (judged ? ' · ' + judged + ' judged' : '');
 }
 
 function PlacementBadge({ item, setMode }: { item: ChallengeSetItem; setMode: ChallengeSetItemLocationMode }) {
@@ -940,6 +966,7 @@ function PlacementBadge({ item, setMode }: { item: ChallengeSetItem; setMode: Ch
   const judged = item.config?.judged === true ? <Badge tone="judged">★ {JUDGING_TYPE_LABELS[getJudgingType(item.config)]}</Badge> : null;
   if (setMode === 'zone') return <Badge tone="linked">Zone linked</Badge>;
   if (setMode === 'point' && item.mapPoint) return <>{judged}<Badge tone="linked">Pinned</Badge></>;
+  if (setMode === 'point' && getChallengeArea(item.config)) return <>{judged}<Badge tone="linked">▧ Area</Badge></>;
   return <>{judged}<Badge tone="portable">{hint || (setMode === 'point' ? 'Anywhere' : 'Portable')}</Badge></>;
 }
 

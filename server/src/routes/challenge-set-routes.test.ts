@@ -180,6 +180,31 @@ describe('challenge set routes', () => {
     const runtimeChallenges = await testDatabase.db.select().from(challenges).where(eq(challenges.gameId, gameId));
     expect(runtimeChallenges.filter((challenge) => challenge.isDeckActive)).toHaveLength(6);
   });
+
+  it('stores drawn challenge areas, rejects self-crossing ones, and deals area challenges at start', async () => {
+    app = await createChallengeSetTestApp(testDatabase);
+    const authored = await seedAuthoredMap(app);
+    const setResponse = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets', headers: idempotencyHeaders('area-set'), payload: { name: 'Areas', locationMode: 'point' } });
+    const challengeSetId = setResponse.json().challengeSet.id as string;
+    const area = { type: 'Polygon', coordinates: [[[-79.39, 43.64], [-79.38, 43.64], [-79.38, 43.65], [-79.39, 43.65], [-79.39, 43.64]]] };
+    const bowtie = { type: 'Polygon', coordinates: [[[-79.39, 43.64], [-79.38, 43.65], [-79.38, 43.64], [-79.39, 43.65], [-79.39, 43.64]]] };
+    const created = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets/' + challengeSetId + '/items', headers: idempotencyHeaders('area-item'), payload: { title: 'Park loop', description: 'Anywhere in the park.', config: { area }, metadata: { sourceMapId: authored.mapId } } });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().item.config.area).toEqual(area);
+    const crossing = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets/' + challengeSetId + '/items', headers: idempotencyHeaders('bowtie-item'), payload: { title: 'Bowtie', description: 'Bad shape.', config: { area: bowtie } } });
+    expect(crossing.statusCode).toBe(400);
+    for (let index = 0; index < 3; index += 1) {
+      await app.inject({ method: 'POST', url: '/api/v1/challenge-sets/' + challengeSetId + '/items', headers: idempotencyHeaders('area-deck-' + index), payload: { title: 'Card ' + index, description: 'Anywhere.' } });
+    }
+    const gameResponse = await app.inject({ method: 'POST', url: '/api/v1/game', headers: adminHeaders('area-game'), payload: { name: 'Area Game', modeKey: 'point_challenge', mapId: authored.mapId, challengeSetId, settings: { active_challenge_count: 1 } } });
+    const gameId = gameResponse.json().game.id as string;
+    expect((await app.inject({ method: 'POST', url: '/api/v1/game/' + gameId + '/start', headers: adminHeaders('start-area-game') })).statusCode).toBe(200);
+    const runtime = await testDatabase.db.select().from(challenges).where(eq(challenges.gameId, gameId));
+    const areaChallenge = runtime.find((challenge) => challenge.title === 'Park loop')!;
+    expect(areaChallenge.isDeckActive).toBe(true);
+    expect(areaChallenge.config).toMatchObject({ portable: false, location_mode: 'area', area });
+    expect(runtime.filter((challenge) => challenge.isDeckActive)).toHaveLength(2);
+  });
 });
 
 async function seedAuthoredMap(app: FastifyInstance) {
