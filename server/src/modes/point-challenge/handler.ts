@@ -36,13 +36,16 @@ export function createPointChallengeModeHandler(): ModeHandler {
         db.select({ id: teams.id }).from(teams).where(eq(teams.gameId, game.id)),
         db.select({ challengeId: challengeClaims.challengeId }).from(challengeClaims).where(and(eq(challengeClaims.gameId, game.id), eq(challengeClaims.status, 'submitted'))),
       ]);
-      // Judged challenges never complete; they are finished once every team has submitted them.
+      // Judged challenges are optional bonuses: the game ends once the regular challenges are done,
+      // even if some teams skipped a bonus. A set with only judged challenges ends once every team
+      // has done each of them.
+      const regularRows = rows.filter((row) => !isJudgedChallengeConfig(row.config));
       const submissionCounts = new Map<string, number>();
       for (const row of submissions) submissionCounts.set(row.challengeId, (submissionCounts.get(row.challengeId) ?? 0) + 1);
       const isOpen = (row: (typeof rows)[number]) => isJudgedChallengeConfig(row.config)
         ? row.status === 'available' && (submissionCounts.get(row.id) ?? 0) < teamRows.length
         : row.status === 'available' || row.status === 'claimed';
-      if (rows.length === 0 || rows.some(isOpen)) {
+      if (rows.length === 0 || (regularRows.length > 0 ? regularRows : rows).some(isOpen)) {
         return { hasWinner: false };
       }
       // Judged points arrive after the game, so no winner can be named yet.

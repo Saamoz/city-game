@@ -57,13 +57,26 @@ describe('judged challenges', () => {
     expect(await pointsFor(TEAM_ONE_ID)).toBe(0);
   });
 
-  it('ends a point game once every team has submitted every judged challenge, then publishes and corrects judged scores', async () => {
+  it('ends a point game once the regular challenges are done, even if a team skipped a judged bonus', async () => {
+    await seedPointGame();
+    app = await createTestApp({ db: testDatabase.db });
+
+    expect((await submit('team-one-session', 'judged-1', null)).statusCode).toBe(200);
+    expect(await getGameStatus()).toBe('active');
+    expect((await submitTo(REGULAR_ID, 'team-two-session', 'regular-1')).statusCode).toBe(200);
+    await waitFor(async () => (await getGameStatus()) === 'completed');
+
+    const recap = await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/public-recap' });
+    expect(recap.json().recap.judging).toMatchObject({ status: 'pending', submissionCount: 1 });
+  });
+
+  it('publishes and corrects judged scores after the game', async () => {
     await seedPointGame();
     app = await createTestApp({ db: testDatabase.db });
 
     expect((await submit('team-one-session', 'judged-1', { note: 'Answer: 42' })).statusCode).toBe(200);
     expect((await submit('team-two-session', 'judged-2', null)).statusCode).toBe(200);
-    await waitFor(async () => (await getGameStatus()) === 'completed');
+    await endGame();
 
     const sheetResponse = await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/judging' });
     const sheet = sheetResponse.json().judging;
@@ -145,7 +158,7 @@ describe('judged challenges', () => {
     expect((await submit('team-two-session', 'pf-2', null)).statusCode).toBe(200);
     expect((await submitTo(BEST_ID, 'team-one-session', 'best-1')).statusCode).toBe(200);
     expect((await submitTo(BEST_ID, 'team-two-session', 'best-2')).statusCode).toBe(200);
-    await waitFor(async () => (await getGameStatus()) === 'completed');
+    await endGame();
 
     const sheet = (await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/judging' })).json().judging;
     const passFail = sheet.challenges.find((entry: { challenge: { id: string } }) => entry.challenge.id === JUDGED_ID);
@@ -170,6 +183,11 @@ describe('judged challenges', () => {
     expect(await pointsFor(TEAM_TWO_ID)).toBe(5);
   });
 
+  async function endGame() {
+    const response = await app.inject({ method: 'POST', url: '/api/v1/game/' + GAME_ID + '/end', headers: { 'idempotency-key': 'end-game' } });
+    expect(response.statusCode).toBe(200);
+  }
+
   function submitTo(challengeId: string, sessionToken: string, actionId: string) {
     return app.inject({ method: 'POST', url: '/api/v1/challenges/' + challengeId + '/complete', cookies: { [SESSION_COOKIE_NAME]: sessionToken }, headers: { 'idempotency-key': actionId }, payload: { gps: null } });
   }
@@ -190,7 +208,7 @@ describe('judged challenges', () => {
     ]);
     await testDatabase.db.insert(challenges).values([
       createTestChallenge({ id: JUDGED_ID, zoneId: null, isDeckActive: true, scoring: {}, config: { portable: true, location_mode: 'portable', judged: true, judged_max_points: 10 } }),
-      createTestChallenge({ id: REGULAR_ID, zoneId: null, isDeckActive: false, status: 'completed', config: { portable: true, location_mode: 'portable' } }),
+      createTestChallenge({ id: REGULAR_ID, zoneId: null, isDeckActive: true, status: 'available', scoring: { points: 0 }, config: { portable: true, location_mode: 'portable' } }),
     ]);
   }
 

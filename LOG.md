@@ -325,3 +325,4 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - The admin can judge any time (during or after the game) at `/admin/judging`.
 - Game end: if every judged submission already has a decision (or there were none), the point-challenge `onGameEnd` publishes straight away (`publishJudgingIfDecided`). Otherwise players see a "Waiting for the judges" screen instead of the results; it refreshes on state-version change and every 10 s, and turns into the results once the admin presses "Show results" (the old "Publish scores").
 - `getJudgingSummary` reports `none` when no team submitted a judged challenge, so such games never wait.
+- Win condition: a Challenge Hunt game now ends once the regular challenges are done, even if some teams skipped judged bonuses. A set made only of judged challenges still ends once every team has done each one.
