@@ -274,3 +274,11 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Area challenges get a card marker fixed at the area's centroid (or `pointOnFeature` when the centroid falls outside). Fixed: a selected marker drifted as the map zoomed, because the CSS `scale`/`translate` properties on the marker element compose with Mapbox's positioning transform and scale its screen offset. Only the inner card is transformed now. Also fixed: pin click handlers kept the `onSelect` from when the pin was created.
 - Distances are shown in feet / miles (`client/src/lib/units.ts`); the editor shows area size in acres.
 - Standings and feed panels drop down from the top (swipe up to close) since the deck owns the bottom.
+
+## Realtime Performance Pass (2026-10-07)
+
+- Client store: `cloneSnapshot` is now a shallow copy. Every update already swaps in new arrays for the slices it touches, so untouched slices (zones, challenges, …) keep their identity. Team-location updates no longer replace `game` when the state version is unchanged.
+- `ZoneLayer` takes `zones` and `teams` instead of the snapshot, so location and resource updates don't rebuild the zone GeoJSON. `GameView` memos depend on the slices they read (and `currentPoint` is memoized), so the deck, scoreboard and completed cards only recompute when their data changes.
+- `POST /players/me/location` reads the player and game in one query and only broadcasts `team_locations_updated` when the updating player is the team's representative, built from that row (no game-wide `listTeamLocationsByGame`).
+- New hourly job (`jobs/receipt-pruning.ts`) deletes `action_receipts` older than 24 h; migration 0016 indexes `created_at`.
+- `broadcastFullStateToGame` loads game state once (`loadGameState`) and shapes it per socket (`buildViewerSnapshot`) instead of rebuilding the full snapshot for every connected player.

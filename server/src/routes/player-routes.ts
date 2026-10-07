@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { and, eq } from 'drizzle-orm';
-import { STATE_VERSION_HEADER, errorCodes, socketServerEventTypes, type GameSettings, type JsonObject } from '@city-game/shared';
+import { STATE_VERSION_HEADER, errorCodes, socketServerEventTypes, type GameSettings, type JsonObject, type TeamLocation } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
 import { games, players, teams } from '../db/schema.js';
 import { generateSessionToken, getSerializedSessionCookie } from '../lib/auth.js';
@@ -9,7 +9,7 @@ import { gpsPayloadSchema } from '../middleware/gps-validation.js';
 import { executeIdempotentMutation } from '../services/idempotency-service.js';
 import { serializeGameRecord, transitionGameLifecycle } from '../services/game-service.js';
 import { updatePlayerLocation } from '../services/player-location-service.js';
-import { listTeamLocationsByGame, shouldBroadcastTeamLocations } from '../services/team-location-service.js';
+import { shouldBroadcastTeamLocations, toTeamLocation } from '../services/team-location-service.js';
 
 const paramsWithGameIdSchema = {
   type: 'object',
@@ -605,7 +605,7 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
             gameId: string;
             modeKey: string;
             stateVersion: number;
-            teamLocations: Awaited<ReturnType<typeof listTeamLocationsByGame>>;
+            teamLocations: TeamLocation[];
           }
         | null = null;
 
@@ -618,14 +618,19 @@ export const playerRoutes: FastifyPluginAsync = async (app) => {
 
         request.player = result.player;
 
-        const game = await getGameById(db, result.player.gameId);
-        if (game.status === 'active' && result.player.teamId && shouldBroadcastTeamLocations(game.settings)) {
-          const teamLocations = await listTeamLocationsByGame(db, result.player.gameId);
+        const { game, teamRepresentative } = result;
+        // Only the team's representative moves its marker; updates from teammates change nothing others see.
+        if (
+          game.status === 'active'
+          && result.player.teamId
+          && teamRepresentative?.id === result.player.id
+          && shouldBroadcastTeamLocations(game.settings)
+        ) {
           broadcastPayload = {
-            gameId: result.player.gameId,
+            gameId: game.id,
             modeKey: game.modeKey,
             stateVersion: game.stateVersion,
-            teamLocations: teamLocations.filter((entry) => entry.teamId === result.player.teamId),
+            teamLocations: [toTeamLocation(teamRepresentative)],
           };
         }
 

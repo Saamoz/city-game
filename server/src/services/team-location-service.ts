@@ -44,6 +44,16 @@ export async function getTeamLocationRepresentative(
   return player as TeamLocationRepresentative;
 }
 
+export function toTeamLocation(representative: TeamLocationRepresentative): TeamLocation {
+  return {
+    teamId: representative.teamId,
+    lat: Number(representative.lastLat),
+    lng: Number(representative.lastLng),
+    gpsErrorMeters: representative.lastGpsError,
+    updatedAt: representative.lastSeenAt.toISOString(),
+  };
+}
+
 export async function listTeamLocationsByGame(
   db: DatabaseClient,
   gameId: string,

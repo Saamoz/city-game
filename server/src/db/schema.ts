@@ -340,6 +340,7 @@ export const actionReceipts = pgTable(
       table.actionId,
     ),
     actionReceiptsLookupIdx: index('idx_receipts_lookup').on(table.scopeKey, table.actionType, table.actionId),
+    actionReceiptsCreatedAtIdx: index('idx_receipts_created_at').on(table.createdAt),
   }),
 );
 

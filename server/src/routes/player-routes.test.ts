@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { and, eq } from 'drizzle-orm';
-import { SESSION_COOKIE_NAME } from '@city-game/shared';
+import { SESSION_COOKIE_NAME, socketServerEventTypes } from '@city-game/shared';
 import { env } from '../db/env.js';
 import { games, playerLocationSamples, players, teams } from '../db/schema.js';
 import { createTestApp } from '../test/create-test-app.js';
@@ -25,6 +25,7 @@ describe('player routes', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await app?.close();
   });
 
@@ -920,6 +921,52 @@ describe('player routes', () => {
       .from(playerLocationSamples)
       .where(and(eq(playerLocationSamples.gameId, GAME_ID), eq(playerLocationSamples.teamId, TEAM_ID)));
     expect(storedSamples).toHaveLength(1);
+  });
+
+  it('broadcasts a team location only when the updating player is the team representative', async () => {
+    await seedGame({ status: 'active' });
+    await seedTeam();
+    await seedPlayer({ teamId: TEAM_ID, sessionToken: 'broadcast-player-one' });
+    await seedPlayer({
+      id: '66666666-6666-4666-8666-666666666666',
+      teamId: TEAM_ID,
+      displayName: 'Player Two',
+      sessionToken: 'broadcast-player-two',
+    });
+    app = await createPlayerTestApp();
+    const sendSpy = vi.spyOn(app.broadcaster, 'send');
+
+    const newerCapturedAt = new Date().toISOString();
+    const olderCapturedAt = new Date(Date.now() - 5_000).toISOString();
+    const firstResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/location',
+      headers: idempotencyHeaders('broadcast-player-one'),
+      cookies: { [SESSION_COOKIE_NAME]: 'broadcast-player-one' },
+      payload: { lat: 49.8951, lng: -97.1384, gpsErrorMeters: 4, capturedAt: newerCapturedAt },
+    });
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy.mock.calls[0]?.[0]).toMatchObject({
+      gameId: GAME_ID,
+      eventType: socketServerEventTypes.teamLocationsUpdated,
+      payload: {
+        teamLocations: [{ teamId: TEAM_ID, lat: 49.8951, lng: -97.1384, gpsErrorMeters: 4, updatedAt: newerCapturedAt }],
+      },
+    });
+
+    // Player two's fix is older, so player one still represents the team and nothing visible changed.
+    const secondResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/players/me/location',
+      headers: idempotencyHeaders('broadcast-player-two'),
+      cookies: { [SESSION_COOKIE_NAME]: 'broadcast-player-two' },
+      payload: { lat: 49.896, lng: -97.1384, gpsErrorMeters: 4, capturedAt: olderCapturedAt },
+    });
+
+    expect(secondResponse.statusCode).toBe(200);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
   });
 
   it('returns GPS_TOO_OLD when /players/me/location is called with stale GPS', async () => {

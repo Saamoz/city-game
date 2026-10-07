@@ -331,6 +331,10 @@ function applyDirectRealtimePayload(
     case socketServerEventTypes.teamLocationsUpdated: {
       const teamLocationsPayload = payload as SocketEventPayloadMap['team_locations_updated'];
       snapshot.teamLocations = upsertTeamLocations(snapshot.teamLocations, teamLocationsPayload.teamLocations);
+      if (snapshot.game.stateVersion === teamLocationsPayload.stateVersion) {
+        return snapshot;
+      }
+
       return {
         ...snapshot,
         game: {
@@ -443,31 +447,10 @@ function applyDirectRealtimePayload(
   }
 }
 
+// Shallow copy only: every update below swaps in a new array or object for the slice it changes, so
+// untouched slices keep their identity and memoized views (zone layer, deck, scoreboard) skip work.
 function cloneSnapshot(snapshot: GameStateSnapshot): GameStateSnapshot {
-  return {
-    ...snapshot,
-    game: { ...snapshot.game },
-    player: snapshot.player ? { ...snapshot.player } : null,
-    team: snapshot.team ? { ...snapshot.team } : null,
-    teams: [...snapshot.teams],
-    players: [...snapshot.players],
-    teamLocations: [...snapshot.teamLocations],
-    zones: [...snapshot.zones],
-    challenges: [...snapshot.challenges],
-    claims: [...snapshot.claims],
-    annotations: [...snapshot.annotations],
-    teamResources: cloneTeamResources(snapshot.teamResources),
-    challengeReroll: {
-      ...snapshot.challengeReroll,
-      votes: snapshot.challengeReroll.votes.map((vote) => ({ ...vote, teamIds: [...vote.teamIds] })),
-    },
-  };
-}
-
-function cloneTeamResources(teamResources: TeamResourcesByTeam): TeamResourcesByTeam {
-  return Object.fromEntries(
-    Object.entries(teamResources).map(([teamId, balances]) => [teamId, { ...balances }]),
-  ) as TeamResourcesByTeam;
+  return { ...snapshot };
 }
 
 function setTeamResourceBalance(

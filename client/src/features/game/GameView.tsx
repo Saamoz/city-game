@@ -15,6 +15,8 @@ import {
   type ResourceAwardMap,
   type SocketEventPayloadMap,
   type SocketServerEventType,
+  type Team,
+  type Zone,
 } from '@city-game/shared';
 import {
   ApiError,
@@ -45,7 +47,7 @@ import {
   FeedOverlay,
   MiniScoreboardCard,
   ScoreboardOverlay,
-  buildFeedEntries,
+  buildFeedEntriesForTeams,
   buildZoneScoreboard,
 } from './Phase32Panels';
 import { ZoneLayer } from './ZoneLayer';
@@ -524,7 +526,20 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     setMapForLayer(null);
   }, [snapshot?.game.status]);
 
-  const activeChallenges = useMemo(() => getAvailableDeckChallenges(snapshot), [snapshot]);
+  // Memos below depend on the specific snapshot slices they read. The store keeps unchanged slices'
+  // identity, so frequent updates like team locations don't recompute the deck, scoreboard or map.
+  const snapshotChallenges = snapshot?.challenges;
+  const snapshotClaims = snapshot?.claims;
+  const snapshotZones = snapshot?.zones;
+  const snapshotTeams = snapshot?.teams;
+  const snapshotTeamLocations = snapshot?.teamLocations;
+  const viewerTeamId = snapshot?.team?.id ?? null;
+  const modeKey = snapshot?.game.modeKey ?? null;
+  const teamSubmittedIds = useMemo(() => getTeamSubmittedIds(snapshotClaims, viewerTeamId), [snapshotClaims, viewerTeamId]);
+  const activeChallenges = useMemo(
+    () => getAvailableDeckChallenges(snapshotChallenges, teamSubmittedIds, modeKey),
+    [modeKey, snapshotChallenges, teamSubmittedIds],
+  );
 
   useEffect(() => {
     if (!activeChallenges.length) {
@@ -573,20 +588,36 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const missingToken = mapboxToken.length === 0;
   const team = snapshot?.team ?? null;
   const isPointMode = snapshot?.game.modeKey === 'point_challenge';
-  const challengeCounts = useMemo(() => buildChallengeCounts(snapshot), [snapshot]);
+  const configuredChallengeTotal = snapshot?.game.settings?.challenge_total_count;
+  const challengeCounts = useMemo(
+    () => buildChallengeCounts(snapshotChallenges, configuredChallengeTotal),
+    [configuredChallengeTotal, snapshotChallenges],
+  );
   const challengeProgressLabel = useMemo(() => buildChallengeProgressLabel(challengeCounts), [challengeCounts]);
-  const completedCards = useMemo(() => buildCompletedCards(snapshot), [snapshot]);
-  const controlledZoneCount = useMemo(() => buildControlledZoneCount(snapshot, team?.id ?? null), [snapshot, team?.id]);
+  const completedCards = useMemo(
+    () => buildCompletedCards(snapshotChallenges, snapshotClaims, snapshotTeams),
+    [snapshotChallenges, snapshotClaims, snapshotTeams],
+  );
+  const controlledZoneCount = useMemo(() => buildControlledZoneCount(snapshotZones, viewerTeamId), [snapshotZones, viewerTeamId]);
   const mobileBottomInsetStyle = { paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1rem)' } as const;
   const mobileBottomShelfStyle = { height: 'calc(env(safe-area-inset-bottom, 0px) + 4.5rem)' } as const;
-  const scoreboardEntries = useMemo(() => buildZoneScoreboard(snapshot), [snapshot]);
-  const feedEntries = useMemo(() => buildFeedEntries(recentEvents, snapshot), [recentEvents, snapshot]);
-  const currentPoint = gpsPayload ? [gpsPayload.lng, gpsPayload.lat] as [number, number] : null;
-  const currentZone = useMemo(() => snapshot ? findContainingZone(snapshot.zones, currentPoint) : null, [currentPoint, snapshot]);
+  const snapshotPlayers = snapshot?.players;
+  const snapshotTeamResources = snapshot?.teamResources;
+  const scoreboardEntries = useMemo(
+    () => buildZoneScoreboard({ teams: snapshotTeams, players: snapshotPlayers, zones: snapshotZones, teamResources: snapshotTeamResources, modeKey }),
+    [modeKey, snapshotPlayers, snapshotTeamResources, snapshotTeams, snapshotZones],
+  );
+  const feedEntries = useMemo(() => buildFeedEntriesForTeams(recentEvents, snapshotTeams ?? []), [recentEvents, snapshotTeams]);
+  const gpsLng = gpsPayload?.lng;
+  const gpsLat = gpsPayload?.lat;
+  const currentPoint = useMemo(
+    () => (gpsLng !== undefined && gpsLat !== undefined ? [gpsLng, gpsLat] as [number, number] : null),
+    [gpsLat, gpsLng],
+  );
+  const currentZone = useMemo(() => snapshotZones ? findContainingZone(snapshotZones, currentPoint) : null, [currentPoint, snapshotZones]);
   const broadcastTeamLocations = Boolean(snapshot?.game.settings?.broadcast_team_locations);
-  const teamSubmittedIds = useMemo(() => getTeamSubmittedIds(snapshot), [snapshot]);
   // Your team's view: a judged challenge you already submitted is done for you, like a completed one.
-  const teamChallenges = useMemo(() => (snapshot?.challenges ?? []).filter((challenge) => !teamSubmittedIds.has(challenge.id)), [snapshot?.challenges, teamSubmittedIds]);
+  const teamChallenges = useMemo(() => (snapshotChallenges ?? []).filter((challenge) => !teamSubmittedIds.has(challenge.id)), [snapshotChallenges, teamSubmittedIds]);
   // Challenges shown on the map: pins and drawn areas.
   const pointChallenges = teamChallenges.filter((challenge) => challenge.status === 'available' && isMapChallenge(challenge));
   const regularPinCount = pointChallenges.length;
@@ -670,8 +701,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   }, [currentPoint]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !snapshot || !broadcastTeamLocations) {
+    const map = mapForLayer;
+    if (!map || !snapshotTeams || !snapshotTeamLocations || !broadcastTeamLocations) {
       clearTeamLocationMarkers(teamLocationMarkersRef.current);
       return;
     }
@@ -679,10 +710,10 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     syncTeamLocationMarkers(
       map,
       teamLocationMarkersRef.current,
-      snapshot.teams,
-      snapshot.teamLocations.filter((entry) => entry.teamId !== snapshot.team?.id),
+      snapshotTeams,
+      snapshotTeamLocations.filter((entry) => entry.teamId !== viewerTeamId),
     );
-  }, [broadcastTeamLocations, snapshot]);
+  }, [broadcastTeamLocations, mapForLayer, snapshotTeamLocations, snapshotTeams, viewerTeamId]);
 
   useEffect(() => {
     latestGpsPayloadRef.current = gpsPayload ?? null;
@@ -898,17 +929,17 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
   const focusZoneById = useCallback((zoneId: string) => {
     const map = mapRef.current;
-    if (!map || !snapshot) {
+    if (!map || !snapshotZones) {
       return;
     }
 
-    const zone = snapshot.zones.find((entry) => entry.id === zoneId);
+    const zone = snapshotZones.find((entry) => entry.id === zoneId);
     if (!zone) {
       return;
     }
 
     focusMapOnZone(map, zone);
-  }, [snapshot]);
+  }, [snapshotZones]);
 
   const handleFocusCompletedCard = useCallback((challengeId: string) => {
     const completedCard = completedCards.find((entry) => entry.challenge.id === challengeId);
@@ -933,7 +964,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       <div ref={mapContainerRef} className="absolute inset-0" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,234,215,0.16),transparent_28%),linear-gradient(180deg,rgba(223,230,232,0.04),rgba(223,230,232,0.16))]" />
 
-      <ZoneLayer map={mapForLayer} snapshot={snapshot} />
+      <ZoneLayer map={mapForLayer} zones={snapshot?.zones ?? null} teams={snapshot?.teams ?? null} />
       <ChallengeAreaLayer map={mapForLayer} challenges={teamChallenges} selectedId={selectedPointChallengeId} onSelect={openCardFromMap} />
       <PointChallengeLayer map={mapForLayer} challenges={teamChallenges} selectedId={selectedPointChallengeId} onSelect={openCardFromMap} />
       {cardViewer && viewerChallenges.length ? (
@@ -1424,9 +1455,8 @@ function isMapChallenge(challenge: Challenge): boolean {
   return isPointChallenge(challenge) || isAreaChallenge(challenge);
 }
 
-function getTeamSubmittedIds(snapshot: GameStateSnapshot | null): Set<string> {
-  const teamId = snapshot?.team?.id;
-  return new Set((snapshot?.claims ?? []).filter((claim) => claim.status === 'submitted' && claim.teamId === teamId).map((claim) => claim.challengeId));
+function getTeamSubmittedIds(claims: ChallengeClaim[] | undefined, teamId: string | null): Set<string> {
+  return new Set((claims ?? []).filter((claim) => claim.status === 'submitted' && claim.teamId === teamId).map((claim) => claim.challengeId));
 }
 
 function PointModeLegend({ pinCount, anywhereCount, showAnywhere }: { pinCount: number; anywhereCount: number; showAnywhere: boolean }) {
@@ -1479,8 +1509,8 @@ function getBoundsFromSnapshot(snapshot: GameStateSnapshot): mapboxgl.LngLatBoun
   return bounds;
 }
 
-function buildChallengeCounts(snapshot: GameStateSnapshot | null) {
-  const counts = (snapshot?.challenges ?? []).reduce(
+function buildChallengeCounts(challenges: Challenge[] | undefined, configuredTotal: unknown) {
+  const counts = (challenges ?? []).reduce(
     (current, challenge) => {
       current[challenge.status] += 1;
       return current;
@@ -1488,10 +1518,9 @@ function buildChallengeCounts(snapshot: GameStateSnapshot | null) {
     { available: 0, claimed: 0, completed: 0, skipped: 0 },
   );
 
-  const configuredTotal = snapshot?.game.settings?.challenge_total_count;
   const total = typeof configuredTotal === 'number' && Number.isFinite(configuredTotal)
     ? configuredTotal
-    : (snapshot?.challenges.length ?? 0);
+    : (challenges?.length ?? 0);
 
   return {
     ...counts,
@@ -1508,11 +1537,10 @@ function buildChallengeProgressLabel(counts: ReturnType<typeof buildChallengeCou
   return `${counts.completed} / ${counts.total} done`;
 }
 
-function getAvailableDeckChallenges(snapshot: GameStateSnapshot | null) {
-  const submittedIds = getTeamSubmittedIds(snapshot);
-  return [...(snapshot?.challenges ?? [])]
+function getAvailableDeckChallenges(challenges: Challenge[] | undefined, submittedIds: Set<string>, modeKey: string | null) {
+  return [...(challenges ?? [])]
     // Point games show every challenge as a card; territory decks leave pins and judged ones out.
-    .filter((challenge) => challenge.status === 'available' && !submittedIds.has(challenge.id) && (snapshot?.game.modeKey === 'point_challenge' || (!isMapChallenge(challenge) && !isJudgedChallenge(challenge))))
+    .filter((challenge) => challenge.status === 'available' && !submittedIds.has(challenge.id) && (modeKey === 'point_challenge' || (!isMapChallenge(challenge) && !isJudgedChallenge(challenge))))
     .sort((left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title));
 }
 
@@ -1524,21 +1552,25 @@ function distanceBetweenLngLat(left: [number, number], right: [number, number]):
   return 12_742_000 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function buildControlledZoneCount(snapshot: GameStateSnapshot | null, teamId: string | null): number {
-  if (!snapshot || !teamId) {
+function buildControlledZoneCount(zones: Zone[] | undefined, teamId: string | null): number {
+  if (!zones || !teamId) {
     return 0;
   }
 
-  return snapshot.zones.filter((zone) => zone.ownerTeamId === teamId).length;
+  return zones.filter((zone) => zone.ownerTeamId === teamId).length;
 }
 
-function buildCompletedCards(snapshot: GameStateSnapshot | null): CompletedCardViewModel[] {
-  if (!snapshot) {
+function buildCompletedCards(
+  challenges: Challenge[] | undefined,
+  claims: ChallengeClaim[] | undefined,
+  teams: Team[] | undefined,
+): CompletedCardViewModel[] {
+  if (!challenges || !claims || !teams) {
     return [];
   }
 
   const completedClaimsByChallengeId = new Map<string, ChallengeClaim>();
-  for (const claim of snapshot.claims) {
+  for (const claim of claims) {
     if (claim.status !== 'completed') {
       continue;
     }
@@ -1552,9 +1584,9 @@ function buildCompletedCards(snapshot: GameStateSnapshot | null): CompletedCardV
     }
   }
 
-  const teamById = new Map(snapshot.teams.map((team) => [team.id, team]));
+  const teamById = new Map(teams.map((team) => [team.id, team]));
 
-  return snapshot.challenges
+  return challenges
     .filter((challenge) => challenge.status === 'completed')
     .sort((left, right) => {
       const leftCompletedAt = completedClaimsByChallengeId.get(left.id)?.completedAt;

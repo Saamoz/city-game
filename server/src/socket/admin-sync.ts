@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { socketServerEventTypes } from '@city-game/shared';
 import type { FastifyInstance } from 'fastify';
 import { players } from '../db/schema.js';
-import { buildGameStateSnapshot } from '../services/state-service.js';
+import { buildViewerSnapshot, hasViewer, loadGameState } from '../services/state-service.js';
 import type { RealtimeSocket } from './broadcaster.js';
 import { getGameRoom, getTeamRoom } from './rooms.js';
 
@@ -10,22 +10,27 @@ export async function broadcastFullStateToGame(app: FastifyInstance, gameId: str
   const socketIds = await app.io.in(getGameRoom(gameId)).allSockets();
   let sentCount = 0;
 
+  if (socketIds.size === 0) {
+    return sentCount;
+  }
+
+  // Load once and tailor per viewer, rather than rebuilding the whole snapshot for every socket.
+  const state = await loadGameState(app.db, gameId);
+  const serverTime = new Date().toISOString();
+
   for (const socketId of socketIds) {
     const socket = app.io.sockets.sockets.get(socketId) as RealtimeSocket | undefined;
 
-    if (!socket || socket.data.joinedGameId !== gameId) {
+    if (!socket || socket.data.joinedGameId !== gameId || !hasViewer(state, socket.data.player.id)) {
       continue;
     }
 
-    const snapshot = await buildGameStateSnapshot(app.db, app.modeRegistry, {
-      gameId,
-      playerId: socket.data.player.id,
-    });
+    const snapshot = buildViewerSnapshot(app.modeRegistry, state, socket.data.player.id);
 
     socket.emit(socketServerEventTypes.gameStateSync, {
       gameId,
       stateVersion: snapshot.game.stateVersion,
-      serverTime: new Date().toISOString(),
+      serverTime,
       snapshot,
     });
     sentCount += 1;

@@ -24,60 +24,89 @@ interface ViewerContextInput {
   playerId: string;
 }
 
+export interface LoadedGameState {
+  modeKey: string;
+  shared: Omit<GameStateSnapshot, 'player' | 'team' | 'annotations'>;
+  playerRows: Array<typeof players.$inferSelect>;
+  annotationRows: Array<typeof annotations.$inferSelect>;
+}
+
 export async function buildGameStateSnapshot(
   db: DatabaseClient,
   registry: ModeRegistry,
   input: ViewerContextInput,
 ): Promise<GameStateSnapshot> {
-  const game = await getGameById(db, input.gameId);
+  const state = await loadGameState(db, input.gameId);
+  return buildViewerSnapshot(registry, state, input.playerId);
+}
+
+// Loads everything a snapshot needs once, so a broadcast to many viewers can reuse it via buildViewerSnapshot.
+export async function loadGameState(db: DatabaseClient, gameId: string): Promise<LoadedGameState> {
+  const game = await getGameById(db, gameId);
   const teamLocationsEnabled = shouldBroadcastTeamLocations(game.settings);
   const [teamRows, playerRows, zoneRows, challengeRows, claimRows, annotationRows, teamResources, teamLocations, challengeReroll] = await Promise.all([
-    db.select().from(teams).where(eq(teams.gameId, input.gameId)).orderBy(asc(teams.createdAt)),
-    db.select().from(players).where(eq(players.gameId, input.gameId)).orderBy(asc(players.createdAt)),
-    listZonesByGame(db, input.gameId),
+    db.select().from(teams).where(eq(teams.gameId, gameId)).orderBy(asc(teams.createdAt)),
+    db.select().from(players).where(eq(players.gameId, gameId)).orderBy(asc(players.createdAt)),
+    listZonesByGame(db, gameId),
     db.select()
       .from(challenges)
-      .where(and(eq(challenges.gameId, input.gameId), or(eq(challenges.isDeckActive, true), eq(challenges.status, 'claimed'), eq(challenges.status, 'completed'), eq(challenges.status, 'skipped'))))
+      .where(and(eq(challenges.gameId, gameId), or(eq(challenges.isDeckActive, true), eq(challenges.status, 'claimed'), eq(challenges.status, 'completed'), eq(challenges.status, 'skipped'))))
       .orderBy(asc(challenges.sortOrder), asc(challenges.createdAt)),
-    db.select().from(challengeClaims).where(eq(challengeClaims.gameId, input.gameId)).orderBy(asc(challengeClaims.createdAt)),
-    db.select().from(annotations).where(eq(annotations.gameId, input.gameId)).orderBy(asc(annotations.createdAt)),
-    getAllBalances(db, input.gameId),
-    teamLocationsEnabled ? listTeamLocationsByGame(db, input.gameId) : Promise.resolve([]),
-    getChallengeRerollState(db, input.gameId),
+    db.select().from(challengeClaims).where(eq(challengeClaims.gameId, gameId)).orderBy(asc(challengeClaims.createdAt)),
+    db.select().from(annotations).where(eq(annotations.gameId, gameId)).orderBy(asc(annotations.createdAt)),
+    getAllBalances(db, gameId),
+    teamLocationsEnabled ? listTeamLocationsByGame(db, gameId) : Promise.resolve([]),
+    getChallengeRerollState(db, gameId),
   ]);
 
-  const viewerPlayerRow = playerRows.find((player) => player.id == input.playerId);
+  return {
+    modeKey: game.modeKey,
+    shared: {
+      game: serializeGameRecord(game),
+      teams: teamRows.map((team) => serializeTeamRow(team)),
+      players: playerRows.map((player) => serializePlayerRow(player)),
+      teamLocations,
+      zones: zoneRows,
+      challenges: challengeRows.map((challenge) => serializeChallengeRow(challenge)),
+      claims: claimRows.map((claim) => serializeClaimRow(claim)),
+      teamResources,
+      challengeReroll,
+    },
+    playerRows,
+    annotationRows,
+  };
+}
 
-  if (!viewerPlayerRow) {
+export function hasViewer(state: LoadedGameState, playerId: string): boolean {
+  return state.playerRows.some((player) => player.id === playerId);
+}
+
+export function buildViewerSnapshot(
+  registry: ModeRegistry,
+  state: LoadedGameState,
+  playerId: string,
+): GameStateSnapshot {
+  const viewerPlayer = state.shared.players.find((player) => player.id === playerId);
+
+  if (!viewerPlayer) {
     throw new AppError(errorCodes.unauthorized, {
       message: 'Player cannot access another game.',
     });
   }
 
-  const serializedTeams = teamRows.map((team) => serializeTeamRow(team));
-  const serializedPlayers = playerRows.map((player) => serializePlayerRow(player));
-  const viewerPlayer = serializedPlayers.find((player) => player.id == input.playerId) ?? serializePlayerRow(viewerPlayerRow);
-  const viewerTeam = viewerPlayer.teamId ? serializedTeams.find((team) => team.id == viewerPlayer.teamId) ?? null : null;
-  const filteredAnnotations = filterAnnotationsForViewer(annotationRows, playerRows, viewerPlayer.teamId).map((annotation) =>
+  const viewerTeam = viewerPlayer.teamId ? state.shared.teams.find((team) => team.id === viewerPlayer.teamId) ?? null : null;
+  const filteredAnnotations = filterAnnotationsForViewer(state.annotationRows, state.playerRows, viewerPlayer.teamId).map((annotation) =>
     serializeAnnotationRow(annotation),
   );
 
   const fullSnapshot = {
-    game: serializeGameRecord(game),
+    ...state.shared,
     player: viewerPlayer,
     team: viewerTeam,
-    teams: serializedTeams,
-    players: serializedPlayers,
-    teamLocations,
-    zones: zoneRows,
-    challenges: challengeRows.map((challenge) => serializeChallengeRow(challenge)),
-    claims: claimRows.map((claim) => serializeClaimRow(claim)),
     annotations: filteredAnnotations,
-    teamResources,
-    challengeReroll,
   } satisfies GameStateSnapshot;
 
-  return registry.get(game.modeKey).filterStateForViewer(fullSnapshot, {
+  return registry.get(state.modeKey).filterStateForViewer(fullSnapshot, {
     playerId: viewerPlayer.id,
     teamId: viewerPlayer.teamId,
   });

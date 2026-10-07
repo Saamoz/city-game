@@ -1,12 +1,13 @@
 import { useEffect } from 'react';
 import type { Feature, FeatureCollection, GeoJsonProperties } from 'geojson';
 import mapboxgl from 'mapbox-gl';
-import type { GameStateSnapshot, GeoJsonGeometry, Zone } from '@city-game/shared';
+import type { GeoJsonGeometry, Team, Zone } from '@city-game/shared';
 import { buildRenderedZoneGeometry } from './mapGeometry';
 
 interface ZoneLayerProps {
   map: mapboxgl.Map | null;
-  snapshot: GameStateSnapshot | null;
+  zones: Zone[] | null;
+  teams: Team[] | null;
 }
 
 const ZONE_SOURCE_ID = 'zones-source';
@@ -16,9 +17,11 @@ const NEUTRAL_FILL = '#b8b9b3';
 const NEUTRAL_LINE = '#7d817b';
 const DESATURATED_BASE = '#c9c0af';
 
-export function ZoneLayer({ map, snapshot }: ZoneLayerProps) {
+// Takes zones and teams rather than the whole snapshot so team-location and other unrelated
+// updates don't rebuild the zone GeoJSON.
+export function ZoneLayer({ map, zones, teams }: ZoneLayerProps) {
   useEffect(() => {
-    if (!map || !snapshot) {
+    if (!map || !zones || !teams) {
       return;
     }
 
@@ -27,7 +30,7 @@ export function ZoneLayer({ map, snapshot }: ZoneLayerProps) {
         return;
       }
 
-      const collection = buildZoneCollection(snapshot);
+      const collection = buildZoneCollection(zones, teams);
 
       let source = map.getSource(ZONE_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
       if (!source) {
@@ -82,17 +85,17 @@ export function ZoneLayer({ map, snapshot }: ZoneLayerProps) {
         canvas.style.cursor = '';
       }
     };
-  }, [map, snapshot]);
+  }, [map, zones, teams]);
 
   return null;
 }
 
-function buildZoneCollection(snapshot: GameStateSnapshot): FeatureCollection<GeoJsonGeometry, GeoJsonProperties> {
-  const teamColorById = new Map(snapshot.teams.map((team) => [team.id, team.color]));
+function buildZoneCollection(zones: Zone[], teams: Team[]): FeatureCollection<GeoJsonGeometry, GeoJsonProperties> {
+  const teamColorById = new Map(teams.map((team) => [team.id, team.color]));
 
   return {
     type: 'FeatureCollection',
-    features: snapshot.zones.map((zone) => buildZoneFeature(
+    features: zones.map((zone) => buildZoneFeature(
       zone,
       teamColorById.get(zone.ownerTeamId ?? '') ?? null,
     )),

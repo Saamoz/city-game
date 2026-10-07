@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import type { GameEventRecord, GameStateSnapshot, Team } from '@city-game/shared';
+import type { GameEventRecord, Player, Team, TeamResourcesByTeam, Zone } from '@city-game/shared';
 
 export interface FeedEntry {
   id: string;
@@ -38,15 +38,23 @@ interface FeedOverlayProps {
   onFocusZone(zoneId: string): void;
 }
 
-export function buildZoneScoreboard(snapshot: GameStateSnapshot | null): ZoneScoreboardEntry[] {
-  if (!snapshot) {
+export interface ZoneScoreboardInput {
+  teams: Team[] | undefined;
+  players: Player[] | undefined;
+  zones: Zone[] | undefined;
+  teamResources: TeamResourcesByTeam | undefined;
+  modeKey: string | null;
+}
+
+export function buildZoneScoreboard({ teams, players, zones, teamResources, modeKey }: ZoneScoreboardInput): ZoneScoreboardEntry[] {
+  if (!teams || !players || !zones || !teamResources) {
     return [];
   }
 
   const zoneCounts = new Map<string, number>();
   const playerNamesByTeamId = new Map<string, string[]>();
 
-  for (const player of snapshot.players) {
+  for (const player of players) {
     if (!player.teamId) {
       continue;
     }
@@ -55,7 +63,7 @@ export function buildZoneScoreboard(snapshot: GameStateSnapshot | null): ZoneSco
     currentNames.push(player.displayName);
     playerNamesByTeamId.set(player.teamId, currentNames);
   }
-  for (const zone of snapshot.zones) {
+  for (const zone of zones) {
     if (!zone.ownerTeamId) {
       continue;
     }
@@ -63,13 +71,13 @@ export function buildZoneScoreboard(snapshot: GameStateSnapshot | null): ZoneSco
     zoneCounts.set(zone.ownerTeamId, (zoneCounts.get(zone.ownerTeamId) ?? 0) + 1);
   }
 
-  return [...snapshot.teams]
+  return [...teams]
     .map((team) => ({
       team,
-      zoneCount: snapshot.game.modeKey === 'point_challenge' ? (snapshot.teamResources[team.id]?.points ?? 0) : (zoneCounts.get(team.id) ?? 0),
+      zoneCount: modeKey === 'point_challenge' ? (teamResources[team.id]?.points ?? 0) : (zoneCounts.get(team.id) ?? 0),
       rank: 0,
       playerNames: playerNamesByTeamId.get(team.id) ?? [],
-      scoreLabel: snapshot.game.modeKey === 'point_challenge' ? ((snapshot.teamResources[team.id]?.points ?? 0) + ' pts') : ((zoneCounts.get(team.id) ?? 0) + ' zones'),
+      scoreLabel: modeKey === 'point_challenge' ? ((teamResources[team.id]?.points ?? 0) + ' pts') : ((zoneCounts.get(team.id) ?? 0) + ' zones'),
     }))
     .sort((left, right) => {
       const zoneDelta = right.zoneCount - left.zoneCount;
@@ -88,10 +96,6 @@ export function buildZoneScoreboard(snapshot: GameStateSnapshot | null): ZoneSco
       ...entry,
       rank: index + 1,
     }));
-}
-
-export function buildFeedEntries(events: GameEventRecord[], snapshot: GameStateSnapshot | null): FeedEntry[] {
-  return buildFeedEntriesForTeams(events, snapshot?.teams ?? []);
 }
 
 export function buildFeedEntriesForTeams(events: GameEventRecord[], teams: Team[]): FeedEntry[] {
