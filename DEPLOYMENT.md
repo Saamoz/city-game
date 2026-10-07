@@ -103,7 +103,7 @@ Copy the public key to both `VAPID_PUBLIC_KEY` and `VITE_VAPID_PUBLIC_KEY`. Copy
 - On boot the server logs `push notifications disabled: …` if any VAPID variable is missing or invalid, and `push notification failed` with the push service's status code for each failed send.
 - **iPhone / iPad:** Web Push only works when the site is added to the Home Screen (Share → Add to Home Screen) and opened from that icon, on iOS 16.4 or later. In Safari tabs the app shows that hint instead of the prompt.
 - **Android:** works in Chrome as a normal tab or installed app. Make sure Chrome's notifications aren't blocked in Android settings.
-- Turf War sends pushes for zone captures (and claim expiry warnings). Challenge Hunt sends them when a team completes a challenge: to teammates, and to rival teams unless it was a judged submission.
+- Turf War sends pushes for zone captures (and claim expiry warnings). Challenge Hunt sends them to rival teams when a team completes a challenge. Each player gets at most one push per `PUSH_RATE_LIMIT_MS` (default 60 s); pushes inside that window are combined into one when it ends.
  
 ---
  

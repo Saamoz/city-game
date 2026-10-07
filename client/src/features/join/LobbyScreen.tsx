@@ -137,7 +137,7 @@ export function LobbyScreen({
                     <p className="mt-1 text-sm leading-6 text-[#44545b]">
                       {game.modeKey === 'territory'
                         ? 'Get notified when rival teams capture a zone.'
-                        : 'Get notified when your teammates or a rival team complete a challenge.'}
+                        : 'Get notified when a rival team completes a challenge.'}
                     </p>
                     {notificationPromptMessage ? (
                       <p className="mt-2 text-sm text-[#8a5a42]">{notificationPromptMessage}</p>

@@ -582,6 +582,7 @@ describe('territory complete route', () => {
         title: 'Zone captured',
         body: 'Your team captured Downtown Zone.',
         priority: 'high',
+        batchTitle: '{count} zone captures',
         meta: {
           zoneId: zone.id,
           challengeId: CHALLENGE_ID,
@@ -594,6 +595,7 @@ describe('territory complete route', () => {
         title: 'Rival zone captured',
         body: 'Another team captured Downtown Zone.',
         priority: 'medium',
+        batchTitle: '{count} zone captures',
         meta: {
           zoneId: zone.id,
           challengeId: CHALLENGE_ID,
@@ -603,7 +605,7 @@ describe('territory complete route', () => {
     ]);
   });
 
-  it('notifies teammates and rival teams when a Challenge Hunt challenge is completed', async () => {
+  it('notifies only rival teams when a Challenge Hunt challenge is completed', async () => {
     const notifications: TeamNotificationInput[] = [];
     await seedGame({ modeKey: 'point_challenge' });
     await seedTeam({ name: 'Gold Team' });
@@ -615,33 +617,24 @@ describe('territory complete route', () => {
     const response = await completeRequest({ sessionToken: 'hunt-notify-session', actionId: 'hunt-notify', payload: { gps: validGpsPayload() } });
 
     expect(response.statusCode).toBe(200);
-    await waitFor(async () => notifications.length === 2);
-    const meta = { challengeId: CHALLENGE_ID, eventType: 'challenge_completed' };
+    await waitFor(async () => notifications.length === 1);
     expect(notifications).toEqual([
       {
         gameId: GAME_ID,
-        teamId: TEAM_ONE_ID,
-        excludePlayerId: PLAYER_ONE_ID,
-        title: 'Challenge completed',
-        body: 'Sam completed "Bean selfie" (+20 pts).',
-        priority: 'medium',
-        meta,
-      },
-      {
-        gameId: GAME_ID,
         teamId: TEAM_TWO_ID,
-        title: 'Rival completed a challenge',
+        title: 'Challenge completed',
         body: 'Gold Team completed "Bean selfie". It\'s off the board.',
         priority: 'medium',
-        meta,
+        batchTitle: '{count} challenges completed',
+        meta: { challengeId: CHALLENGE_ID, eventType: 'challenge_completed' },
       },
     ]);
   });
 
-  it('only tells teammates about a judged Challenge Hunt submission', async () => {
+  it('tells rival teams a judged Challenge Hunt challenge was completed, without calling it off the board', async () => {
     const notifications: TeamNotificationInput[] = [];
     await seedGame({ modeKey: 'point_challenge' });
-    await seedTeam();
+    await seedTeam({ name: 'Gold Team' });
     await seedTeam({ id: TEAM_TWO_ID, name: 'Other Team', color: '#2563eb', joinCode: 'TEAM9999' });
     await seedPlayer({ sessionToken: 'hunt-judged-session', displayName: 'Sam' });
     await seedChallenge({ title: 'Best costume', zoneId: null, isDeckActive: true, config: { portable: true, location_mode: 'portable', judged: true, judging_type: 'pass_fail' }, scoring: { points: 5 } });
@@ -654,11 +647,11 @@ describe('territory complete route', () => {
     expect(notifications).toEqual([
       {
         gameId: GAME_ID,
-        teamId: TEAM_ONE_ID,
-        excludePlayerId: PLAYER_ONE_ID,
-        title: 'Submitted for judging',
-        body: 'Sam submitted "Best costume" for judging.',
+        teamId: TEAM_TWO_ID,
+        title: 'Challenge completed',
+        body: 'Gold Team completed "Best costume".',
         priority: 'medium',
+        batchTitle: '{count} challenges completed',
         meta: { challengeId: CHALLENGE_ID, eventType: 'challenge_completed' },
       },
     ]);

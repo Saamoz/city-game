@@ -250,8 +250,8 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
           }
 
           await sendZoneCaptureNotifications(app, postCommitData);
-          if (modeKey === 'point_challenge' && request.player) {
-            await sendChallengeHuntNotifications(app, postCommitData, request.player);
+          if (modeKey === 'point_challenge') {
+            await sendChallengeHuntNotifications(app, postCommitData);
           }
 
           const winConditionResult = await evaluateConfiguredWinConditions(app.db, app.modeRegistry, {
@@ -434,46 +434,20 @@ function isTerritoryPostCommitData(value: unknown): value is TerritoryPostCommit
   return Boolean(value && typeof value === 'object' && 'type' in value && 'stateVersion' in value && 'gameId' in value);
 }
 
-// Challenge Hunt: teammates hear about every completion; rivals hear when a challenge leaves the board.
+// Challenge Hunt: rival teams hear when another team completes a challenge. Bursts are combined by
+// the notification service into one "{count} challenges completed" push.
 async function sendChallengeHuntNotifications(
   app: FastifyInstance,
   data: Extract<TerritoryPostCommitData, { type: 'challenge_completed' }>,
-  actor: { id: string; displayName: string },
 ) {
-  const title = data.challenge.title;
-  const meta = { challengeId: data.challenge.id, eventType: 'challenge_completed' };
-
-  if (data.claim.status === 'submitted') {
-    // Judged: the challenge stays open for other teams until judging, so only teammates are told.
-    await app.notificationService.sendTeamNotification({
-      gameId: data.gameId,
-      teamId: data.claim.teamId,
-      excludePlayerId: actor.id,
-      title: 'Submitted for judging',
-      body: `${actor.displayName} submitted "${title}" for judging.`,
-      priority: 'medium',
-      meta,
-    });
-    return;
-  }
-
-  const points = data.resourcesAwarded.points ?? 0;
-  const pointsLabel = points > 0 ? ` (+${points} pts)` : '';
-  await app.notificationService.sendTeamNotification({
-    gameId: data.gameId,
-    teamId: data.claim.teamId,
-    excludePlayerId: actor.id,
-    title: 'Challenge completed',
-    body: `${actor.displayName} completed "${title}"${pointsLabel}.`,
-    priority: 'medium',
-    meta,
-  });
-
   const teamRows = await app.db
     .select({ id: teams.id, name: teams.name })
     .from(teams)
     .where(eq(teams.gameId, data.gameId));
   const teamName = teamRows.find((team) => team.id === data.claim.teamId)?.name ?? 'Another team';
+  // A judged challenge stays open for other teams until it is judged, so it isn't off the board yet.
+  const isJudgedSubmission = data.claim.status === 'submitted';
+  const body = `${teamName} completed "${data.challenge.title}".` + (isJudgedSubmission ? '' : " It's off the board.");
 
   for (const team of teamRows) {
     if (team.id === data.claim.teamId) {
@@ -483,10 +457,11 @@ async function sendChallengeHuntNotifications(
     await app.notificationService.sendTeamNotification({
       gameId: data.gameId,
       teamId: team.id,
-      title: 'Rival completed a challenge',
-      body: `${teamName} completed "${title}". It's off the board.`,
+      title: 'Challenge completed',
+      body,
       priority: 'medium',
-      meta,
+      batchTitle: '{count} challenges completed',
+      meta: { challengeId: data.challenge.id, eventType: 'challenge_completed' },
     });
   }
 }
@@ -502,6 +477,7 @@ async function sendZoneCaptureNotifications(app: FastifyInstance, data: Extract<
     title: 'Zone captured',
     body: `Your team captured ${data.zone.name}.`,
     priority: 'high',
+    batchTitle: '{count} zone captures',
     meta: {
       zoneId: data.zone.id,
       challengeId: data.challenge.id,
@@ -521,6 +497,7 @@ async function sendZoneCaptureNotifications(app: FastifyInstance, data: Extract<
       title: 'Rival zone captured',
       body: `Another team captured ${data.zone.name}.`,
       priority: 'medium',
+      batchTitle: '{count} zone captures',
       meta: {
         zoneId: data.zone.id,
         challengeId: data.challenge.id,

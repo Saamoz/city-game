@@ -312,3 +312,8 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - A judged submission only tells teammates ("Submitted for judging"); the challenge stays open for other teams until judging.
 - `TeamNotificationInput.excludePlayerId` skips the acting player.
 - The lobby prompt and in-game menu item now appear in both modes, with "Challenge Alerts" wording in Challenge Hunt.
+
+## Batched Pushes, Rivals-Only Challenge Hunt Alerts (2026-10-07)
+
+- The notification service no longer drops pushes inside a player's rate-limit window (`PUSH_RATE_LIMIT_MS`, 60 s). The first push goes out immediately; later ones are held and sent as one when the window ends: "{count} challenges completed" / "{count} zone captures" (from `batchTitle`), or "{count} game updates" for mixed batches, with up to three bodies and "+N more". Held pushes live in memory and are lost if the server restarts mid-window.
+- Challenge Hunt completions only notify rival teams, titled "Challenge completed" for judged and regular challenges alike. Regular ones add "It's off the board."; judged ones don't, since they stay open for other teams until judged.

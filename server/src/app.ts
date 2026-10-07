@@ -62,6 +62,9 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.decorate('modeRegistry', modeRegistry);
   app.decorate('osmImportService', options.osmImportService ?? createOsmImportService());
   app.decorate('notificationService', options.notificationService ?? createNotificationService({ db: database.db, logger: app.log }));
+  app.addHook('onClose', async () => {
+    app.notificationService.close?.();
+  });
 
   if (database.pool && database.ownsPool) {
     app.addHook('onClose', async () => {

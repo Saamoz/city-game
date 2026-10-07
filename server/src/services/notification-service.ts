@@ -16,11 +16,18 @@ export interface TeamNotificationInput {
   meta?: JsonObject;
   // Skip this player, e.g. the one whose action caused the notification.
   excludePlayerId?: string;
+  // Title for a combined push when several of these are held back together, with {count} filled in,
+  // e.g. '{count} challenges completed'. Mixed batches fall back to '{count} game updates'.
+  batchTitle?: string;
 }
 
 export interface NotificationService {
   sendTeamNotification(input: TeamNotificationInput): Promise<void>;
+  // Cancels pending batched pushes; called when the server shuts down.
+  close?(): void;
 }
+
+export type NotificationScheduler = (callback: () => void, delayMs: number) => { cancel(): void };
 
 export interface PushClient {
   setVapidDetails(subject: string, publicKey: string, privateKey: string): void;
@@ -42,6 +49,7 @@ export interface NotificationServiceOptions {
   pushClient?: PushClient;
   now?: () => Date;
   rateLimitMs?: number;
+  schedule?: NotificationScheduler;
   vapidPublicKey?: string | null;
   vapidPrivateKey?: string | null;
   vapidSubject?: string | null;
@@ -54,8 +62,12 @@ export function createNotificationService(options: NotificationServiceOptions): 
   const vapidPublicKey = options.vapidPublicKey ?? env.vapidPublicKey;
   const vapidPrivateKey = options.vapidPrivateKey ?? env.vapidPrivateKey;
   const vapidSubject = options.vapidSubject ?? env.vapidSubject;
+  const schedule = options.schedule ?? defaultScheduler;
   let isConfigured = Boolean(vapidPublicKey && vapidPrivateKey && vapidSubject);
+  // Each player gets at most one push per rateLimitMs. Pushes inside the window are held and sent
+  // together as one when it ends, instead of being dropped.
   const lastSentAtByPlayerId = new Map<string, number>();
+  const pendingByPlayerId = new Map<string, PendingBatch>();
 
   if (isConfigured) {
     try {
@@ -70,6 +82,44 @@ export function createNotificationService(options: NotificationServiceOptions): 
       hasPrivateKey: Boolean(vapidPrivateKey),
       hasSubject: Boolean(vapidSubject),
     }, 'push notifications disabled: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT must all be set');
+  }
+
+  async function deliver(playerId: string, subscription: WebPushSubscription, notification: QueuedNotification): Promise<void> {
+    try {
+      await pushClient.sendNotification(subscription, JSON.stringify(notification.payload), {
+        TTL: 60,
+        urgency: mapUrgency(notification.priority),
+      });
+    } catch (error) {
+      if (isInvalidSubscriptionError(error)) {
+        await clearPlayerSubscription(options.db, playerId);
+        lastSentAtByPlayerId.delete(playerId);
+        pendingByPlayerId.get(playerId)?.timer.cancel();
+        pendingByPlayerId.delete(playerId);
+        return;
+      }
+
+      // A push is best-effort: one failing device must not stop the rest of the team, or the
+      // caller's work after it (win checks, claim expiry).
+      options.logger?.warn({
+        playerId,
+        statusCode: getErrorField(error, 'statusCode'),
+        responseBody: getErrorField(error, 'body'),
+        endpointHost: getEndpointHost(subscription.endpoint),
+        err: error,
+      }, 'push notification failed');
+    }
+  }
+
+  async function flush(playerId: string): Promise<void> {
+    const batch = pendingByPlayerId.get(playerId);
+    pendingByPlayerId.delete(playerId);
+    if (!batch || batch.items.length === 0) {
+      return;
+    }
+
+    lastSentAtByPlayerId.set(playerId, now().getTime());
+    await deliver(playerId, batch.subscription, combineNotifications(batch.items));
   }
 
   return {
@@ -108,14 +158,18 @@ export function createNotificationService(options: NotificationServiceOptions): 
           ),
         );
 
-      const payload = JSON.stringify({
-        title: input.title,
-        body: input.body,
+      const notification: QueuedNotification = {
         priority: input.priority ?? 'medium',
-        gameId: input.gameId,
-        teamId: input.teamId,
-        meta: input.meta ?? {},
-      });
+        batchTitle: input.batchTitle ?? null,
+        payload: {
+          title: input.title,
+          body: input.body,
+          priority: input.priority ?? 'medium',
+          gameId: input.gameId,
+          teamId: input.teamId,
+          meta: input.meta ?? {},
+        },
+      };
 
       for (const player of subscribedPlayers) {
         const subscription = normalizePushSubscription(player.pushSubscription);
@@ -125,38 +179,102 @@ export function createNotificationService(options: NotificationServiceOptions): 
           continue;
         }
 
-        const sentAt = lastSentAtByPlayerId.get(player.id) ?? 0;
-        const currentTime = now().getTime();
-        if (currentTime - sentAt < rateLimitMs) {
+        const pending = pendingByPlayerId.get(player.id);
+        if (pending) {
+          pending.items.push(notification);
+          pending.subscription = subscription;
           continue;
         }
 
-        try {
-          await pushClient.sendNotification(subscription, payload, {
-            TTL: 60,
-            urgency: mapUrgency(input.priority),
+        const currentTime = now().getTime();
+        const sentAt = lastSentAtByPlayerId.get(player.id);
+        if (sentAt !== undefined && currentTime - sentAt < rateLimitMs) {
+          const playerId = player.id;
+          pendingByPlayerId.set(playerId, {
+            subscription,
+            items: [notification],
+            timer: schedule(() => {
+              void flush(playerId).catch((error) => {
+                options.logger?.warn({ playerId, err: error }, 'batched push notification failed');
+              });
+            }, sentAt + rateLimitMs - currentTime),
           });
-          lastSentAtByPlayerId.set(player.id, currentTime);
-        } catch (error) {
-          if (isInvalidSubscriptionError(error)) {
-            await clearPlayerSubscription(options.db, player.id);
-            lastSentAtByPlayerId.delete(player.id);
-            continue;
-          }
-
-          // A push is best-effort: one failing device must not stop the rest of the team, or the
-          // caller's work after it (win checks, claim expiry).
-          options.logger?.warn({
-            playerId: player.id,
-            statusCode: getErrorField(error, 'statusCode'),
-            responseBody: getErrorField(error, 'body'),
-            endpointHost: getEndpointHost(subscription.endpoint),
-            err: error,
-          }, 'push notification failed');
+          continue;
         }
+
+        lastSentAtByPlayerId.set(player.id, currentTime);
+        await deliver(player.id, subscription, notification);
       }
     },
+    close() {
+      for (const batch of pendingByPlayerId.values()) {
+        batch.timer.cancel();
+      }
+      pendingByPlayerId.clear();
+    },
   };
+}
+
+interface QueuedNotification {
+  priority: NonNullable<TeamNotificationInput['priority']>;
+  batchTitle: string | null;
+  payload: {
+    title: string;
+    body: string;
+    priority: string;
+    gameId: string;
+    teamId: string;
+    meta: JsonObject;
+  };
+}
+
+interface PendingBatch {
+  subscription: WebPushSubscription;
+  items: QueuedNotification[];
+  timer: { cancel(): void };
+}
+
+const MAX_BATCH_LINES = 3;
+const PRIORITY_RANK = { low: 0, medium: 1, high: 2 } as const;
+
+export function combineNotifications(items: QueuedNotification[]): QueuedNotification {
+  const [first] = items;
+  if (!first) {
+    throw new Error('Cannot combine an empty batch.');
+  }
+
+  if (items.length === 1) {
+    return first;
+  }
+
+  const count = items.length;
+  const sharedBatchTitle = items.every((item) => item.batchTitle === first.batchTitle) ? first.batchTitle : null;
+  const title = (sharedBatchTitle ?? '{count} game updates').replace('{count}', String(count));
+  const lines = items.slice(0, MAX_BATCH_LINES).map((item) => item.payload.body);
+  const remaining = count - lines.length;
+  const body = lines.join(' ') + (remaining > 0 ? ` +${remaining} more.` : '');
+  const priority = items.reduce<QueuedNotification['priority']>(
+    (highest, item) => (PRIORITY_RANK[item.priority] > PRIORITY_RANK[highest] ? item.priority : highest),
+    'low',
+  );
+
+  return {
+    priority,
+    batchTitle: sharedBatchTitle,
+    payload: {
+      ...first.payload,
+      title,
+      body,
+      priority,
+      meta: { batched: true, count },
+    },
+  };
+}
+
+function defaultScheduler(callback: () => void, delayMs: number) {
+  const timer = setTimeout(callback, Math.max(0, delayMs));
+  timer.unref?.();
+  return { cancel: () => clearTimeout(timer) };
 }
 
 export async function clearPlayerSubscription(db: DatabaseClient, playerId: string): Promise<void> {
