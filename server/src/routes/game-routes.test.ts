@@ -355,6 +355,27 @@ describe("game and team routes", () => {
     });
   });
 
+  it("keeps featured results on the homepage while a hidden test game is live", async () => {
+    await seedGame({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      name: "Featured Final",
+      status: "completed",
+      settings: { feature_results_on_home: true },
+    });
+    await seedGame({
+      id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      name: "Test Game",
+      status: "active",
+      settings: { hide_from_home: true },
+    });
+    app = await createGameTestApp();
+
+    const response = await app.inject({ method: "GET", url: "/api/v1/game/active" });
+    expect(response.json().game).toMatchObject({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
+    const direct = await app.inject({ method: "GET", url: "/api/v1/game/dddddddd-dddd-4ddd-8ddd-dddddddddddd" });
+    expect(direct.statusCode).toBe(200);
+  });
+
   it("runs the full lifecycle, initializes resources once, and logs events", async () => {
     await seedGame();
     await seedTeam();

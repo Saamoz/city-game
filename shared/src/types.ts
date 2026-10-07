@@ -118,6 +118,7 @@ export type GameSettings = JsonObject & {
   allow_midgame_join?: boolean;
   allow_reclaim_zones?: boolean;
   feature_results_on_home?: boolean;
+  hide_from_home?: boolean; // test games: never picked by /game/active, reached by direct link only
   reroll_completion_target?: number;
   judging_published_at?: IsoTimestamp; // set when judges publish scores for judged challenges
 };

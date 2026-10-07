@@ -119,11 +119,13 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
     reply.send({ games: rows.map(serializeGameRecord) });
   });
 
+  // The homepage game. Test games set hide_from_home so they never replace it; open them by direct link.
   app.get('/game/active', async (_request, reply) => {
+    const listedOnHome = sql`COALESCE(${games.settings}->>'hide_from_home', 'false') <> 'true'`;
     const [liveGame] = await app.db
       .select()
       .from(games)
-      .where(inArray(games.status, ['active', 'paused']))
+      .where(and(inArray(games.status, ['active', 'paused']), listedOnHome))
       .orderBy(desc(games.createdAt))
       .limit(1);
 
@@ -137,7 +139,7 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
     const [setupGame] = liveGame || featuredFinishedGame ? [] : await app.db
       .select()
       .from(games)
-      .where(eq(games.status, 'setup'))
+      .where(and(eq(games.status, 'setup'), listedOnHome))
       .orderBy(desc(games.createdAt))
       .limit(1);
 

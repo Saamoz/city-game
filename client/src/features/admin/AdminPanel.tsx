@@ -62,6 +62,7 @@ interface GameFormState {
   timeLimitMinutes: string;
   activeChallengeCount: string;
   dealAllChallenges: boolean;
+  hideFromHome: boolean;
   requireGpsAccuracy: boolean;
   broadcastTeamLocations: boolean;
   allowMidgameJoin: boolean;
@@ -83,6 +84,7 @@ const INITIAL_GAME_FORM: GameFormState = {
   timeLimitMinutes: '60',
   activeChallengeCount: '3',
   dealAllChallenges: false,
+  hideFromHome: false,
   requireGpsAccuracy: false,
   broadcastTeamLocations: true,
   allowMidgameJoin: true,
@@ -814,6 +816,15 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                   />
                   Require GPS accuracy gate
                 </label>
+                <label className="flex items-center gap-3 text-sm font-medium text-[#21313a]" title="The homepage keeps showing the current game; open this one by its direct link.">
+                  <input
+                    type="checkbox"
+                    checked={gameForm.hideFromHome}
+                    onChange={(event) => { setGameForm((current) => ({ ...current, hideFromHome: event.target.checked })); }}
+                    className="h-4 w-4 rounded border-[#9aabb5]"
+                  />
+                  Test game (hide from homepage)
+                </label>
                 <label className="flex items-center gap-3 text-sm font-medium text-[#21313a]">
                   <input
                     type="checkbox"
@@ -1171,6 +1182,7 @@ function buildGameForm(game: Game): GameFormState {
     timeLimitMinutes: winCondition.type === 'time_limit' ? String(winCondition.duration_minutes) : '60',
     activeChallengeCount: String(settings.active_challenge_count ?? 3),
     dealAllChallenges: settings.deal_all_challenges === true,
+    hideFromHome: settings.hide_from_home === true,
     requireGpsAccuracy: Boolean(settings.require_gps_accuracy),
     broadcastTeamLocations: settings.broadcast_team_locations !== false,
     allowMidgameJoin: settings.allow_midgame_join !== false,
@@ -1208,6 +1220,7 @@ function buildSettings(form: GameFormState, existing: JsonObject): JsonObject {
   delete next.claim_timeout_minutes;
   next.active_challenge_count = Math.max(1, Number(form.activeChallengeCount) || 1);
   next.deal_all_challenges = form.dealAllChallenges;
+  next.hide_from_home = form.hideFromHome;
   next.require_gps_accuracy = form.requireGpsAccuracy;
   next.broadcast_team_locations = form.broadcastTeamLocations;
   next.allow_midgame_join = form.allowMidgameJoin;
