@@ -601,7 +601,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       return;
     }
     const point = challenge ? getPointLocation(challenge) : null;
-    if (point) mapRef.current?.easeTo({ center: [point.coordinates[0] as number, point.coordinates[1] as number], zoom: Math.max(mapRef.current?.getZoom() ?? 14, 15), duration: 450 });
+    // Offset upward so the pin sits above the challenge card that opens over the bottom of the screen.
+    if (point) mapRef.current?.easeTo({ center: [point.coordinates[0] as number, point.coordinates[1] as number], zoom: Math.max(mapRef.current?.getZoom() ?? 14, 15), offset: [0, -Math.round(window.innerHeight * 0.22)], duration: 450 });
   };
 
   useEffect(() => {
