@@ -282,14 +282,19 @@ input {
   .result-spark { display: none; }
 }
 
-/* Map pins: a small parchment playing card on an ink stem. Mapbox positions markers with
-   position:absolute + an inline transform, so never override either here: position:relative stacks
-   markers in normal flow, and a transform transition makes pins lag the map. Lift with translate/scale. */
-.map-card-marker { width: 2rem; height: 3.1rem; border: 0; padding: 0; background: transparent; cursor: pointer; transition: translate .2s ease, scale .2s ease; }
+/* Map pins: a small parchment playing card on an ink stem. Mapbox positions the marker element with
+   position:absolute + an inline translate, so leave that element alone: position:relative stacks markers
+   in normal flow, and transform/translate/scale on it move the marker off its spot (scale even multiplies
+   the screen offset, so a selected marker slid as the map zoomed). Animate only the inner card. */
+.map-card-marker { width: 2rem; height: 3.1rem; border: 0; padding: 0; background: transparent; cursor: pointer; }
+.map-card-marker--area { height: 2.15rem; }
+.map-card-marker--area .map-card-marker__card { transform: rotate(4deg); }
+.map-card-marker__card svg.is-area { stroke: #8f5a3c; fill: none; }
+.map-card-marker.is-selected .map-card-marker__card svg.is-area { stroke: #f3e6c8; fill: none; }
 .map-card-marker__card { position: absolute; left: .2rem; top: 0; display: grid; place-items: center; width: 1.6rem; height: 2.15rem; border: 1.5px solid #5d4a2f; border-radius: 4px; background: radial-gradient(circle at 30% 20%, #fbf6e8, #efe2c4); box-shadow: inset 0 0 0 2px #f6edd8, inset 0 0 0 2.75px rgba(93,74,47,.35), 0 4px 8px rgba(40,30,15,.28); transform: rotate(-6deg); transition: transform .2s ease, background .2s ease; }
 .map-card-marker__card svg { width: .95rem; height: .95rem; fill: #8f5a3c; }
 .map-card-marker__stem { position: absolute; left: calc(50% - .75px); top: 2.05rem; width: 1.5px; height: .6rem; background: #5d4a2f; }
 .map-card-marker__dot { position: absolute; left: calc(50% - .25rem); bottom: 0; width: .5rem; height: .5rem; border-radius: 50%; background: #5d4a2f; box-shadow: 0 0 0 2px rgba(246,237,216,.9); }
-.map-card-marker:hover, .map-card-marker.is-selected { translate: 0 -3px; scale: 1.12; }
-.map-card-marker.is-selected .map-card-marker__card { transform: rotate(0deg); background: #4f3f2a; box-shadow: inset 0 0 0 2px #4f3f2a, inset 0 0 0 2.75px rgba(246,237,216,.5), 0 6px 12px rgba(40,30,15,.35); }
+.map-card-marker:hover .map-card-marker__card { transform: rotate(-2deg) scale(1.08); }
+.map-card-marker.is-selected .map-card-marker__card { transform: rotate(0deg) scale(1.14); background: #4f3f2a; box-shadow: inset 0 0 0 2px #4f3f2a, inset 0 0 0 2.75px rgba(246,237,216,.5), 0 6px 12px rgba(40,30,15,.35); }
 .map-card-marker.is-selected .map-card-marker__card svg { fill: #f3e6c8; }

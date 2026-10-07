@@ -265,3 +265,12 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Map: pins are small parchment cards on an ink stem (same for judged and regular); areas are a subdued rust fill with no labels. Area taps are handled by a map-level click + `queryRenderedFeatures` (layer-scoped listeners added before the layer exists never fire). Area layers are added without waiting for `isStyleLoaded()`, which stays false while tiles load.
 - Fixed: the closed deck was off-centre (each hidden card in the fan added ~8 px of width) and dropped too far (its height was measured once, while open; now a ResizeObserver keeps it current). A swipe in the viewer no longer counts as a backdrop tap.
 - Territory games keep the old `ChallengeDeck`.
+
+## Card UI Polish (2026-10-07)
+
+- Open deck: swiping down from on top of a mini card now closes it (mini cards are no longer `data-deck-interactive`, a press that travelled doesn't open the card, and the deck captures the pointer once a vertical swipe starts so the release isn't lost when the finger ends below the deck).
+- Card viewer backdrop is much lighter (map visible); counter and dots sit on dark pills.
+- The game's name runs along the top and bottom edges of every card (`EdgeLabel`), full-size and mini.
+- Area challenges get a card marker fixed at the area's centroid (or `pointOnFeature` when the centroid falls outside). Fixed: a selected marker drifted as the map zoomed, because the CSS `scale`/`translate` properties on the marker element compose with Mapbox's positioning transform and scale its screen offset. Only the inner card is transformed now. Also fixed: pin click handlers kept the `onSelect` from when the pin was created.
+- Distances are shown in feet / miles (`client/src/lib/units.ts`); the editor shows area size in acres.
+- Standings and feed panels drop down from the top (swipe up to close) since the deck owns the bottom.

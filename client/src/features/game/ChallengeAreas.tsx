@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
-import { bbox as turfBbox, point as turfPoint, pointToPolygonDistance } from '@turf/turf';
+import { booleanPointInPolygon, bbox as turfBbox, centroid as turfCentroid, point as turfPoint, pointOnFeature, pointToPolygonDistance } from '@turf/turf';
 import { CHALLENGE_AREA_EDGE_TOLERANCE_METERS, getChallengeArea, type Challenge, type GeoJsonMultiPolygon, type GeoJsonPolygon } from '@city-game/shared';
 
 // Challenges tied to a drawn area: shaded on the map, completed from anywhere inside.
@@ -23,6 +23,21 @@ export function getAreaDistance(challenge: Challenge, position: [number, number]
 
 export function isInsideArea(distance: number | null): boolean {
   return distance !== null && distance <= CHALLENGE_AREA_EDGE_TOLERANCE_METERS;
+}
+
+// Where an area's card marker sits: the centroid, or a point guaranteed inside for odd shapes (an L or a
+// crescent can have its centroid outside). Fixed per area, so the marker never drifts.
+const areaCenterCache = new Map<string, [number, number]>();
+export function getAreaCenter(challenge: Challenge): [number, number] | null {
+  const cached = areaCenterCache.get(challenge.id);
+  if (cached) return cached;
+  const area = getChallengeArea(challenge.config);
+  if (!area) return null;
+  const shape = area as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+  const centroid = turfCentroid(shape).geometry.coordinates as [number, number];
+  const center = booleanPointInPolygon(centroid, shape) ? centroid : pointOnFeature(shape).geometry.coordinates as [number, number];
+  areaCenterCache.set(challenge.id, center);
+  return center;
 }
 
 export function getAreaBounds(area: GeoJsonPolygon | GeoJsonMultiPolygon): mapboxgl.LngLatBoundsLike {

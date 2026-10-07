@@ -254,6 +254,12 @@ export function OverlayShell({ title, onClose, children }: { title: string; onCl
   const [dragOffset, setDragOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  // The card deck owns the bottom of the screen, so panels drop down from the top instead.
+  const [isEntered, setIsEntered] = useState(false);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setIsEntered(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => () => {
     if (closeTimerRef.current !== null) {
@@ -274,7 +280,7 @@ export function OverlayShell({ title, onClose, children }: { title: string; onCl
 
     setIsClosing(true);
     setIsDragging(false);
-    setDragOffset(window.innerHeight);
+    setDragOffset(-window.innerHeight);
     closeTimerRef.current = window.setTimeout(() => {
       onClose();
     }, 220);
@@ -309,7 +315,7 @@ export function OverlayShell({ title, onClose, children }: { title: string; onCl
 
     event.preventDefault();
     setIsDragging(true);
-    setDragOffset(deltaY > 0 ? deltaY : Math.round(deltaY * 0.2));
+    setDragOffset(deltaY < 0 ? deltaY : Math.round(deltaY * 0.2));
   };
 
   const handlePointerEnd = (event: ReactPointerEvent<HTMLElement>) => {
@@ -327,7 +333,7 @@ export function OverlayShell({ title, onClose, children }: { title: string; onCl
     clearOverlayDragRefs(dragRefs);
     setIsDragging(false);
 
-    if (didDrag && (deltaY > 90 || (deltaY > 36 && velocity > 0.55))) {
+    if (didDrag && (deltaY < -90 || (deltaY < -36 && velocity < -0.55))) {
       requestClose(true);
       return;
     }
@@ -336,29 +342,15 @@ export function OverlayShell({ title, onClose, children }: { title: string; onCl
   };
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-50 flex items-end justify-center p-0 lg:items-center lg:p-6">
+    <div className="pointer-events-none fixed inset-0 z-50 flex items-start justify-center p-0 lg:items-center lg:p-6">
       <section
-        className="pointer-events-auto flex max-h-[72vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] shadow-[0_30px_80px_rgba(24,32,36,0.28)] lg:rounded-[2rem]"
+        className="pointer-events-auto flex max-h-[72vh] w-full max-w-4xl flex-col overflow-hidden rounded-b-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] pt-[env(safe-area-inset-top,0px)] shadow-[0_30px_80px_rgba(24,32,36,0.28)] lg:rounded-[2rem] lg:pt-0"
         style={{
-          transform: `translateY(${dragOffset}px)`,
-          transition: isDragging ? 'none' : 'transform 0.24s ease',
+          transform: isEntered ? `translateY(${dragOffset}px)` : 'translateY(-100%)',
+          transition: isDragging ? 'none' : 'transform 0.26s cubic-bezier(0.22,1,0.36,1)',
         }}
       >
-        <header
-          className="touch-none cursor-grab border-b border-[#d6c59d]/55 px-5 py-2.5 active:cursor-grabbing lg:px-6"
-          onPointerDown={(event) => {
-            if (isOverlayInteractiveTarget(event.target)) {
-              return;
-            }
-            handlePointerDown(event);
-          }}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerEnd}
-          onPointerCancel={handlePointerEnd}
-        >
-          <div className="mb-1.5 flex justify-center">
-            <div className="h-1 w-10 rounded-full bg-[#c8b48a]/70" />
-          </div>
+        <header className="border-b border-[#d6c59d]/55 px-5 py-2.5 lg:px-6">
           <div className="flex items-center justify-between gap-4">
             <h2 className="truncate font-[Georgia,Times_New_Roman,serif] text-xl font-semibold text-[#24343a] lg:text-2xl">{title}</h2>
             <button
@@ -371,6 +363,16 @@ export function OverlayShell({ title, onClose, children }: { title: string; onCl
           </div>
         </header>
         <div className="overflow-y-auto overscroll-contain px-4 py-3 [touch-action:pan-y] lg:px-5">{children}</div>
+        <div
+          aria-hidden="true"
+          className="flex touch-none cursor-grab justify-center py-2.5 active:cursor-grabbing"
+          onPointerCancel={handlePointerEnd}
+          onPointerDown={(event) => { if (!isOverlayInteractiveTarget(event.target)) handlePointerDown(event); }}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+        >
+          <div className="h-1 w-10 rounded-full bg-[#c8b48a]/70" />
+        </div>
       </section>
     </div>
   );

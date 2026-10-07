@@ -5,6 +5,7 @@ import {
   CHALLENGE_CARD_TITLE_MAX_LENGTH,
   clampChallengeCardText,
 } from '../../lib/challenge-card-limits';
+import { formatDistance } from '../../lib/units';
 import { JudgedMark } from './JudgedChallenges';
 import { BonusList, CompleteChallengeSheet, ScoreChips, formatPoints, type CompletionExtras } from './ChallengeScoring';
 import type { GeolocationStatus } from './useGeolocation';
@@ -732,10 +733,6 @@ function CardTag({ challenge, kind, distance }: { challenge: Challenge; kind: Ca
       {judged}
     </div>
   );
-}
-
-function formatDistance(meters: number): string {
-  return meters < 1000 ? Math.round(meters) + ' m' : (meters / 1000).toFixed(1) + ' km';
 }
 
 function AnywhereTag({ challenge }: { challenge: Challenge }) {

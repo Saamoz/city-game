@@ -835,6 +835,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       if (Math.abs(deltaY) > 10) {
         deckSwipeRef.current.committed = true;
         setIsDraggingDeck(true);
+        // The deck follows the finger, which can end up below it; capture so the release still lands here.
+        e.currentTarget.setPointerCapture(e.pointerId);
       }
       return;
     }
@@ -936,6 +938,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       <PointChallengeLayer map={mapForLayer} challenges={teamChallenges} selectedId={selectedPointChallengeId} onSelect={openCardFromMap} />
       {cardViewer && viewerChallenges.length ? (
         <CardViewer
+          gameName={snapshot?.game.name ?? ''}
           challenges={viewerChallenges}
           getContext={getCardContext}
           isPending={(challengeId) => isPending('capture:' + challengeId)}
@@ -1097,6 +1100,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               >
 {isPointMode ? (
                   <PointDeck
+                    gameName={snapshot.game.name}
                     challenges={deckChallenges}
                     distanceTo={distanceToChallenge}
                     getSuit={getCardKind}
@@ -1164,6 +1168,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
 {isPointMode ? (
               <PointDeck
+                gameName={snapshot.game.name}
                 challenges={deckChallenges}
                 distanceTo={distanceToChallenge}
                 getSuit={getCardKind}

@@ -13,6 +13,7 @@ export interface CardContext {
 }
 
 interface CardViewerProps {
+  gameName: string;
   challenges: Challenge[];
   startId: string;
   getContext(challenge: Challenge): CardContext;
@@ -24,7 +25,7 @@ interface CardViewerProps {
 const SWIPE_THRESHOLD_PX = 60;
 
 // Full-screen deck: one fixed-size card at a time, swipe sideways to flip through the others.
-export function CardViewer({ challenges, startId, getContext, isPending, onComplete, onClose }: CardViewerProps) {
+export function CardViewer({ gameName, challenges, startId, getContext, isPending, onComplete, onClose }: CardViewerProps) {
   const [currentId, setCurrentId] = useState(startId);
   const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -98,10 +99,10 @@ export function CardViewer({ challenges, startId, getContext, isPending, onCompl
   const slides = [index - 1, index, index + 1].filter((position) => position >= 0 && position < challenges.length);
 
   return (
-    <div className="fixed inset-0 z-[80] flex flex-col bg-[#1d1810]/85 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={current.title}>
+    <div className="fixed inset-0 z-[80] flex flex-col bg-[#1d1810]/30" role="dialog" aria-modal="true" aria-label={current.title}>
       <div className="flex items-center justify-between px-4 pb-2 pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] text-[#f3e8cf]">
-        <span className="font-[Georgia,Times_New_Roman,serif] text-sm italic tabular-nums">{index + 1} of {challenges.length}</span>
-        <button aria-label="Close card" className="grid h-10 w-10 place-items-center rounded-full border border-[#f3e8cf]/40 bg-[#2a2217]/60 text-lg" onClick={onClose} type="button">×</button>
+        <span className="rounded-full bg-[#2a2217]/75 px-3 py-1 font-[Georgia,Times_New_Roman,serif] text-sm italic tabular-nums">{index + 1} of {challenges.length}</span>
+        <button aria-label="Close card" className="grid h-10 w-10 place-items-center rounded-full border border-[#f3e8cf]/40 bg-[#2a2217]/80 text-lg" onClick={onClose} type="button">×</button>
       </div>
 
       <div
@@ -124,6 +125,7 @@ export function CardViewer({ challenges, startId, getContext, isPending, onCompl
             >
               <div className="pointer-events-auto h-[min(74dvh,640px)] w-[min(92vw,400px)]" style={{ transform: `rotate(${(position - index) * 2}deg)` }}>
                 <ChallengeCardFace
+                  gameName={gameName}
                   key={challenge.id}
                   challenge={challenge}
                   distanceMeters={context.distanceMeters}
@@ -143,7 +145,7 @@ export function CardViewer({ challenges, startId, getContext, isPending, onCompl
         <button aria-label="Next card" className="absolute right-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-[#2a2217]/70 text-xl text-[#f3e8cf] disabled:opacity-30 lg:grid" disabled={index === challenges.length - 1} onClick={() => go(1)} type="button">›</button>
       </div>
 
-      <div className="flex justify-center gap-1.5 px-6 pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] pt-3">
+      <div className="mx-auto mb-[calc(env(safe-area-inset-bottom,0px)+1rem)] mt-3 flex flex-wrap justify-center gap-1.5 rounded-full bg-[#2a2217]/70 px-3 py-1.5">
         {challenges.length <= 30 ? challenges.map((challenge, position) => (
           <span key={challenge.id} className={['h-1.5 rounded-full transition-all', position === index ? 'w-4 bg-[#f3e8cf]' : 'w-1.5 bg-[#f3e8cf]/35'].join(' ')} />
         )) : <span className="text-xs text-[#f3e8cf]/70">Swipe for more</span>}

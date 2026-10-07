@@ -3,6 +3,7 @@ import mapboxgl from 'mapbox-gl';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { area as turfArea, bbox as turfBbox } from '@turf/turf';
+import { formatArea } from '../../lib/units';
 import type { GeoJsonMultiPolygon, GeoJsonPolygon, MapDefinition } from '@city-game/shared';
 
 interface ChallengeAreaPickerProps {
@@ -114,6 +115,3 @@ function Notice({ body }: { body: string }) {
   return <div className="rounded-[1.25rem] border border-dashed border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-5 text-sm leading-6 text-[#5a6a70]">{body}</div>;
 }
 
-function formatArea(squareMeters: number): string {
-  return squareMeters >= 1_000_000 ? (squareMeters / 1_000_000).toFixed(2) + ' km²' : Math.round(squareMeters / 100) * 100 + ' m²';
-}

@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react';
 import { getBasePoints, getMaxBonusPoints, type Challenge } from '@city-game/shared';
-import { INK, RUST, SuitGlyph, type CardSuit } from './CardGlyphs';
+import { EdgeLabel, INK, RUST, SuitGlyph, type CardSuit } from './CardGlyphs';
 import { consumeSuppressedClick, handlePointerDown, handlePointerEnd, handlePointerMove, useDragRefs } from './ChallengeDeck';
-import { formatDistance } from './ChallengeCardFace';
+import { formatDistance } from '../../lib/units';
 
 type DeckFilter = 'all' | 'pin' | 'anywhere';
 
 interface PointDeckProps {
+  gameName: string;
   challenges: Challenge[];
   getSuit(challenge: Challenge): CardSuit;
   distanceTo(challenge: Challenge): number | null;
@@ -18,7 +19,7 @@ interface PointDeckProps {
 
 // Point Challenge deck: a centred fan of small cards when closed, a row of dense mini cards when
 // open. Tapping a mini card opens the full-screen card viewer.
-export function PointDeck({ challenges, getSuit, distanceTo, isInRange, isPeeking, onOpen, onOpenCard }: PointDeckProps) {
+export function PointDeck({ gameName, challenges, getSuit, distanceTo, isInRange, isPeeking, onOpen, onOpenCard }: PointDeckProps) {
   const [filter, setFilter] = useState<DeckFilter>('all');
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRefs = useDragRefs();
@@ -44,6 +45,7 @@ export function PointDeck({ challenges, getSuit, distanceTo, isInRange, isPeekin
         ))}
         <span className="absolute inset-x-0 top-0 flex h-full flex-col items-center rounded-[0.9rem] border border-[#a98c5a] bg-[radial-gradient(circle_at_30%_20%,#fbf6e8,#f1e6cc)] pt-3 shadow-[0_10px_24px_rgba(40,30,15,0.22)]" style={{ transform: 'rotate(2deg)' }}>
           <span aria-hidden="true" className="pointer-events-none absolute inset-[5px] rounded-[0.7rem] border border-[#c4a874]/70" />
+          <EdgeLabel size="mini" text={gameName} />
           <span className="font-[Georgia,Times_New_Roman,serif] text-xl font-semibold" style={{ color: INK }}>Challenges</span>
           <span className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: RUST }}>{available.length} left</span>
         </span>
@@ -83,6 +85,7 @@ export function PointDeck({ challenges, getSuit, distanceTo, isInRange, isPeekin
               <MiniCard
                 key={challenge.id}
                 challenge={challenge}
+                gameName={gameName}
                 distance={distanceTo(challenge)}
                 inRange={isInRange(challenge)}
                 onOpen={() => { if (!consumeSuppressedClick(dragRefs)) onOpenCard(challenge.id, visible); }}
@@ -99,7 +102,10 @@ export function PointDeck({ challenges, getSuit, distanceTo, isInRange, isPeekin
   );
 }
 
-function MiniCard({ challenge, suit, distance, inRange, tilt, onOpen }: { challenge: Challenge; suit: CardSuit; distance: number | null; inRange: boolean; tilt: number; onOpen(): void }) {
+function MiniCard({ challenge, gameName, suit, distance, inRange, tilt, onOpen }: { challenge: Challenge; gameName: string; suit: CardSuit; distance: number | null; inRange: boolean; tilt: number; onOpen(): void }) {
+  // Not marked data-deck-interactive: a vertical swipe that starts on a card must still close the deck.
+  // So a press that travelled (a swipe, not a tap) must not open the card either.
+  const pressRef = useRef({ x: 0, y: 0 });
   const base = getBasePoints(challenge.scoring);
   const maxBonus = getMaxBonusPoints(challenge.config);
   const hint = typeof challenge.config?.location_hint === 'string' && challenge.config.location_hint.trim() ? challenge.config.location_hint : null;
@@ -108,12 +114,13 @@ function MiniCard({ challenge, suit, distance, inRange, tilt, onOpen }: { challe
   return (
     <button
       className="relative flex h-[12.25rem] w-[8.75rem] shrink-0 flex-col rounded-[0.9rem] border border-[#a98c5a] bg-[radial-gradient(circle_at_30%_18%,#fbf6e8,#f1e6cc_70%,#eadcbc)] px-2.5 pb-2.5 pt-2 text-left shadow-[0_8px_20px_rgba(40,30,15,0.16)] transition active:scale-[0.98]"
-      data-deck-interactive="true"
-      onClick={onOpen}
+      onClick={(event) => { if (Math.hypot(event.clientX - pressRef.current.x, event.clientY - pressRef.current.y) < 12) onOpen(); }}
+      onPointerDown={(event) => { pressRef.current = { x: event.clientX, y: event.clientY }; }}
       style={{ transform: `rotate(${tilt * 0.6}deg)` }}
       type="button"
     >
       <span aria-hidden="true" className="pointer-events-none absolute inset-[4px] rounded-[0.65rem] border border-[#c4a874]/60" />
+      <EdgeLabel size="mini" text={gameName} />
       <span className="flex items-start justify-between">
         <span className="flex flex-col items-center leading-none">
           <span className="font-[Georgia,Times_New_Roman,serif] text-lg font-bold" style={{ color: INK }}>{base}</span>

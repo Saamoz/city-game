@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { getBasePoints, getChallengeBonuses, isJudgedChallengeConfig, type Challenge } from '@city-game/shared';
-import { Flourish, INK, RUST, SuitGlyph, type CardSuit } from './CardGlyphs';
+import { formatDistance } from '../../lib/units';
+import { EdgeLabel, Flourish, INK, RUST, SuitGlyph, type CardSuit } from './CardGlyphs';
 import type { CompletionExtras } from './ChallengeScoring';
 
 export interface CardReroll {
@@ -12,6 +13,7 @@ export interface CardReroll {
 }
 
 interface ChallengeCardFaceProps {
+  gameName: string;
   challenge: Challenge;
   suit: CardSuit;
   distanceMeters: number | null;
@@ -25,7 +27,7 @@ interface ChallengeCardFaceProps {
 
 // A challenge drawn as a playing card on old parchment: corner indices with the points and the suit,
 // the short description up front, longer explanations behind (i) toggles, and bonus tasks to tick.
-export function ChallengeCardFace({ challenge, suit, distanceMeters, inRange, pending, onComplete, onShowOnMap, reroll }: ChallengeCardFaceProps) {
+export function ChallengeCardFace({ gameName, challenge, suit, distanceMeters, inRange, pending, onComplete, onShowOnMap, reroll }: ChallengeCardFaceProps) {
   const base = getBasePoints(challenge.scoring);
   const bonuses = getChallengeBonuses(challenge.config);
   const judged = isJudgedChallengeConfig(challenge.config);
@@ -51,6 +53,7 @@ export function ChallengeCardFace({ challenge, suit, distanceMeters, inRange, pe
   return (
     <article className="relative flex h-full w-full flex-col overflow-hidden rounded-[1.35rem] border border-[#a98c5a] bg-[radial-gradient(circle_at_28%_18%,#fbf6e8,#f2e8cf_62%,#e8d9b6)] text-[#2f2a20] shadow-[0_24px_60px_rgba(30,24,14,0.38)]">
       <div aria-hidden="true" className="pointer-events-none absolute inset-[7px] rounded-[1rem] border border-[#c4a874]/70" />
+      <EdgeLabel text={gameName} />
       <CornerIndex points={base} suit={suit} />
       <CornerIndex flipped points={base} suit={suit} />
 
@@ -180,6 +183,3 @@ function getText(challenge: Challenge, key: string): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-export function formatDistance(meters: number): string {
-  return meters < 1000 ? Math.round(meters) + ' m' : (meters / 1000).toFixed(1) + ' km';
-}

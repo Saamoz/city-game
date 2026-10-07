@@ -50,3 +50,18 @@ export function Flourish({ color = '#b79b6a' }: { color?: string }) {
     </div>
   );
 }
+
+// The game's name printed on the card edge, top and (upside down) bottom, like the maker's mark on a
+// playing card. It sits over the inner frame line on a parchment patch.
+export function EdgeLabel({ text, size = 'full' }: { text: string; size?: 'full' | 'mini' }) {
+  if (!text.trim()) return null;
+  const className = size === 'full'
+    ? 'top-[1px] max-w-[62%] px-2 text-[9px] tracking-[0.32em]'
+    : 'top-0 max-w-[78%] px-1 text-[6.5px] tracking-[0.22em]';
+  return (
+    <>
+      <span aria-hidden="true" className={'pointer-events-none absolute left-1/2 -translate-x-1/2 truncate rounded-sm bg-[#f5ecd5] font-semibold uppercase leading-[1.6] ' + className} style={{ color: '#8a6f45' }}>{text}</span>
+      <span aria-hidden="true" className={'pointer-events-none absolute left-1/2 -translate-x-1/2 rotate-180 truncate rounded-sm bg-[#efe3c6] font-semibold uppercase leading-[1.6] ' + className.replace(/top-\S+/, size === 'full' ? 'bottom-[1px]' : 'bottom-0')} style={{ color: '#8a6f45' }}>{text}</span>
+    </>
+  );
+}
