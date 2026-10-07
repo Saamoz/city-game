@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { GAME_MODE_KEYS, GAME_MODE_LABELS, PLATFORM_NAME } from '@city-game/shared';
+import { BrandMark } from '../../components/BrandMark';
 import type {
   Challenge,
   ChallengeSet,
@@ -609,7 +610,10 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
         <aside className="rounded-[1.75rem] border border-[#cbd3d8] bg-white p-4 shadow-[0_20px_50px_rgba(21,31,37,0.08)]">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-[#718089]">Admin</p>
+              <div className="flex items-center gap-2">
+                <BrandMark className="h-6 w-6" decorative />
+                <p className="text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-[#718089]">{PLATFORM_NAME} Admin</p>
+              </div>
               <h1 className="mt-2 text-2xl font-semibold text-[#182126]">Game Control</h1>
               <p className="mt-2 text-sm text-[#5b6870]">Desktop-first management for authored maps, challenge sets, and live {PLATFORM_NAME} games.</p>
             </div>

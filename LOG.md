@@ -288,3 +288,10 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - The app is now called Saadventure (`PLATFORM_NAME`): page title, home-screen name, push notification fallback title, join and loading screens, admin subtitle. Favicon is a compass.
 - Modes have player-facing names from `GAME_MODE_LABELS` in `shared/src/constants.ts`: `territory` → Turf War, `point_challenge` → Challenge Hunt. The stored `mode_key` values are unchanged, so existing games keep working. The join screen header shows "Saadventure · <mode>".
 - Seed demo games are named "<City> Turf War Demo".
+
+## Logo and Skyline Branding (2026-10-07)
+
+- New mark `client/public/logo.svg`: parchment map badge with a muted city skyline, a dotted trail and a rust destination pin with a gold star. It replaces `favicon.svg` and is the favicon, manifest icon and source of the PNGs (`apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, full-bleed and maskable-safe). Push notifications use `icon-192.png`.
+- `manifest.webmanifest` and `theme-color` added so the home-screen install shows Saadventure with the logo.
+- `BrandMark` (`client/src/components`) shows the logo on the join header, loading/empty/error screens and admin sidebar. `SkylineBackdrop` lays a faint two-layer skyline (`client/public/skyline.svg`, a seamless tile) along the bottom of the join and status screens; not on the spectator map or in-game.
+- PNGs were rendered from the SVG with headless Chromium; regenerate them if the SVG changes.

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { BrandMark } from '../../components/BrandMark';
+import { SkylineBackdrop } from '../../components/SkylineBackdrop';
 import { GAME_MODE_LABELS, PLATFORM_NAME, socketServerEventTypes, type Game, type GameEventRecord, type MapDefinition, type MapZone, type Player, type SocketEventPayloadMap, type Team, type TeamLocation, type Zone } from '@city-game/shared';
 import {
   ApiError,
@@ -751,6 +753,7 @@ function HomeScreen(props: {
     <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#f5f0e8] px-5 py-8 sm:px-8">
       {showSpectatorView ? <SpectatorMapBackground game={props.game} teams={props.spectatorTeams} teamLocations={props.spectatorTeamLocations} zones={props.spectatorZones} /> : null}
       {showSpectatorView ? <div className="pointer-events-none absolute inset-0 bg-[rgba(245,240,232,0.18)]" /> : null}
+      {showSpectatorView ? null : <SkylineBackdrop />}
       <div className={[
         'relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] w-full flex-col justify-between',
         showSpectatorView ? 'pointer-events-none max-w-none' : 'max-w-3xl',
@@ -794,8 +797,9 @@ function HomeScreen(props: {
           </div>
         ) : (
           <>
-            <div>
-              <p className="text-center font-['IBM_Plex_Mono',monospace] text-[11px] uppercase tracking-[0.38em] text-[#8c7a57]">
+            <div className="flex items-center justify-center gap-2.5">
+              <BrandMark className="h-9 w-9" decorative />
+              <p className="font-['IBM_Plex_Mono',monospace] text-[11px] uppercase tracking-[0.38em] text-[#8c7a57]">
                 {PLATFORM_NAME} · {GAME_MODE_LABELS[props.game.modeKey]}
               </p>
             </div>
@@ -1018,9 +1022,11 @@ function SpectatorTeamPanel(props: {
 
 function LoadingScreen() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#f5f0e8] px-6 text-center text-[#5a676c]">
-      <div>
-        <p className="font-['IBM_Plex_Mono',monospace] text-[11px] uppercase tracking-[0.36em] text-[#8c7a57]">{PLATFORM_NAME}</p>
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f5f0e8] px-6 text-center text-[#5a676c]">
+      <SkylineBackdrop />
+      <div className="relative flex flex-col items-center">
+        <BrandMark className="h-16 w-16" decorative />
+        <p className="mt-5 font-['IBM_Plex_Mono',monospace] text-[11px] uppercase tracking-[0.36em] text-[#8c7a57]">{PLATFORM_NAME}</p>
         <p className="mt-4 font-[Georgia,Times_New_Roman,serif] text-2xl text-[#223238]">Loading current game…</p>
       </div>
     </main>
@@ -1029,8 +1035,10 @@ function LoadingScreen() {
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#f5f0e8] px-6 text-center">
-      <div>
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f5f0e8] px-6 text-center">
+      <SkylineBackdrop />
+      <div className="relative flex flex-col items-center">
+        <BrandMark className="mb-6 h-14 w-14" />
         <p className="font-[Georgia,Times_New_Roman,serif] text-3xl text-[#223238]">No active game</p>
         <p className="mt-4 text-[#6d6758]">{message}</p>
       </div>
@@ -1040,8 +1048,10 @@ function EmptyState({ message }: { message: string }) {
 
 function ErrorState({ message }: { message: string }) {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#f5f0e8] px-6 text-center">
-      <div>
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f5f0e8] px-6 text-center">
+      <SkylineBackdrop />
+      <div className="relative flex flex-col items-center">
+        <BrandMark className="mb-6 h-14 w-14" />
         <p className="font-[Georgia,Times_New_Roman,serif] text-3xl text-[#223238]">Unable to load the game</p>
         <p className="mt-4 text-[#6d6758]">{message}</p>
       </div>

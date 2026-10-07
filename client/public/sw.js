@@ -17,6 +17,7 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
+      icon: '/icon-192.png',
       data: {
         url: gameId ? '/game/' + gameId : '/',
       },
