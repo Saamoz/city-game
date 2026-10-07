@@ -249,3 +249,10 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Runtime: area challenges are always active (like pins), `portable: false`, `location_mode: 'area'`. Completing (and judged submissions) require GPS within `CHALLENGE_AREA_EDGE_TOLERANCE_METERS` (20 m) of the area, checked with PostGIS geography distance. Completing one doesn't deal a deck card.
 - Game map: `ChallengeAreaLayer` draws dashed, shaded areas with name labels; tapping one opens the location card ("Anywhere in the shaded area · You're in it / 120 m away"). Cards show "▧ Area · you're in it"; the "On map" filter includes areas. The layer retries until the style accepts it (the map can already be idle when it mounts, so neither 'load' nor 'idle' fires again).
 - Editor: `ChallengeAreaPicker` uses mapbox-gl-draw (Draw area / Redraw / Clear, drag corners to adjust, shows the area size).
+
+## Prod Test Game (2026-10-07)
+
+- New game setting `hide_from_home`: `/game/active` skips such games, so a live test game doesn't replace the featured results or the real game. Open it with `/?gameId=<id>`. Admin checkbox: "Test game (hide from homepage)".
+- Prod test game "TEST · Point Challenge Preview" (`2e9effd0-6e4a-4d2d-a863-0b9efc62dec8`, set `4215d2f4-3046-4568-b61d-bfc23faf143b`): 15 Chicago challenges (6 pins, 4 areas, 5 anywhere; 3 judged), all in play, teams Test Foxes / Test Owls. A "Claude (test)" player is on Test Owls.
+- Found on prod: `.point-challenge-marker` set `position: relative`, overriding Mapbox's absolute marker positioning, so pins stacked away from their locations once there were several. Fixed in d51b7d8.
+- Admin routes are unauthenticated on prod (V1 no-op `requireAdmin`), which is how the test game was created via the API.
