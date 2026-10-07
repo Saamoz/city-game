@@ -366,24 +366,27 @@ export function ChallengeDeck({
                       <p className="relative overflow-hidden text-[13px] leading-5 text-[#3d362a] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:4]">
                         {shortDescription}
                       </p>
-                      {getMaxBonusPoints(challenge.config) ? (
-                        <p className="relative mt-2 w-fit rounded-full border border-[#c4a874] px-2 py-px font-[Georgia,Times_New_Roman,serif] text-[11px] font-semibold italic" style={{ color: RUST }}>
-                          +{getMaxBonusPoints(challenge.config)} bonus
-                        </p>
-                      ) : null}
+                      <div className="relative mt-2 flex flex-wrap items-center gap-2">
+                        {/* Details sit with the description, apart from the Claim button. */}
+                        <button
+                          className="-my-1.5 flex items-center gap-1.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6d5a3c]"
+                          data-deck-interactive="true"
+                          onClick={() => openDetails(challenge.id, dragRefs, setDetailChallengeId)}
+                          type="button"
+                        >
+                          <span aria-hidden="true" className="grid h-5 w-5 place-items-center rounded-full border border-[#a98c5a] font-[Georgia,Times_New_Roman,serif] text-[12px] normal-case italic">i</span>
+                          More info
+                        </button>
+                        {getMaxBonusPoints(challenge.config) ? (
+                          <span className="rounded-full border border-[#c4a874] px-2 py-px font-[Georgia,Times_New_Roman,serif] text-[11px] font-semibold italic" style={{ color: RUST }}>
+                            +{getMaxBonusPoints(challenge.config)} bonus
+                          </span>
+                        ) : null}
+                      </div>
 
                       <div className="relative mt-auto space-y-2 pb-1 pt-3">
                         {/* Right inset keeps the buttons clear of the upside-down corner index. */}
                         <div className="flex gap-2 pr-6">
-                          <button
-                            aria-label="Details"
-                            className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[#a98c5a] bg-[#fbf5e5] font-[Georgia,Times_New_Roman,serif] text-base italic text-[#4f3f2a] transition hover:bg-[#f5ead0]"
-                            data-deck-interactive="true"
-                            onClick={() => openDetails(challenge.id, dragRefs, setDetailChallengeId)}
-                            type="button"
-                          >
-                            i
-                          </button>
                           {isAnywhere && cardKind !== 'anywhere' ? (
                             <button
                               className={['h-11 flex-1 rounded-xl border border-[#3a3022] bg-[#3a3022] px-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#f5ecd6] transition', isSelected ? '' : 'invisible pointer-events-none'].join(' ')}
