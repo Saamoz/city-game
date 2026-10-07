@@ -5,6 +5,7 @@
       "title": "Costco rotisserie chicken",
       "shortDescription": "Get a Costco rotisserie chicken.",
       "points": 1,
+      "judged": true,
       "where": {
         "placement": "anywhere",
         "hint": "Any Costco"
@@ -91,6 +92,7 @@
       "title": "Ethiopian food",
       "shortDescription": "Order something from an Ethiopian restaurant and taste it.",
       "points": 1,
+      "judged": true,
       "where": {
         "placement": "anywhere",
         "hint": "Any Ethiopian restaurant"
@@ -281,6 +283,7 @@
       "title": "Metra balloon",
       "shortDescription": "Ride the Metra with a balloon for at least one stop.",
       "points": 1,
+      "judged": true,
       "where": {
         "placement": "anywhere",
         "hint": "On the Metra"
@@ -315,6 +318,7 @@
       "title": "La Fournette",
       "shortDescription": "Get a baked good at La Fournette.",
       "points": 1,
+      "judged": true,
       "where": {
         "placement": "pin",
         "point": [
