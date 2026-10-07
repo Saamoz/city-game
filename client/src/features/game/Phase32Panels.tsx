@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { GameEventRecord, Player, Team, TeamResourcesByTeam, Zone } from '@city-game/shared';
 
 export interface FeedEntry {
@@ -16,6 +16,7 @@ export interface ZoneScoreboardEntry {
   rank: number;
   playerNames: string[];
   scoreLabel: string;
+  scoreUnit: 'zones' | 'points';
 }
 
 interface MiniScoreboardCardProps {
@@ -27,6 +28,7 @@ interface MiniScoreboardCardProps {
 
 interface ScoreboardOverlayProps {
   entries: ZoneScoreboardEntry[];
+  teamId?: string | null;
   onClose(): void;
 }
 
@@ -77,6 +79,7 @@ export function buildZoneScoreboard({ teams, players, zones, teamResources, mode
       zoneCount: modeKey === 'point_challenge' ? (teamResources[team.id]?.points ?? 0) : (zoneCounts.get(team.id) ?? 0),
       rank: 0,
       playerNames: playerNamesByTeamId.get(team.id) ?? [],
+      scoreUnit: modeKey === 'point_challenge' ? 'points' as const : 'zones' as const,
       scoreLabel: modeKey === 'point_challenge' ? ((teamResources[team.id]?.points ?? 0) + ' pts') : ((zoneCounts.get(team.id) ?? 0) + ' zones'),
     }))
     .sort((left, right) => {
@@ -107,163 +110,123 @@ export function buildFeedEntriesForTeams(events: GameEventRecord[], teams: Team[
     .filter((entry): entry is FeedEntry => entry !== null);
 }
 
+// Standings and feed are scribbled on a scrap of notepaper: handwriting in ballpoint blue, a red pen
+// for what matters, and the sheet unfolds from a crumpled ball when it opens.
+const PEN = '#233a68';
+const RED_PEN = '#c0392b';
+const PENCIL = '#5d6271';
+
 export function MiniScoreboardCard({ entries, teamId, onOpenScoreboard, onOpenFeed }: MiniScoreboardCardProps) {
   const leaders = entries.slice(0, 3);
 
   return (
-    <section className="rounded-[1.55rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] px-3 py-3 shadow-[0_20px_60px_rgba(46,58,62,0.18)]">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">Standings</p>
-        <div className="flex items-center gap-1.5">
-          <button
-            className="rounded-full border border-[#c8b48a]/55 bg-[#efe5cf] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#e7dbc0]"
-            onClick={onOpenFeed}
-            type="button"
-          >
-            Feed
-          </button>
-          <button
-            className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#f2ead6]"
-            onClick={onOpenScoreboard}
-            type="button"
-          >
-            Standings
-          </button>
+    <div className="scrap-paper-wrap">
+      <section className="scrap-paper px-4 pb-3 pt-3" style={{ clipPath: roughEdge(7) }}>
+        <div className="flex items-center justify-between gap-3">
+          <ScrawlTitle size="sm">Standings</ScrawlTitle>
+          <div className="relative flex items-center gap-3 font-hand text-sm" style={{ color: PEN }}>
+            <button className="underline decoration-[#233a68]/40 decoration-wavy underline-offset-4 hover:decoration-[#233a68]" onClick={onOpenFeed} type="button">feed</button>
+            <button className="underline decoration-[#233a68]/40 decoration-wavy underline-offset-4 hover:decoration-[#233a68]" onClick={onOpenScoreboard} type="button">all teams</button>
+          </div>
         </div>
-      </div>
-
-      <div className="mt-2 space-y-1.5">
-        {leaders.map((entry) => {
-          const isCurrentTeam = entry.team.id === teamId;
-          return (
-            <div
-              key={entry.team.id}
-              className={[
-                'flex items-center justify-between rounded-[0.9rem] border px-2.5 py-1.5',
-                isCurrentTeam ? 'border-[#24343a]/25 bg-[#fff8eb]' : 'border-[#d6c59d]/55 bg-[#f7efdc]',
-              ].join(' ')}
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="w-4 text-xs font-semibold text-[#7a5e2d]">{entry.rank}</span>
-                <span
-                  className="h-3 w-3 shrink-0 rounded-full border border-[#f8f1df]"
-                  style={{ backgroundColor: entry.team.color }}
-                />
-                <p className="truncate text-sm font-medium text-[#24343a]">{entry.team.name}</p>
-              </div>
-              <p className="text-sm font-semibold text-[#24343a]">{entry.zoneCount}</p>
-            </div>
-          );
-        })}
-      </div>
-    </section>
+        <ol className="relative mt-1.5 space-y-0.5">
+          {leaders.map((entry) => (
+            <li key={entry.team.id} className={['flex items-baseline gap-2 px-1.5', entry.team.id === teamId ? 'scrap-highlight' : ''].join(' ')}>
+              <span className="w-4 font-scrawl text-xl leading-7" style={{ color: PEN }}>{entry.rank}.</span>
+              <TeamMark color={entry.team.color} />
+              <span className="min-w-0 flex-1 truncate font-scrawl text-xl leading-7" style={{ color: PEN }}>{entry.team.name}</span>
+              <span className="font-scrawl text-xl leading-7" style={{ color: PEN }}>{entry.zoneCount}</span>
+            </li>
+          ))}
+        </ol>
+      </section>
+    </div>
   );
 }
 
-export function ScoreboardOverlay({ entries, onClose }: ScoreboardOverlayProps) {
+export function ScoreboardOverlay({ entries, teamId = null, onClose }: ScoreboardOverlayProps) {
+  const topScore = entries[0]?.zoneCount ?? 0;
   return (
     <OverlayShell title="Standings" onClose={onClose}>
-      <div className="space-y-1.5">
-        {entries.map((entry) => (
-          <article
-            key={entry.team.id}
-            className="flex items-start justify-between gap-3 rounded-[1.1rem] border border-[#d6c59d]/55 bg-[#f7efdc] px-3 py-2"
-          >
-            <div className="flex min-w-0 items-center gap-2.5">
-              <p className="w-5 text-center text-sm font-semibold text-[#7a5e2d]">{entry.rank}</p>
-              <span
-                className="h-3 w-3 shrink-0 rounded-full border border-[#f8f1df] shadow-sm"
-                style={{ backgroundColor: entry.team.color }}
-              />
-              <div className="min-w-0">
-                <h3 className="truncate font-[Georgia,Times_New_Roman,serif] text-base font-semibold text-[#24343a]">
-                  {entry.team.name}
-                </h3>
-                {entry.playerNames.length ? (
-                  <p className="mt-0.5 truncate text-[11px] leading-4 text-[#5a686f]">
-                    {entry.playerNames.join(', ')}
-                  </p>
-                ) : null}
+      {entries.length === 0 ? <PanelMessage tone="default" message="No teams yet." /> : null}
+      <ol className="space-y-1.5 pb-1">
+        {entries.map((entry) => {
+          const isMine = entry.team.id === teamId;
+          const isLeader = topScore > 0 && entry.zoneCount === topScore;
+          return (
+            <li key={entry.team.id} className={['relative px-2 py-1', isMine ? 'scrap-highlight' : ''].join(' ')}>
+              <div className="flex items-baseline gap-2">
+                <span className="w-7 shrink-0 font-scrawl text-[1.7rem] leading-9" style={{ color: PEN }}>{entry.rank}.</span>
+                <TeamMark color={entry.team.color} />
+                <span className="min-w-0 truncate font-scrawl text-[1.7rem] leading-9" style={{ color: PEN }}>{entry.team.name}</span>
+                <span aria-hidden="true" className="min-w-4 flex-1 -translate-y-2 border-b-2 border-dotted" style={{ borderColor: 'rgba(35,58,104,0.3)' }} />
+                <span className="relative shrink-0 px-1.5 font-scrawl text-[1.7rem] leading-9" style={{ color: isLeader ? RED_PEN : PEN }}>
+                  {entry.zoneCount}
+                  <span className="ml-1 font-hand text-sm">{entry.scoreUnit === 'points' ? (entry.zoneCount === 1 ? 'pt' : 'pts') : (entry.zoneCount === 1 ? 'zone' : 'zones')}</span>
+                  {isLeader ? <ScribbleCircle /> : null}
+                </span>
               </div>
-            </div>
-            <p className="shrink-0 text-xs font-semibold uppercase tracking-[0.12em] text-[#24343a]">
-              {entry.scoreLabel}
-            </p>
-          </article>
-        ))}
-      </div>
+              <div className="flex items-baseline justify-between gap-3 pl-9">
+                <p className="min-w-0 truncate font-hand text-[13px] leading-5" style={{ color: PENCIL }}>{entry.playerNames.length ? entry.playerNames.join(', ') : 'nobody yet'}</p>
+                {isMine ? <span className="shrink-0 -rotate-3 font-scrawl text-lg leading-5" style={{ color: RED_PEN }}>← us!</span> : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
     </OverlayShell>
   );
 }
 
 export function FeedOverlay({ entries, isLoading, errorMessage, onClose, onFocusZone }: FeedOverlayProps) {
   return (
-    <OverlayShell title="Field Feed" onClose={onClose}>
-      {isLoading ? <PanelMessage tone="default" message="Loading recent events." /> : null}
+    <OverlayShell ruled title="Field notes" onClose={onClose}>
+      {isLoading ? <PanelMessage tone="default" message="Flipping back through the notes…" /> : null}
       {errorMessage ? <PanelMessage tone="danger" message={errorMessage} /> : null}
-      {!isLoading && !errorMessage && entries.length === 0 ? <PanelMessage tone="default" message="No visible events yet." /> : null}
+      {!isLoading && !errorMessage && entries.length === 0 ? <PanelMessage tone="default" message="Nothing jotted down yet." /> : null}
 
       {entries.length ? (
-        <div className="space-y-1">
+        <ol>
           {entries.map((entry) => {
-            const isZoneLinked = Boolean(entry.zoneId);
-            const articleClassName = [
-              'w-full rounded-[0.9rem] border border-[#d6c59d]/55 bg-[#f7efdc] px-3 py-2 text-left transition',
-              isZoneLinked ? 'hover:bg-[#fbf3e2]' : '',
-            ].join(' ').trim();
-
             const content = (
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    {entry.accentColor ? (
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-[#f8f1df]" style={{ backgroundColor: entry.accentColor }} />
-                    ) : null}
-                    <h3 className="text-[13px] font-semibold leading-5 text-[#24343a]">{entry.title}</h3>
-                  </div>
-                  {entry.body ? <p className="mt-1 text-xs leading-5 text-[#55656c]">{entry.body}</p> : null}
-                </div>
-                <p className="shrink-0 pt-0.5 text-[10px] uppercase tracking-[0.16em] text-[#7a6a48]">{formatEventTime(entry.createdAt)}</p>
-              </div>
+              <>
+                <span className="block -rotate-2 truncate pr-2 text-right font-hand text-[11px] leading-7" style={{ color: PENCIL }}>{formatEventTime(entry.createdAt)}</span>
+                <span className="block min-w-0 pl-2.5">
+                  <span className="font-hand text-[15px] leading-7" style={{ color: PEN }}>
+                    {entry.accentColor ? <TeamMark color={entry.accentColor} inline /> : null}
+                    {entry.title}
+                  </span>
+                  {entry.body ? <span className="block font-hand text-[13px] leading-7" style={{ color: PENCIL }}>{entry.body}</span> : null}
+                  {entry.zoneId ? <span className="block font-scrawl text-lg leading-7" style={{ color: RED_PEN }}>→ see it on the map</span> : null}
+                </span>
+              </>
             );
-
-            if (isZoneLinked && entry.zoneId) {
-              return (
-                <button
-                  key={entry.id}
-                  className={articleClassName}
-                  onClick={() => onFocusZone(entry.zoneId!)}
-                  type="button"
-                >
-                  {content}
-                </button>
-              );
-            }
-
+            const className = 'grid w-full grid-cols-[3.1rem_minmax(0,1fr)] text-left';
             return (
-              <article key={entry.id} className={articleClassName}>
-                {content}
-              </article>
+              <li key={entry.id}>
+                {entry.zoneId ? (
+                  <button className={className + ' transition hover:bg-[#233a68]/[0.04]'} onClick={() => onFocusZone(entry.zoneId!)} type="button">{content}</button>
+                ) : (
+                  <div className={className}>{content}</div>
+                )}
+              </li>
             );
           })}
-        </div>
+        </ol>
       ) : null}
     </OverlayShell>
   );
 }
 
-export function OverlayShell({ title, onClose, children }: { title: string; onClose(): void; children: ReactNode }) {
+export function OverlayShell({ title, onClose, ruled = false, children }: { title: string; onClose(): void; ruled?: boolean; children: ReactNode }) {
   const dragRefs = useOverlayDragRefs();
   const closeTimerRef = useRef<number | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
-  // The card deck owns the bottom of the screen, so panels drop down from the top instead.
-  const [isEntered, setIsEntered] = useState(false);
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setIsEntered(true));
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
+  // Each sheet sits a little crooked, like a note dropped on the map.
+  const [tilt] = useState(() => (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 0.6));
+  const [edge] = useState(() => roughEdge(Math.floor(Math.random() * 1000)));
 
   useEffect(() => () => {
     if (closeTimerRef.current !== null) {
@@ -271,23 +234,12 @@ export function OverlayShell({ title, onClose, children }: { title: string; onCl
     }
   }, []);
 
-  const requestClose = (animated: boolean) => {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-
-    if (!animated) {
-      onClose();
-      return;
-    }
-
+  const requestClose = () => {
+    if (closeTimerRef.current !== null) return;
     setIsClosing(true);
     setIsDragging(false);
-    setDragOffset(-window.innerHeight);
-    closeTimerRef.current = window.setTimeout(() => {
-      onClose();
-    }, 220);
+    // Scrunched back into a ball and tossed.
+    closeTimerRef.current = window.setTimeout(onClose, 230);
   };
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
@@ -313,10 +265,7 @@ export function OverlayShell({ title, onClose, children }: { title: string; onCl
       return;
     }
 
-    if (!dragRefs.didDrag.current) {
-      dragRefs.didDrag.current = true;
-    }
-
+    dragRefs.didDrag.current = true;
     event.preventDefault();
     setIsDragging(true);
     setDragOffset(deltaY < 0 ? deltaY : Math.round(deltaY * 0.2));
@@ -338,7 +287,7 @@ export function OverlayShell({ title, onClose, children }: { title: string; onCl
     setIsDragging(false);
 
     if (didDrag && (deltaY < -90 || (deltaY < -36 && velocity < -0.55))) {
-      requestClose(true);
+      requestClose();
       return;
     }
 
@@ -346,40 +295,79 @@ export function OverlayShell({ title, onClose, children }: { title: string; onCl
   };
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-50 flex items-start justify-center p-0 lg:items-center lg:p-6">
-      <section
-        className="pointer-events-auto flex max-h-[72vh] w-full max-w-4xl flex-col overflow-hidden rounded-b-[1.9rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] pt-[env(safe-area-inset-top,0px)] shadow-[0_30px_80px_rgba(24,32,36,0.28)] lg:rounded-[2rem] lg:pt-0"
-        style={{
-          transform: isEntered ? `translateY(${dragOffset}px)` : 'translateY(-100%)',
-          transition: isDragging ? 'none' : 'transform 0.26s cubic-bezier(0.22,1,0.36,1)',
-        }}
+    <div className="pointer-events-none fixed inset-0 z-50 flex items-start justify-center px-3 pt-[calc(env(safe-area-inset-top,0px)+1.5rem)] lg:items-center lg:p-6">
+      <div
+        className="pointer-events-auto w-full max-w-xl"
+        style={{ transform: `translateY(${dragOffset}px)`, transition: isDragging ? 'none' : 'transform 0.26s cubic-bezier(0.22,1,0.36,1)' }}
       >
-        <header className="border-b border-[#d6c59d]/55 px-5 py-2.5 lg:px-6">
-          <div className="flex items-center justify-between gap-4">
-            <h2 className="truncate font-[Georgia,Times_New_Roman,serif] text-xl font-semibold text-[#24343a] lg:text-2xl">{title}</h2>
-            <button
-              className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#f2ead6]"
-              onClick={() => requestClose(true)}
-              type="button"
+        <div className={'scrap-paper-wrap relative ' + (isClosing ? 'scrap-paper-exit' : 'scrap-paper-enter')} style={{ '--scrap-tilt': tilt.toFixed(2) + 'deg' } as CSSProperties}>
+          <section className={'scrap-paper flex max-h-[76vh] flex-col ' + (ruled ? 'scrap-paper--ruled' : '')} style={{ clipPath: edge }}>
+            <header className="relative z-[1] flex items-start justify-between gap-4 px-5 pb-1 pt-5">
+              <ScrawlTitle>{title}</ScrawlTitle>
+              <button aria-label="Close" className="relative -mr-1 -mt-1 grid h-11 w-11 shrink-0 place-items-center font-scrawl text-[1.6rem] leading-none" onClick={requestClose} style={{ color: PEN }} type="button">
+                ✕
+                <ScribbleCircle />
+              </button>
+            </header>
+            <div className="scrap-paper__lines relative z-[1] overflow-y-auto overscroll-contain px-4 pb-3 pt-1 [touch-action:pan-y]">{children}</div>
+            <div
+              aria-hidden="true"
+              className="relative z-[1] flex touch-none cursor-grab justify-center pb-3 pt-1 active:cursor-grabbing"
+              onPointerCancel={handlePointerEnd}
+              onPointerDown={(event) => { if (!isOverlayInteractiveTarget(event.target)) handlePointerDown(event); }}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerEnd}
             >
-              Close
-            </button>
-          </div>
-        </header>
-        <div className="overflow-y-auto overscroll-contain px-4 py-3 [touch-action:pan-y] lg:px-5">{children}</div>
-        <div
-          aria-hidden="true"
-          className="flex touch-none cursor-grab justify-center py-2.5 active:cursor-grabbing"
-          onPointerCancel={handlePointerEnd}
-          onPointerDown={(event) => { if (!isOverlayInteractiveTarget(event.target)) handlePointerDown(event); }}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerEnd}
-        >
-          <div className="h-1 w-10 rounded-full bg-[#c8b48a]/70" />
+              <svg className="h-2 w-12" fill="none" viewBox="0 0 48 8"><path d="M2 5c6-3 10 2 16 0s10-3 16-1 8 2 12 0" stroke={PENCIL} strokeLinecap="round" strokeOpacity="0.45" strokeWidth="2" /></svg>
+            </div>
+          </section>
+          <span aria-hidden="true" className="scrap-tape" />
         </div>
-      </section>
+      </div>
     </div>
   );
+}
+
+function ScrawlTitle({ children, size = 'lg' }: { children: ReactNode; size?: 'sm' | 'lg' }) {
+  return (
+    <h2 className={'relative w-fit font-scrawl font-bold leading-none ' + (size === 'lg' ? 'text-[2.3rem]' : 'text-[1.6rem]')} style={{ color: PEN }}>
+      {children}
+      <svg aria-hidden="true" className="absolute -bottom-2 left-0 h-3 w-full" fill="none" preserveAspectRatio="none" viewBox="0 0 120 12">
+        <path d="M2 8c14-4 26 2 40-1s24-5 38-2 26 3 38-2" stroke={RED_PEN} strokeLinecap="round" strokeWidth="2.4" />
+      </svg>
+    </h2>
+  );
+}
+
+// A quick loop of red pen around something, never quite closed.
+function ScribbleCircle() {
+  return (
+    <svg aria-hidden="true" className="pointer-events-none absolute -inset-x-1 -inset-y-0.5 h-[calc(100%+0.25rem)] w-[calc(100%+0.5rem)]" fill="none" preserveAspectRatio="none" viewBox="0 0 100 60">
+      <path d="M58 6C30 2 6 12 5 30s24 27 50 26 41-12 40-28S70 3 44 6" stroke={RED_PEN} strokeLinecap="round" strokeWidth="2.6" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+// The team's colour as a hurried scribble of felt-tip.
+function TeamMark({ color, inline = false }: { color: string; inline?: boolean }) {
+  return (
+    <svg aria-hidden="true" className={inline ? 'mr-1.5 inline-block h-3.5 w-3.5 -translate-y-px align-middle' : 'h-4 w-4 shrink-0 self-center'} fill="none" viewBox="0 0 20 20">
+      <path d="M4 11c1-5 7-8 11-5s1 9-4 9-6-5-2-7 6 0 5 3" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.2" />
+    </svg>
+  );
+}
+
+// A torn, slightly uneven outline so the sheet never has perfectly straight edges.
+function roughEdge(seed: number): string {
+  let state = seed * 9301 + 49297;
+  const next = () => { state = (state * 9301 + 49297) % 233280; return state / 233280; };
+  const jitter = (max: number) => (next() * max).toFixed(1) + 'px';
+  const points: string[] = [];
+  for (let step = 0; step <= 10; step += 1) points.push(`${step * 10}% ${jitter(4)}`);
+  for (let step = 1; step <= 10; step += 1) points.push(`calc(100% - ${jitter(4)}) ${step * 10}%`);
+  for (let step = 9; step >= 0; step -= 1) points.push(`${step * 10}% calc(100% - ${jitter(6)})`);
+  for (let step = 9; step >= 1; step -= 1) points.push(`${jitter(4)} ${step * 10}%`);
+  return `polygon(${points.join(', ')})`;
 }
 
 interface OverlayDragRefs {
@@ -404,11 +392,7 @@ function clearOverlayDragRefs(dragRefs: OverlayDragRefs): void {
 }
 
 function PanelMessage({ message, tone }: { message: string; tone: 'default' | 'danger' }) {
-  const className = tone === 'danger'
-    ? 'border-[#bb4d4d]/35 bg-[#f7d9d4] text-[#6c2626]'
-    : 'border-[#d6c59d]/55 bg-[#fff8eb] text-[#55656c]';
-
-  return <div className={'mb-3 rounded-[1.1rem] border px-4 py-3 text-sm ' + className}>{message}</div>;
+  return <p className="font-hand text-[15px] leading-7" style={{ color: tone === 'danger' ? RED_PEN : PENCIL }}>{message}</p>;
 }
 
 function formatFeedEntry(

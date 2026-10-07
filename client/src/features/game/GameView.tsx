@@ -1144,6 +1144,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                   />
                 ) : (
                                   <ChallengeDeck
+                                    gameName={snapshot.game.name}
                     allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones === true}
                     animatedChallengeIds={animatedChallengeIds}
                     challenges={deckChallenges}
@@ -1212,6 +1213,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               />
             ) : (
                           <ChallengeDeck
+                            gameName={snapshot.game.name}
                 allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones === true}
                 animatedChallengeIds={animatedChallengeIds}
                 challenges={deckChallenges}
@@ -1351,6 +1353,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
       {activeOverlay === 'scoreboard' ? (
         <ScoreboardOverlay
+          teamId={team?.id ?? null}
           entries={scoreboardEntries}
           onClose={() => setActiveOverlay(null)}
         />

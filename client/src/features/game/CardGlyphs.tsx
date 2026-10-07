@@ -40,6 +40,17 @@ export function WindRose({ size = 16, color = RUST }: { size?: number; color?: s
   );
 }
 
+// Turf War's suit: a pennant planted on a pole, like a claim marked on a survey map.
+export function FlagGlyph({ size = 16, color = RUST }: { size?: number; color?: string }) {
+  return (
+    <svg aria-hidden="true" height={size} viewBox="0 0 24 24" width={size}>
+      <path d="M6 2.5v19" stroke={color} strokeLinecap="round" strokeWidth="1.8" />
+      <path d="M6.9 3.5c3.2-1.4 5.6 1.4 9 0.3l2.6-0.8-2.2 5.2 2.2 4.4c-3.4 1.6-6.1-1-9.6 0.4Z" fill={color} />
+      <path d="M3.5 21.5h5" stroke={color} strokeLinecap="round" strokeWidth="1.6" opacity="0.7" />
+    </svg>
+  );
+}
+
 // Thin rule with a diamond in the middle, like a map cartouche divider.
 export function Flourish({ color = '#b79b6a' }: { color?: string }) {
   return (

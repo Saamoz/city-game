@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
-import { CHALLENGE_AREA_EDGE_TOLERANCE_METERS, getChallengeBonuses, isJudgedChallengeConfig, type Challenge, type ChallengeRerollState, type Zone } from '@city-game/shared';
+import { CHALLENGE_AREA_EDGE_TOLERANCE_METERS, getBasePoints, getChallengeBonuses, getMaxBonusPoints, isJudgedChallengeConfig, type Challenge, type ChallengeRerollState, type Zone } from '@city-game/shared';
 import {
   CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH,
   CHALLENGE_CARD_TITLE_MAX_LENGTH,
   clampChallengeCardText,
 } from '../../lib/challenge-card-limits';
 import { formatDistance } from '../../lib/units';
+import { EdgeLabel, FlagGlyph, Flourish, INK, RUST } from './CardGlyphs';
 import { JudgedMark } from './JudgedChallenges';
 import { BonusList, CompleteChallengeSheet, ScoreChips, formatPoints, type CompletionExtras } from './ChallengeScoring';
 import type { GeolocationStatus } from './useGeolocation';
@@ -27,6 +28,8 @@ interface RenderedChallengeCard extends ExitingChallengeCard {
 }
 
 interface ChallengeDeckProps {
+  // Printed on the card edge, like the Challenge Hunt cards.
+  gameName: string;
   challenges: Challenge[];
   rerollState: ChallengeRerollState;
   teamId: string | null;
@@ -68,6 +71,7 @@ interface DragStateRefs {
 }
 
 export function ChallengeDeck({
+  gameName,
   challenges,
   rerollState,
   teamId,
@@ -281,10 +285,10 @@ export function ChallengeDeck({
                 >
                 <article
                   className={[
-                    'relative snap-start min-w-[13.5rem] max-w-[13.5rem] lg:min-w-[17rem] lg:max-w-[17rem] flex-none rounded-[1.65rem] border p-3.5 lg:p-4 text-[#1f2a2f] shadow-[0_16px_80px_rgba(24,32,36,0.10)] transition duration-150',
+                    'relative flex min-h-[15.5rem] min-w-[13.5rem] max-w-[13.5rem] flex-none snap-start flex-col overflow-hidden rounded-[1.1rem] border bg-[radial-gradient(circle_at_28%_18%,#fbf6e8,#f2e8cf_62%,#e8d9b6)] px-4 pb-4 pt-5 text-[#2f2a20] transition duration-150 lg:min-h-[17rem] lg:min-w-[17rem] lg:max-w-[17rem]',
                     isSelected
-                      ? 'z-10 border-[#24343a] bg-[#fff8eb] shadow-[0_20px_80px_rgba(24,32,36,0.16)]'
-                      : 'z-0 border-[#c8b48a]/55 bg-[#f8f1df] hover:-translate-y-0.5 hover:bg-[#fbf4e4]',
+                      ? 'z-10 -translate-y-1 border-[#4f3f2a] shadow-[0_22px_48px_rgba(30,24,14,0.32)]'
+                      : 'z-0 border-[#a98c5a] shadow-[0_14px_34px_rgba(30,24,14,0.2)] hover:-translate-y-0.5',
                   ].join(' ')}
                   onClick={(event) => {
                     if (consumeSuppressedClick(dragRefs)) {
@@ -303,134 +307,142 @@ export function ChallengeDeck({
                     pointerEvents: isPeeking || isExiting ? 'none' : undefined,
                   }}
                 >
+                  <div aria-hidden="true" className="pointer-events-none absolute inset-[6px] rounded-[0.8rem] border border-[#c4a874]/70" />
+                  <EdgeLabel text={gameName} />
                   {isPeeking && index === 0 ? (
-                    <div className="flex w-full items-center justify-center">
-                      <h3 className="font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#1f2a2f]">
+                    <div className="relative flex w-full flex-col items-center">
+                      <h3 className="flex items-center gap-1.5 whitespace-nowrap font-[Georgia,Times_New_Roman,serif] text-xl font-semibold" style={{ color: INK }}>
+                        <FlagGlyph size={18} />
                         {isAnywhere ? (showFilters ? 'Challenges' : 'Anywhere Cards') : 'Challenge Deck'}
                       </h3>
+                      <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: RUST }}>{allAvailable.length} {allAvailable.length === 1 ? 'card' : 'cards'}</p>
                     </div>
                   ) : (
                     <>
-                      {isAnywhere ? <CardTag challenge={challenge} kind={getCardKind(challenge)} distance={distanceTo(challenge)} /> : null}
-                      <div className="flex items-start justify-between gap-2">
-                        <h3
-                          className="min-w-0 font-[Georgia,Times_New_Roman,serif] text-base lg:text-lg font-semibold leading-snug text-[#1f2a2f]"
-                          title={challenge.title}
-                        >
-                          {getDisplayTitle(challenge.title)}
-                        </h3>
-                        {showReroll ? (
-                          <button
-                            aria-label={hasRerollVote ? 'Withdraw reroll vote' : 'Vote to reroll challenge'}
-                            aria-pressed={hasRerollVote}
-                            className={[
-                              'inline-flex h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-full px-2 text-[10px] font-semibold tabular-nums transition disabled:cursor-wait disabled:opacity-50',
-                              hasRerollVote
-                                ? 'bg-[#e8ddc4] text-[#5f523b]'
-                                : 'text-[#7d745f] hover:bg-[#eee4cf] hover:text-[#4f4635]',
-                            ].join(' ')}
-                            data-deck-interactive="true"
-                            disabled={rerollPending}
-                            onClick={() => onToggleRerollVote(challenge.id)}
-                            title={hasRerollVote ? 'Withdraw reroll vote' : 'Vote to reroll'}
-                            type="button"
+                      <CardCorner points={getBasePoints(challenge.scoring)} />
+                      <CardCorner flipped points={getBasePoints(challenge.scoring)} />
+                      <div className="relative pl-8">
+                        {isAnywhere ? <CardTag challenge={challenge} kind={getCardKind(challenge)} distance={distanceTo(challenge)} /> : (
+                          <p className="truncate text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: RUST }} title={currentZoneName ?? undefined}>
+                            {currentZoneName ?? 'Stand in a zone'}
+                          </p>
+                        )}
+                        <div className="mt-0.5 flex items-start justify-between gap-1">
+                          <h3
+                            className="min-w-0 font-[Georgia,Times_New_Roman,serif] text-[1.15rem] font-semibold leading-[1.2] lg:text-xl"
+                            style={{ color: INK }}
+                            title={challenge.title}
                           >
-                            <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24">
-                              <path d="M19 8a8 8 0 1 0 1 7" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-                              <path d="M19 4v4h-4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
-                            </svg>
-                            {rerollVoteCount > 0 ? (
-                              <span>{rerollVoteCount}/{rerollState.eligibleTeamCount}</span>
-                            ) : null}
-                          </button>
-                        ) : null}
+                            {getDisplayTitle(challenge.title)}
+                          </h3>
+                          {showReroll ? (
+                            <button
+                              aria-label={hasRerollVote ? 'Withdraw reroll vote' : 'Vote to reroll challenge'}
+                              aria-pressed={hasRerollVote}
+                              className={[
+                                '-mr-1 -mt-1 inline-flex h-9 min-w-9 shrink-0 items-center justify-center gap-1 rounded-full px-1.5 text-[10px] font-semibold tabular-nums transition disabled:cursor-wait disabled:opacity-50',
+                                hasRerollVote ? 'bg-[#e3d4b0] text-[#4f3f2a]' : 'text-[#7d6b4c] hover:bg-[#efe3c6]',
+                              ].join(' ')}
+                              data-deck-interactive="true"
+                              disabled={rerollPending}
+                              onClick={() => onToggleRerollVote(challenge.id)}
+                              title={hasRerollVote ? 'Withdraw reroll vote' : 'Vote to reroll'}
+                              type="button"
+                            >
+                              <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                <path d="M19 8a8 8 0 1 0 1 7" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                                <path d="M19 4v4h-4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                              </svg>
+                              {rerollVoteCount > 0 ? (
+                                <span>{rerollVoteCount}/{rerollState.eligibleTeamCount}</span>
+                              ) : null}
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
 
-                      <div className="mt-1.5"><ScoreChips challenge={challenge} size="xs" /></div>
-                      <p className="mt-2 overflow-hidden text-xs leading-5 text-[#4f6168] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:4]">
+                      <div className="relative my-2.5"><Flourish /></div>
+
+                      <p className="relative overflow-hidden text-[13px] leading-5 text-[#3d362a] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:4]">
                         {shortDescription}
                       </p>
-                    </>
-                  )}
+                      {getMaxBonusPoints(challenge.config) ? (
+                        <p className="relative mt-2 w-fit rounded-full border border-[#c4a874] px-2 py-px font-[Georgia,Times_New_Roman,serif] text-[11px] font-semibold italic" style={{ color: RUST }}>
+                          +{getMaxBonusPoints(challenge.config)} bonus
+                        </p>
+                      ) : null}
 
-
-                  <div className="mt-3 border-t border-[#d8c8a3]/55 pt-3">
-                    <p className="hidden lg:block text-[11px] uppercase tracking-[0.18em] text-[#7d6f55]">
-                      {isAnywhere ? (cardKind === 'anywhere' ? 'Do it wherever you are' : cardKind === 'area' ? 'Go into the area on the map' : 'Go to the pin on the map') : (currentZoneName ?? 'No zone')}
-                    </p>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        className="rounded-full border border-[#c8b48a]/55 bg-[#efe5cf] px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#e7dbc0]"
-                        data-deck-interactive="true"
-                        onClick={() => openDetails(challenge.id, dragRefs, setDetailChallengeId)}
-                        type="button"
-                      >
-                        Details
-                      </button>
-                    </div>
-
-                    <div className="mt-3 space-y-2">
-                      {isAnywhere && cardKind !== 'anywhere' ? (
-                        <button
-                          className={[
-                            'w-full rounded-2xl border border-[#c76a2c] bg-[#d97a37] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#fff8eb] transition hover:bg-[#c56a2b]',
-                            isSelected ? '' : 'invisible pointer-events-none',
-                          ].join(' ')}
-                          data-deck-interactive="true"
-                          onClick={() => onLocateChallenge?.(challenge.id)}
-                          type="button"
-                        >
-                          Show on map
-                        </button>
-                      ) : isZoneClaimBlocked ? (
-                        <button
-                          className="w-full rounded-2xl border border-[#aeb9bd] bg-[#cbd3d6] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#65757c] disabled:cursor-not-allowed"
-                          data-deck-interactive="true"
-                          disabled
-                          type="button"
-                        >
-                          Zone Claimed
-                        </button>
-                      ) : isConfirming ? (
-                        <>
+                      <div className="relative mt-auto space-y-2 pb-1 pt-3">
+                        {/* Right inset keeps the buttons clear of the upside-down corner index. */}
+                        <div className="flex gap-2 pr-6">
                           <button
-                            className="w-full rounded-2xl border border-[#8d2727] bg-[#b83a31] px-3 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#fff6ef] transition hover:bg-[#9e3028] disabled:cursor-not-allowed disabled:opacity-60"
+                            aria-label="Details"
+                            className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[#a98c5a] bg-[#fbf5e5] font-[Georgia,Times_New_Roman,serif] text-base italic text-[#4f3f2a] transition hover:bg-[#f5ead0]"
                             data-deck-interactive="true"
-                            disabled={capturePending || (!isAnywhere && (locationStatus === 'unsupported' || locationStatus === 'requesting'))}
-                            onClick={() => {
-                              onCaptureChallenge(challenge.id, null);
-                              setConfirmChallengeId(null);
-                            }}
+                            onClick={() => openDetails(challenge.id, dragRefs, setDetailChallengeId)}
                             type="button"
                           >
-                            {capturePending ? (isAnywhere ? 'Completing…' : 'Claiming…') : (isAnywhere ? 'We did it' : 'Confirm')}
+                            i
                           </button>
+                          {isAnywhere && cardKind !== 'anywhere' ? (
+                            <button
+                              className={['h-11 flex-1 rounded-xl border border-[#3a3022] bg-[#3a3022] px-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#f5ecd6] transition', isSelected ? '' : 'invisible pointer-events-none'].join(' ')}
+                              data-deck-interactive="true"
+                              onClick={() => onLocateChallenge?.(challenge.id)}
+                              type="button"
+                            >
+                              Show on map
+                            </button>
+                          ) : isZoneClaimBlocked ? (
+                            <button
+                              className="h-11 flex-1 rounded-xl border border-[#b9ab8f] bg-[#cfc3a8] px-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#7a6f5c] disabled:cursor-not-allowed"
+                              data-deck-interactive="true"
+                              disabled
+                              type="button"
+                            >
+                              Zone held
+                            </button>
+                          ) : isConfirming ? (
+                            <button
+                              className="h-11 flex-1 rounded-xl border border-[#6e3b22] bg-[#7d4527] px-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#fbf1dc] transition hover:bg-[#6e3b22] disabled:cursor-not-allowed disabled:opacity-60"
+                              data-deck-interactive="true"
+                              disabled={capturePending || (!isAnywhere && (locationStatus === 'unsupported' || locationStatus === 'requesting'))}
+                              onClick={() => {
+                                onCaptureChallenge(challenge.id, null);
+                                setConfirmChallengeId(null);
+                              }}
+                              type="button"
+                            >
+                              {capturePending ? (isAnywhere ? 'Completing…' : 'Claiming…') : (isAnywhere ? 'We did it' : 'Confirm')}
+                            </button>
+                          ) : (
+                            <button
+                              className={[
+                                'h-11 flex-1 rounded-xl border border-[#3a3022] bg-[#3a3022] px-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#f5ecd6] transition hover:bg-[#2c2419] disabled:cursor-not-allowed disabled:border-[#b9ab8f] disabled:bg-[#cfc3a8] disabled:text-[#7a6f5c]',
+                                isSelected ? '' : 'invisible pointer-events-none',
+                              ].join(' ')}
+                              data-deck-interactive="true"
+                              disabled={capturePending || (!isAnywhere && (locationStatus === 'unsupported' || locationStatus === 'requesting'))}
+                              onClick={() => getChallengeBonuses(challenge.config).length ? setBonusSheetChallengeId(challenge.id) : setConfirmChallengeId(challenge.id)}
+                              type="button"
+                            >
+                              {isAnywhere ? 'Complete' : 'Claim'}
+                            </button>
+                          )}
+                        </div>
+                        {isConfirming ? (
                           <button
-                            className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#efe5cf] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#5d4d33] transition hover:bg-[#e6d8bc]"
+                            className="w-full text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6d5a3c] underline-offset-4 hover:underline"
                             data-deck-interactive="true"
                             onClick={() => setConfirmChallengeId(null)}
                             type="button"
                           >
                             Cancel
                           </button>
-                        </>
-                      ) : (
-                        <button
-                          className={[
-                            'w-full rounded-2xl border border-[#29414b] bg-[#24343a] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#f4ead7] transition hover:bg-[#1d2b30] disabled:cursor-not-allowed disabled:border-[#8aa1a8] disabled:bg-[#8ea2a7] disabled:text-[#eef4f5]',
-                            isSelected ? '' : 'invisible pointer-events-none',
-                          ].join(' ')}
-                          data-deck-interactive="true"
-                          disabled={capturePending || (!isAnywhere && (locationStatus === 'unsupported' || locationStatus === 'requesting'))}
-                          onClick={() => getChallengeBonuses(challenge.config).length ? setBonusSheetChallengeId(challenge.id) : setConfirmChallengeId(challenge.id)}
-                          type="button"
-                        >
-                          {isAnywhere ? 'Complete' : 'Claim'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                        ) : null}
+                      </div>
+                    </>
+                  )}
                 </article>
                 </div>
               );
@@ -514,19 +526,21 @@ export function ChallengeDeck({
           onClick={() => setDetailChallengeId(null)}
         >
           <div
-            className="w-full max-w-xl rounded-[2rem] border border-[#c8b48a]/55 bg-[#f8f1df] p-6 text-[#1f2a2f] shadow-[0_24px_70px_rgba(20,28,32,0.3)]"
+            className="relative w-full max-w-xl overflow-hidden rounded-[1.35rem] border border-[#a98c5a] bg-[radial-gradient(circle_at_28%_18%,#fbf6e8,#f2e8cf_62%,#e8d9b6)] px-6 pb-7 pt-7 text-[#2f2a20] shadow-[0_24px_60px_rgba(30,24,14,0.38)]"
             data-deck-interactive="true"
             onClick={(event) => event.stopPropagation()}
           >
+            <div aria-hidden="true" className="pointer-events-none absolute inset-[7px] rounded-[1rem] border border-[#c4a874]/70" />
+            <EdgeLabel text={gameName} />
             <div className="flex items-start justify-between gap-4">
               <div>
                 {isAnywhere ? <AnywhereTag challenge={detailChallenge} /> : null}
-                <h3 className="font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#1f2a2f]">
+                <h3 className="font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold" style={{ color: INK }}>
                   {detailChallenge.title}
                 </h3>
               </div>
               <button
-                className="rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#24343a] transition hover:bg-[#f2ead6]"
+                className="relative rounded-xl border border-[#a98c5a] bg-[#fbf5e5] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#4f3f2a] transition hover:bg-[#f5ead0]"
                 data-deck-interactive="true"
                 onClick={() => setDetailChallengeId(null)}
                 type="button"
@@ -537,7 +551,8 @@ export function ChallengeDeck({
 
             <div className="mt-3 flex flex-wrap items-center gap-2"><ScoreChips challenge={detailChallenge} />{isJudgedChallengeConfig(detailChallenge.config) ? <JudgedMark challenge={detailChallenge} /> : null}</div>
             {isJudgedChallengeConfig(detailChallenge.config) ? <p className="mt-2 text-xs text-[#6b777b]">Judged bonus: complete it like any challenge. The judges decide yes or no, and a yes earns the points.</p> : null}
-            <p className="mt-4 text-sm leading-7 text-[#44545c]">{getLongDescription(detailChallenge)}</p>
+            <div className="mt-3"><Flourish /></div>
+            <p className="relative mt-3 text-[15px] leading-7 text-[#3d362a]">{getLongDescription(detailChallenge)}</p>
             <div className="mt-4"><BonusList challenge={detailChallenge} /></div>
 
           </div>
@@ -761,6 +776,16 @@ function getLongDescription(challenge: Challenge): string {
 function getConfigString(challenge: Challenge, key: string): string | null {
   const value = challenge.config?.[key];
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+// Corner index like a playing card: the points and Turf War's flag suit.
+function CardCorner({ points, flipped = false }: { points: number; flipped?: boolean }) {
+  return (
+    <div aria-hidden="true" className={['pointer-events-none absolute flex w-6 flex-col items-center leading-none', flipped ? 'bottom-3 right-2.5 rotate-180' : 'left-2.5 top-4'].join(' ')}>
+      <span className="font-[Georgia,Times_New_Roman,serif] text-lg font-bold" style={{ color: INK }}>{points}</span>
+      <span className="mt-0.5"><FlagGlyph size={13} /></span>
+    </div>
+  );
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {

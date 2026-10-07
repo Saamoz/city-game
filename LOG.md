@@ -326,3 +326,8 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Game end: if every judged submission already has a decision (or there were none), the point-challenge `onGameEnd` publishes straight away (`publishJudgingIfDecided`). Otherwise players see a "Waiting for the judges" screen instead of the results; it refreshes on state-version change and every 10 s, and turns into the results once the admin presses "Show results" (the old "Publish scores").
 - `getJudgingSummary` reports `none` when no team submitted a judged challenge, so such games never wait.
 - Win condition: a Challenge Hunt game now ends once the regular challenges are done, even if some teams skipped judged bonuses. A set made only of judged challenges still ends once every team has done each one.
+
+## Paper Cards for Turf War, Scrap-Paper Standings and Feed (2026-10-07)
+
+- Turf War deck cards now use Challenge Hunt's parchment card language (inner frame, game name on the edge, corner index with points and a flag suit, flourish divider, ink/rust buttons) while keeping the peeking, swipeable deck and Claim → Confirm flow. Details opens a parchment card too.
+- Standings and feed (both modes, plus the results-screen timeline) are a crumpled scrap of notepaper: crease shading, torn edges, tape, handwriting (Caveat + Kalam, self-hosted in `client/public/fonts`), ballpoint-blue ink, the leader's score circled in red pen, your team highlighted, and a ruled notepad with time in the margin for the feed. The sheet unfolds from a ball when opened and crumples away when closed.

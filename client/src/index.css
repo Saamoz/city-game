@@ -1,3 +1,20 @@
+/* Handwriting fonts (SIL Open Font License), self-hosted so they work offline from the Home Screen. */
+@font-face {
+  font-family: 'Caveat';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/caveat-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Kalam';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/kalam-latin-400.woff2') format('woff2');
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -298,3 +315,89 @@ input {
 .map-card-marker:hover .map-card-marker__card { transform: rotate(-2deg) scale(1.08); }
 .map-card-marker.is-selected .map-card-marker__card { transform: rotate(0deg) scale(1.14); background: #4f3f2a; box-shadow: inset 0 0 0 2px #4f3f2a, inset 0 0 0 2.75px rgba(246,237,216,.5), 0 6px 12px rgba(40,30,15,.35); }
 .map-card-marker.is-selected .map-card-marker__card svg { fill: #f3e6c8; }
+
+/* Scrap paper: the standings and feed look like a crumpled sheet of notepaper, smoothed out. */
+.scrap-paper-wrap {
+  filter: drop-shadow(0 18px 28px rgba(40, 30, 15, 0.28)) drop-shadow(0 2px 3px rgba(40, 30, 15, 0.18));
+}
+
+.scrap-paper {
+  position: relative;
+  color: #233a68;
+  background-color: #f8f2e2;
+  background-image:
+    linear-gradient(118deg, transparent 0 37.6%, rgba(255, 255, 255, 0.7) 38%, rgba(110, 88, 52, 0.13) 38.7%, transparent 41%),
+    linear-gradient(64deg, transparent 0 55%, rgba(110, 88, 52, 0.11) 55.4%, rgba(255, 255, 255, 0.6) 56.1%, transparent 58.5%),
+    linear-gradient(172deg, transparent 0 21%, rgba(255, 255, 255, 0.55) 21.3%, rgba(110, 88, 52, 0.1) 22%, transparent 24.5%),
+    linear-gradient(14deg, transparent 0 75%, rgba(110, 88, 52, 0.1) 75.3%, rgba(255, 255, 255, 0.5) 76%, transparent 78.5%),
+    linear-gradient(97deg, transparent 0 82%, rgba(255, 255, 255, 0.45) 82.3%, rgba(110, 88, 52, 0.08) 82.9%, transparent 85%),
+    conic-gradient(from 200deg at 30% 38%, rgba(110, 88, 52, 0.07), rgba(255, 255, 255, 0.16), rgba(110, 88, 52, 0.09), rgba(255, 255, 255, 0.12), rgba(110, 88, 52, 0.05), rgba(110, 88, 52, 0.07)),
+    conic-gradient(from 30deg at 72% 70%, rgba(255, 255, 255, 0.14), rgba(110, 88, 52, 0.08), rgba(255, 255, 255, 0.1), rgba(110, 88, 52, 0.07), rgba(255, 255, 255, 0.14)),
+    radial-gradient(120% 80% at 50% 0%, transparent 60%, rgba(150, 120, 70, 0.14)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.4 0 0 0 0 0.32 0 0 0 0 0.2 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* The heavier creases of the freshly opened ball fade as the sheet settles. */
+.scrap-paper::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.45;
+  background-image:
+    conic-gradient(from 120deg at 18% 72%, rgba(110, 88, 52, 0.12), transparent 25%, rgba(255, 255, 255, 0.3) 40%, transparent 60%, rgba(110, 88, 52, 0.1)),
+    conic-gradient(from 300deg at 84% 24%, rgba(255, 255, 255, 0.28), transparent 30%, rgba(110, 88, 52, 0.12) 52%, transparent 75%),
+    conic-gradient(from 80deg at 52% 52%, transparent, rgba(110, 88, 52, 0.08) 15%, transparent 30%, rgba(255, 255, 255, 0.2) 55%, transparent 70%);
+  animation: scrap-settle 0.9s ease-out;
+}
+
+/* Notepad rules and a red margin line, for the feed. */
+.scrap-paper--ruled .scrap-paper__lines {
+  background-image:
+    linear-gradient(90deg, transparent 0 3.1rem, rgba(205, 80, 70, 0.45) 3.1rem, rgba(205, 80, 70, 0.45) calc(3.1rem + 1.5px), transparent calc(3.1rem + 1.5px)),
+    repeating-linear-gradient(180deg, transparent 0 calc(1.75rem - 1px), rgba(70, 110, 170, 0.22) calc(1.75rem - 1px) 1.75rem);
+  background-attachment: local;
+}
+
+.scrap-paper-enter { animation: scrap-unfold 0.62s cubic-bezier(0.2, 0.9, 0.25, 1.05) both; }
+.scrap-paper-exit { animation: scrap-crumple 0.24s cubic-bezier(0.5, 0, 0.75, 0) both; }
+
+@keyframes scrap-unfold {
+  0% { opacity: 0; transform: translateY(-30%) scale(0.16) rotate(-30deg); }
+  30% { opacity: 1; transform: translateY(-8%) scale(0.5) rotate(14deg); }
+  68% { transform: translateY(0) scale(1.03) rotate(-2.2deg); }
+  100% { transform: translateY(0) scale(1) rotate(var(--scrap-tilt, -0.6deg)); }
+}
+
+@keyframes scrap-crumple {
+  0% { opacity: 1; transform: scale(1) rotate(var(--scrap-tilt, -0.6deg)); }
+  100% { opacity: 0; transform: translateY(-25%) scale(0.2) rotate(22deg); }
+}
+
+@keyframes scrap-settle {
+  from { opacity: 1; }
+  to { opacity: 0.45; }
+}
+
+/* A strip of tape holding the note to the screen. */
+.scrap-tape {
+  position: absolute;
+  top: -0.7rem;
+  left: 50%;
+  width: 5.5rem;
+  height: 1.5rem;
+  transform: translateX(-50%) rotate(-3deg);
+  background: linear-gradient(180deg, rgba(236, 226, 196, 0.82), rgba(222, 208, 170, 0.78));
+  box-shadow: 0 1px 2px rgba(60, 45, 20, 0.18);
+  clip-path: polygon(3% 8%, 9% 0, 17% 7%, 26% 1%, 38% 6%, 50% 0, 62% 6%, 74% 1%, 85% 7%, 94% 0, 100% 9%, 97% 92%, 90% 100%, 80% 93%, 68% 99%, 55% 94%, 43% 100%, 31% 94%, 19% 100%, 8% 93%, 0 98%);
+}
+
+/* Yellow highlighter stroke behind your own team. */
+.scrap-highlight {
+  background: linear-gradient(100deg, transparent 0.4rem, rgba(255, 226, 92, 0.55) 0.7rem, rgba(255, 220, 70, 0.48) calc(100% - 0.8rem), transparent calc(100% - 0.3rem));
+  border-radius: 0.6rem 0.3rem 0.7rem 0.25rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrap-paper-enter, .scrap-paper-exit, .scrap-paper::after { animation: none; }
+}
