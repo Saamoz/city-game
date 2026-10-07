@@ -94,6 +94,16 @@ npx web-push generate-vapid-keys
 ```
  
 Copy the public key to both `VAPID_PUBLIC_KEY` and `VITE_VAPID_PUBLIC_KEY`. Copy the private key to `VAPID_PRIVATE_KEY`.
+
+### Push notification checklist
+
+- `VITE_VAPID_PUBLIC_KEY` is baked into the client **at build time**. After setting or changing it, redeploy (a restart alone keeps the old bundle). Without it the "Zone Alerts" prompt never appears.
+- `VAPID_SUBJECT` must be a real contact: `mailto:you@yourdomain.com` or an `https://` URL. Apple's push service rejects placeholder or `localhost` subjects.
+- The public and private keys must be a matching pair. Changing keys invalidates existing subscriptions; players turn alerts on again from the lobby or the in-game menu.
+- On boot the server logs `push notifications disabled: …` if any VAPID variable is missing or invalid, and `push notification failed` with the push service's status code for each failed send.
+- **iPhone / iPad:** Web Push only works when the site is added to the Home Screen (Share → Add to Home Screen) and opened from that icon, on iOS 16.4 or later. In Safari tabs the app shows that hint instead of the prompt.
+- **Android:** works in Chrome as a normal tab or installed app. Make sure Chrome's notifications aren't blocked in Android settings.
+- Only Turf War games send pushes (zone captures, and claim expiry warnings).
  
 ---
  

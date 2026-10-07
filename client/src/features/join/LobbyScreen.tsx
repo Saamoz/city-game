@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Game, MapDefinition, MapZone, Player, Team } from '@city-game/shared';
 import { collectGeometryPositions } from '../game/mapGeometry';
+import { PushInstallHint } from './PushInstallHint';
 
 interface LobbyScreenProps {
   game: Game;
@@ -15,6 +16,7 @@ interface LobbyScreenProps {
   kickingPlayerId: string | null;
   isLeavingTeam: boolean;
   canShowNotificationPrompt: boolean;
+  showNotificationInstallHint: boolean;
   notificationPromptMessage: string | null;
   notificationPromptPending: boolean;
   isCurrentPlayerReady: boolean;
@@ -44,6 +46,7 @@ export function LobbyScreen({
   kickingPlayerId,
   isLeavingTeam,
   canShowNotificationPrompt,
+  showNotificationInstallHint,
   notificationPromptMessage,
   notificationPromptPending,
   isCurrentPlayerReady,
@@ -155,6 +158,12 @@ export function LobbyScreen({
                     </button>
                   </div>
                 </div>
+              </div>
+            ) : null}
+            {showNotificationInstallHint ? (
+              <div className="mx-auto mt-5 max-w-2xl rounded-[1.4rem] border border-[#d2c19d]/70 bg-[#fbf6ea]/96 px-4 py-4 text-left shadow-[0_16px_34px_rgba(31,42,47,0.08)] sm:px-5">
+                <p className="text-[11px] uppercase tracking-[0.24em] text-[#8c7a57]">Zone Alerts</p>
+                <PushInstallHint className="mt-1" />
               </div>
             ) : null}
           </header>

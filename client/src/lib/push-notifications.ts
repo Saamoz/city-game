@@ -12,6 +12,19 @@ export function supportsPushNotifications(): boolean {
   );
 }
 
+// iPhone and iPad only offer Web Push to sites added to the Home Screen and opened from there.
+export function needsHomeScreenInstallForPush(): boolean {
+  if (!vapidPublicKey || typeof window === 'undefined' || supportsPushNotifications()) {
+    return false;
+  }
+
+  const isAppleMobile = /iPhone|iPad|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches
+    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  return isAppleMobile && !isStandalone;
+}
+
 export function getNotificationPermission(): NotificationPermission {
   if (typeof window === 'undefined' || !('Notification' in window)) {
     return 'default';

@@ -45,14 +45,14 @@ describe('mode registry', () => {
         type: 'points',
         label: 'Points',
         scope: 'team',
-        description: 'Primary scoring resource for Territory win conditions and standings.',
+        description: 'Primary scoring resource for win conditions and standings.',
         initialBalance: 0,
       },
       {
         type: 'coins',
         label: 'Coins',
         scope: 'team',
-        description: 'Secondary team currency reserved for future Territory mechanics.',
+        description: 'Secondary team currency reserved for future mechanics.',
         initialBalance: 0,
       },
     ]);

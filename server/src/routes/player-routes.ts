@@ -684,6 +684,7 @@ function serializePlayer(player: typeof players.$inferSelect) {
 function serializePublicPlayer(player: typeof players.$inferSelect) {
   return {
     ...serializePlayer(player),
+    pushSubscription: null,
     lastLat: null,
     lastLng: null,
     lastGpsError: null,

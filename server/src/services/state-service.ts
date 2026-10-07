@@ -64,7 +64,8 @@ export async function loadGameState(db: DatabaseClient, gameId: string): Promise
     shared: {
       game: serializeGameRecord(game),
       teams: teamRows.map((team) => serializeTeamRow(team)),
-      players: playerRows.map((player) => serializePlayerRow(player)),
+      // Push subscriptions are private to their owner; buildViewerSnapshot restores the viewer's own.
+      players: playerRows.map((player) => ({ ...serializePlayerRow(player), pushSubscription: null })),
       teamLocations,
       zones: zoneRows,
       challenges: challengeRows.map((challenge) => serializeChallengeRow(challenge)),
@@ -86,14 +87,15 @@ export function buildViewerSnapshot(
   state: LoadedGameState,
   playerId: string,
 ): GameStateSnapshot {
-  const viewerPlayer = state.shared.players.find((player) => player.id === playerId);
+  const viewerRow = state.playerRows.find((player) => player.id === playerId);
 
-  if (!viewerPlayer) {
+  if (!viewerRow) {
     throw new AppError(errorCodes.unauthorized, {
       message: 'Player cannot access another game.',
     });
   }
 
+  const viewerPlayer = serializePlayerRow(viewerRow);
   const viewerTeam = viewerPlayer.teamId ? state.shared.teams.find((team) => team.id === viewerPlayer.teamId) ?? null : null;
   const filteredAnnotations = filterAnnotationsForViewer(state.annotationRows, state.playerRows, viewerPlayer.teamId).map((annotation) =>
     serializeAnnotationRow(annotation),
@@ -101,6 +103,7 @@ export function buildViewerSnapshot(
 
   const fullSnapshot = {
     ...state.shared,
+    players: state.shared.players.map((player) => (player.id === viewerPlayer.id ? viewerPlayer : player)),
     player: viewerPlayer,
     team: viewerTeam,
     annotations: filteredAnnotations,

@@ -51,6 +51,7 @@ import {
   buildZoneScoreboard,
 } from './Phase32Panels';
 import { ZoneLayer } from './ZoneLayer';
+import { NotificationMenuItem } from './NotificationMenuItem';
 import { collectGeometryPositions, findContainingZone } from './mapGeometry';
 import { clearTeamLocationMarkers, syncTeamLocationMarkers } from './teamLocationMarkers';
 import { useGeolocation } from './useGeolocation';
@@ -1332,6 +1333,9 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               >
                 Feed
               </button>
+              {snapshot?.game.modeKey === 'territory' && snapshot.player?.teamId ? (
+                <NotificationMenuItem isSubscribed={Boolean(snapshot.player.pushSubscription)} />
+              ) : null}
               <button
                 className="w-full rounded-xl border border-[#29414b] bg-[#24343a] px-3 py-2.5 text-left text-sm font-semibold text-[#f4ead7] transition hover:bg-[#1d2b30]"
                 onClick={onLeaveMap}

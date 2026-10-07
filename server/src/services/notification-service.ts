@@ -1,6 +1,7 @@
 import { and, eq, isNotNull } from 'drizzle-orm';
 import type { PushSubscription as WebPushSubscription, RequestOptions } from 'web-push';
-import * as webPush from 'web-push';
+// web-push is CommonJS: under Node ESM its functions only exist on the default export.
+import webPush from 'web-push';
 import type { GameSettings, JsonObject, PushSubscriptionData } from '@city-game/shared';
 import { games, players } from '../db/schema.js';
 import type { DatabaseClient } from '../db/connection.js';
@@ -28,8 +29,14 @@ export interface PushClient {
   ): Promise<unknown>;
 }
 
+export interface NotificationLogger {
+  info(object: Record<string, unknown>, message: string): void;
+  warn(object: Record<string, unknown>, message: string): void;
+}
+
 export interface NotificationServiceOptions {
   db: DatabaseClient;
+  logger?: NotificationLogger;
   pushClient?: PushClient;
   now?: () => Date;
   rateLimitMs?: number;
@@ -51,9 +58,16 @@ export function createNotificationService(options: NotificationServiceOptions): 
   if (isConfigured) {
     try {
       pushClient.setVapidDetails(vapidSubject!, vapidPublicKey!, vapidPrivateKey!);
-    } catch {
+    } catch (error) {
       isConfigured = false;
+      options.logger?.warn({ err: error }, 'push notifications disabled: invalid VAPID details');
     }
+  } else {
+    options.logger?.info({
+      hasPublicKey: Boolean(vapidPublicKey),
+      hasPrivateKey: Boolean(vapidPrivateKey),
+      hasSubject: Boolean(vapidSubject),
+    }, 'push notifications disabled: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT must all be set');
   }
 
   return {
@@ -127,7 +141,15 @@ export function createNotificationService(options: NotificationServiceOptions): 
             continue;
           }
 
-          throw error;
+          // A push is best-effort: one failing device must not stop the rest of the team, or the
+          // caller's work after it (win checks, claim expiry).
+          options.logger?.warn({
+            playerId: player.id,
+            statusCode: getErrorField(error, 'statusCode'),
+            responseBody: getErrorField(error, 'body'),
+            endpointHost: getEndpointHost(subscription.endpoint),
+            err: error,
+          }, 'push notification failed');
         }
       }
     },
@@ -182,6 +204,18 @@ function mapUrgency(priority: TeamNotificationInput['priority']): RequestOptions
       return 'low';
     default:
       return 'normal';
+  }
+}
+
+function getErrorField(error: unknown, field: string): unknown {
+  return error && typeof error === 'object' && field in error ? (error as Record<string, unknown>)[field] : undefined;
+}
+
+function getEndpointHost(endpoint: string): string | null {
+  try {
+    return new URL(endpoint).host;
+  } catch {
+    return null;
   }
 }
 

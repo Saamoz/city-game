@@ -28,6 +28,7 @@ import { buildRenderedZoneGeometry, collectGeometryPositions } from '../game/map
 import { clearTeamLocationMarkers, syncTeamLocationMarkers } from '../game/teamLocationMarkers';
 import {
   getNotificationPermission,
+  needsHomeScreenInstallForPush,
   subscribeToPushNotifications,
   supportsPushNotifications,
 } from '../../lib/push-notifications';
@@ -44,7 +45,7 @@ interface JoinFlowProps {
 }
 
 type LoadStatus = 'loading' | 'ready' | 'empty' | 'error';
-type PushPromptState = 'hidden' | 'ready' | 'subscribing' | 'enabled';
+type PushPromptState = 'hidden' | 'install_hint' | 'ready' | 'subscribing' | 'enabled';
 
 const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env.MAPBOX_ACCESS_TOKEN ?? '').trim();
 
@@ -290,8 +291,15 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
       return;
     }
 
-    if (!supportsPushNotifications()) {
+    // Only Turf War sends pushes (zone captures and claim expiry warnings).
+    if (game.modeKey !== 'territory') {
       setPushPromptState('hidden');
+      setPushPromptMessage(null);
+      return;
+    }
+
+    if (!supportsPushNotifications()) {
+      setPushPromptState(needsHomeScreenInstallForPush() ? 'install_hint' : 'hidden');
       setPushPromptMessage(null);
       return;
     }
@@ -697,6 +705,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
             kickingPlayerId={kickingPlayerId}
             isLeavingTeam={isLeavingTeam}
             canShowNotificationPrompt={pushPromptState === 'ready' || pushPromptState === 'subscribing'}
+            showNotificationInstallHint={pushPromptState === 'install_hint'}
             notificationPromptMessage={pushPromptMessage}
             notificationPromptPending={pushPromptState === 'subscribing'}
             onEnableNotifications={handleEnableNotifications}

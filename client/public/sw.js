@@ -1,3 +1,13 @@
+// Take over immediately: installed apps on phones are rarely fully closed, so a waiting
+// worker would otherwise keep the old push handling around indefinitely.
+self.addEventListener('install', () => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
 self.addEventListener('push', (event) => {
   if (!event.data) {
     return;
@@ -35,8 +45,13 @@ self.addEventListener('notificationclick', (event) => {
     const matchingClient = windows.find((client) => 'focus' in client);
 
     if (matchingClient) {
-      await matchingClient.navigate(targetUrl);
-      await matchingClient.focus();
+      // navigate() rejects for windows this worker doesn't control yet; focusing is still useful.
+      const focused = await matchingClient.focus();
+      try {
+        await (focused ?? matchingClient).navigate(targetUrl);
+      } catch {
+        // Leave the focused window where it is.
+      }
       return;
     }
 

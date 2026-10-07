@@ -295,3 +295,13 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - `manifest.webmanifest` and `theme-color` added so the home-screen install shows Saadventure with the logo.
 - `BrandMark` (`client/src/components`) shows the logo on the join header, loading/empty/error screens and admin sidebar. `SkylineBackdrop` lays a faint two-layer skyline (`client/public/skyline.svg`, a seamless tile) along the bottom of the join and status screens; not on the spectator map or in-game.
 - PNGs were rendered from the SVG with headless Chromium; regenerate them if the SVG changes.
+
+## Push Notifications Fixed (2026-10-07)
+
+- Root cause: `import * as webPush from 'web-push'` gives a namespace without `setVapidDetails` under Node ESM (web-push is CommonJS), so `createNotificationService` threw during setup, swallowed it, and disabled push. No push was ever sent in production. Now a default import, with a test against the real client.
+- A failing push (any status except 404/410) is logged and skipped instead of thrown, so it no longer aborts the rest of the team, the post-capture win check, or the claim-timeout sweep. Startup logs say why push is disabled when it is.
+- `sw.js` skips waiting and claims clients on activate (installed apps are rarely fully closed), and a notification tap focuses the app even when `navigate()` is refused.
+- The lobby prompt only shows in Turf War (the only mode that sends pushes). Players who skip the lobby can turn alerts on from the in-game menu (`NotificationMenuItem`). iPhone Safari shows an Add to Home Screen hint, since iOS only offers push to installed web apps.
+- Other players' `pushSubscription` is no longer sent in snapshots or public player payloads.
+- Verified locally: the service worker shows a delivered push (CDP `deliverPushMessage`) with the logo icon; the server sends a VAPID-signed aes128gcm push to a local fake push service, which decrypts to the expected payload. Real subscription needs a phone (headless Chromium has no push service).
+- Logo: the trail now runs along the ground in front of the skyline, ending at the pin.
