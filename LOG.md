@@ -256,3 +256,12 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Prod test game "TEST · Point Challenge Preview" (`2e9effd0-6e4a-4d2d-a863-0b9efc62dec8`, set `4215d2f4-3046-4568-b61d-bfc23faf143b`): 15 Chicago challenges (6 pins, 4 areas, 5 anywhere; 3 judged), all in play, teams Test Foxes / Test Owls. A "Claude (test)" player is on Test Owls.
 - Found on prod: `.point-challenge-marker` set `position: relative`, overriding Mapbox's absolute marker positioning, so pins stacked away from their locations once there were several. Fixed in d51b7d8.
 - Admin routes are unauthenticated on prod (V1 no-op `requireAdmin`), which is how the test game was created via the API.
+
+## Card UI Redesign (2026-10-07)
+
+- Point games use `PointDeck`: closed, a centred fan of three cards ("Challenges · N left"); open, a row of dense mini playing cards (points + suit in the corner, title, where, short description) with All / On map / Anywhere filters. Tapping a mini card, a pin or an area opens `CardViewer`: one fixed-size full-screen card (`ChallengeCardFace`) with swipe left/right between cards.
+- `ChallengeCardFace`: parchment playing card with corner indices (points + suit: compass star = pin, hatched plot = area, wind rose = anywhere), short description, "More info" toggle for the long description, a "Bonus" list with (i) toggles for each bonus's `description`, map button for located challenges, and a two-tap Complete. No radius bubble; distance/"you're here" sits in the type line and the button.
+- Bonuses have an optional `description` (editor: Details field).
+- Map: pins are small parchment cards on an ink stem (same for judged and regular); areas are a subdued rust fill with no labels. Area taps are handled by a map-level click + `queryRenderedFeatures` (layer-scoped listeners added before the layer exists never fire). Area layers are added without waiting for `isStyleLoaded()`, which stays false while tiles load.
+- Fixed: the closed deck was off-centre (each hidden card in the fan added ~8 px of width) and dropped too far (its height was measured once, while open; now a ResizeObserver keeps it current). A swipe in the viewer no longer counts as a backdrop tap.
+- Territory games keep the old `ChallengeDeck`.

@@ -9,6 +9,7 @@ export interface ChallengeBonus {
   id: string;
   label: string;
   points: number;
+  description?: string; // optional longer explanation, shown behind an info toggle
 }
 
 export function getChallengeBonuses(config: unknown): ChallengeBonus[] {
@@ -17,9 +18,14 @@ export function getChallengeBonuses(config: unknown): ChallengeBonus[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((entry): ChallengeBonus[] => {
     if (!entry || typeof entry !== 'object') return [];
-    const { id, label, points } = entry as { id?: unknown; label?: unknown; points?: unknown };
+    const { id, label, points, description } = entry as { id?: unknown; label?: unknown; points?: unknown; description?: unknown };
     if (typeof id !== 'string' || !id || typeof label !== 'string' || !label.trim()) return [];
-    return [{ id, label: label.trim(), points: typeof points === 'number' && Number.isFinite(points) ? Math.round(points) : 0 }];
+    return [{
+      id,
+      label: label.trim(),
+      points: typeof points === 'number' && Number.isFinite(points) ? Math.round(points) : 0,
+      ...(typeof description === 'string' && description.trim() ? { description: description.trim() } : {}),
+    }];
   });
 }
 

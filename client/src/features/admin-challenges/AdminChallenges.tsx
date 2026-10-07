@@ -79,6 +79,7 @@ interface BonusFormRow {
   id: string;
   label: string;
   points: string;
+  description: string;
 }
 
 // Within a point-linked set, each item is either pinned to the map or doable anywhere.
@@ -393,7 +394,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
     const judgedMaxPoints = Math.floor(Number(itemForm.judgedMaxPoints));
     const basePoints = itemForm.pointValue.trim() === '' ? DEFAULT_CHALLENGE_POINTS : Math.max(0, Math.floor(Number(itemForm.pointValue) || 0));
     const bonuses = itemForm.bonuses
-      .map((bonus) => ({ id: bonus.id, label: bonus.label.trim(), points: Math.floor(Number(bonus.points) || 0) }))
+      .map((bonus) => ({ id: bonus.id, label: bonus.label.trim(), points: Math.floor(Number(bonus.points) || 0), ...(bonus.description.trim() ? { description: bonus.description.trim() } : {}) }))
       .filter((bonus) => bonus.label);
     const payload = {
       mapZoneId: setForm.locationMode === 'zone' ? itemForm.mapZoneId : null,
@@ -915,7 +916,7 @@ function buildItemForm(item: ChallengeSetItem): ItemFormState {
     mapPoint: item.mapPoint,
     pointRadiusMeters: String(typeof item.config?.point_radius_meters === 'number' ? item.config.point_radius_meters : 40),
     pointValue: String(getBasePoints(item.scoring)),
-    bonuses: getChallengeBonuses(item.config).map((bonus) => ({ id: bonus.id, label: bonus.label, points: String(bonus.points) })),
+    bonuses: getChallengeBonuses(item.config).map((bonus) => ({ id: bonus.id, label: bonus.label, points: String(bonus.points), description: bonus.description ?? '' })),
     placement: item.mapPoint ? 'pinned' : getChallengeArea(item.config) ? 'area' : 'anywhere',
     area: getChallengeArea(item.config),
     locationHint: typeof item.config?.location_hint === 'string' ? item.config.location_hint : '',
@@ -941,14 +942,17 @@ function BonusEditor({ rows, isJudged, onChange }: { rows: BonusFormRow[]; isJud
       <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a6a48]">Bonus Tasks</span>
       <div className="space-y-2">
         {rows.map((row) => (
-          <div key={row.id} className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto] items-center gap-2">
-            <input aria-label="Bonus task" className={inputClassName} maxLength={120} onChange={(event) => update(row.id, { label: event.target.value })} placeholder="e.g. Do it in costume" value={row.label} />
-            <input aria-label="Bonus points" className={inputClassName + ' text-right'} onChange={(event) => update(row.id, { points: event.target.value })} placeholder="pts" type="number" value={row.points} />
-            <button aria-label="Remove bonus" className="h-9 w-9 rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] text-sm text-[#7d2d26]" onClick={() => onChange(rows.filter((entry) => entry.id !== row.id))} type="button">×</button>
+          <div key={row.id} className="space-y-1.5 rounded-2xl border border-[#d6c59d]/55 bg-white/40 p-2">
+            <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto] items-center gap-2">
+              <input aria-label="Bonus task" className={inputClassName} maxLength={60} onChange={(event) => update(row.id, { label: event.target.value })} placeholder="Short, e.g. Do it in costume" value={row.label} />
+              <input aria-label="Bonus points" className={inputClassName + ' text-right'} onChange={(event) => update(row.id, { points: event.target.value })} placeholder="pts" type="number" value={row.points} />
+              <button aria-label="Remove bonus" className="h-9 w-9 rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] text-sm text-[#7d2d26]" onClick={() => onChange(rows.filter((entry) => entry.id !== row.id))} type="button">×</button>
+            </div>
+            <textarea aria-label="Bonus details" className={inputClassName + ' h-14 w-full'} maxLength={400} onChange={(event) => update(row.id, { description: event.target.value })} placeholder="Details (optional): shown behind an info button" value={row.description} />
           </div>
         ))}
       </div>
-      {rows.length < MAX_CHALLENGE_BONUSES ? <button className="mt-2 rounded-full border border-dashed border-[#a88c52] bg-[#fff8eb] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#5d4d33]" onClick={() => onChange([...rows, { id: 'bonus-' + crypto.randomUUID().slice(0, 8), label: '', points: '1' }])} type="button">+ Add bonus</button> : null}
+      {rows.length < MAX_CHALLENGE_BONUSES ? <button className="mt-2 rounded-full border border-dashed border-[#a88c52] bg-[#fff8eb] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#5d4d33]" onClick={() => onChange([...rows, { id: 'bonus-' + crypto.randomUUID().slice(0, 8), label: '', points: '1', description: '' }])} type="button">+ Add bonus</button> : null}
       <p className="mt-1.5 text-xs leading-5 text-[#6b777b]">{isJudged ? 'Up to ' + MAX_CHALLENGE_BONUSES + '. Teams tick the ones they did when completing; judges approve each one.' : 'Optional extras, up to ' + MAX_CHALLENGE_BONUSES + '. Teams tick the ones they did when completing, and each adds its points.'}</p>
     </div>
   );

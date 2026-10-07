@@ -34,8 +34,10 @@ import {
 } from '../../lib/realtime';
 import { useGameStore, type RealtimeConnectionStatus } from '../../store/gameStore';
 import { ChallengeDeck, type CardKind } from './ChallengeDeck';
-import { PointChallengeCard, PointChallengeLayer, getPointLocation, isPointChallenge } from './PointChallenges';
-import { ChallengeAreaLayer, getAreaBounds, getAreaDistance, isAreaChallenge } from './ChallengeAreas';
+import { PointChallengeLayer, getPointLocation, getPointRadius, isPointChallenge } from './PointChallenges';
+import { CardViewer, type CardContext } from './CardViewer';
+import { PointDeck } from './PointDeck';
+import { ChallengeAreaLayer, getAreaBounds, getAreaDistance, isAreaChallenge, isInsideArea } from './ChallengeAreas';
 import { GameResultsScreen } from './GameResultsScreen';
 import { formatPoints, type CompletionExtras } from './ChallengeScoring';
 import { isJudgedChallenge } from './JudgedChallenges';
@@ -72,6 +74,9 @@ interface CompletedCardViewModel {
   pointsEarned: number;
 }
 
+// How much of the closed deck stays on screen.
+const DECK_PEEK_PX = 76;
+
 const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env.MAPBOX_ACCESS_TOKEN ?? '').trim();
 
 export function GameView({ gameId, onLeaveMap }: GameViewProps) {
@@ -90,13 +95,15 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const [mapForLayer, setMapForLayer] = useState<mapboxgl.Map | null>(null);
   const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
   const [selectedPointChallengeId, setSelectedPointChallengeId] = useState<string | null>(null);
+  // Full-screen card viewer: the cards in the order they were shown, opened at one of them.
+  const [cardViewer, setCardViewer] = useState<{ startId: string; orderedIds: string[] } | null>(null);
   const [isDeckOpen, setIsDeckOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showMobileCompleted, setShowMobileCompleted] = useState(false);
   const [deckDragY, setDeckDragY] = useState(0);
   const [isDraggingDeck, setIsDraggingDeck] = useState(false);
   const deckWrapperRef = useRef<HTMLDivElement | null>(null);
-  const deckWrapperHeightRef = useRef(320);
+  const [deckWrapperHeight, setDeckWrapperHeight] = useState(320);
   const deckSwipeRef = useRef({ active: false, startX: 0, startY: 0, startTime: 0, committed: false });
   const feedAbortRef = useRef<AbortController | null>(null);
   const [activeOverlay, setActiveOverlay] = useState<'scoreboard' | 'feed' | null>(null);
@@ -177,12 +184,16 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  // Measure deck wrapper height once content is available so peek translateY is accurate.
+  // Keep the deck's height current (it changes between the closed fan and the open row), so the
+  // closed deck always leaves exactly the peek strip on screen.
   useEffect(() => {
-    if (snapshot && deckWrapperRef.current) {
-      deckWrapperHeightRef.current = deckWrapperRef.current.offsetHeight;
-    }
-  }, [snapshot?.game.stateVersion]);
+    const element = deckWrapperRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => setDeckWrapperHeight(element.offsetHeight));
+    observer.observe(element);
+    setDeckWrapperHeight(element.offsetHeight);
+    return () => observer.disconnect();
+  }, [Boolean(snapshot)]);
 
 
 
@@ -585,24 +596,58 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   // Pure pin sets have no deck at all; mixed sets keep it for the anywhere cards.
   const showDeck = !isPointMode || deckChallenges.length > 0;
   const teamPoints = snapshot?.teamResources[team?.id ?? '']?.points ?? 0;
-  const selectedPointChallenge = pointChallenges.find((challenge) => challenge.id === selectedPointChallengeId) ?? null;
   const distanceToChallenge = (challenge: Challenge) => {
     if (isAreaChallenge(challenge)) return getAreaDistance(challenge, currentPoint);
     const point = getPointLocation(challenge);
     return currentPoint && point ? distanceBetweenLngLat(currentPoint, [point.coordinates[0] as number, point.coordinates[1] as number]) : null;
   };
-  const selectedPointDistance = selectedPointChallenge ? distanceToChallenge(selectedPointChallenge) : null;
+  const isChallengeInRange = (challenge: Challenge) => {
+    const distance = distanceToChallenge(challenge);
+    if (isAreaChallenge(challenge)) return isInsideArea(distance);
+    if (isPointChallenge(challenge)) return distance !== null && distance <= getPointRadius(challenge);
+    return true;
+  };
+  const openCardViewer = (challengeId: string, ordered: Challenge[]) => {
+    setCardViewer({ startId: challengeId, orderedIds: ordered.map((challenge) => challenge.id) });
+  };
+  // Tapping a pin or area opens its card, with the rest of the deck to swipe through.
+  const openCardFromMap = (challengeId: string) => {
+    setSelectedPointChallengeId(challengeId);
+    const ordered = deckChallenges.filter((challenge) => challenge.status === 'available').sort((left, right) => left.sortOrder - right.sortOrder);
+    openCardViewer(challengeId, ordered.some((challenge) => challenge.id === challengeId) ? ordered : [...ordered, ...teamChallenges.filter((challenge) => challenge.id === challengeId)]);
+  };
+  const viewerChallenges = cardViewer
+    ? cardViewer.orderedIds.map((id) => teamChallenges.find((challenge) => challenge.id === id && challenge.status === 'available')).filter((challenge): challenge is Challenge => Boolean(challenge))
+    : [];
+  const getCardContext = (challenge: Challenge): CardContext => {
+    const suit = getCardKind(challenge);
+    const rerollVote = snapshot?.challengeReroll.votes.find((vote) => vote.challengeId === challenge.id);
+    const canReroll = suit === 'anywhere' && !isJudgedChallenge(challenge) && Boolean(snapshot?.challengeReroll.isAvailable && team);
+    return {
+      suit,
+      distanceMeters: distanceToChallenge(challenge),
+      inRange: isChallengeInRange(challenge),
+      onShowOnMap: suit === 'anywhere' ? undefined : () => { setCardViewer(null); setIsDeckOpen(false); focusPointChallenge(challenge.id); },
+      reroll: canReroll ? {
+        voted: Boolean(team && rerollVote?.teamIds.includes(team.id)),
+        count: rerollVote?.teamIds.length ?? 0,
+        eligible: snapshot?.challengeReroll.eligibleTeamCount ?? 0,
+        pending: isPending('reroll:' + challenge.id),
+        onToggle: () => handleToggleRerollVote(challenge.id),
+      } : null,
+    };
+  };
   const focusPointChallenge = (id: string) => {
     setSelectedPointChallengeId(id);
     const challenge = snapshot?.challenges.find((entry) => entry.id === id);
     const area = challenge ? getChallengeArea(challenge.config) : null;
     if (area) {
-      mapRef.current?.fitBounds(getAreaBounds(area), { padding: { top: 140, bottom: 380, left: 40, right: 40 }, maxZoom: 17, duration: 450 });
+      mapRef.current?.fitBounds(getAreaBounds(area), { padding: { top: 170, bottom: 170, left: 40, right: 40 }, maxZoom: 17, duration: 450 });
       return;
     }
     const point = challenge ? getPointLocation(challenge) : null;
-    // Offset upward so the pin sits above the challenge card that opens over the bottom of the screen.
-    if (point) mapRef.current?.easeTo({ center: [point.coordinates[0] as number, point.coordinates[1] as number], zoom: Math.max(mapRef.current?.getZoom() ?? 14, 15), offset: [0, -Math.round(window.innerHeight * 0.22)], duration: 450 });
+    // Offset upward so the pin sits clear of the deck at the bottom of the screen.
+    if (point) mapRef.current?.easeTo({ center: [point.coordinates[0] as number, point.coordinates[1] as number], zoom: Math.max(mapRef.current?.getZoom() ?? 14, 15), offset: [0, -Math.round(window.innerHeight * 0.1)], duration: 450 });
   };
 
   useEffect(() => {
@@ -738,6 +783,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       }
     });
   };
+
+  const closeCardViewer = useCallback(() => setCardViewer(null), []);
 
   const handleToggleRerollVote = (challengeId: string) => {
     void runAction('reroll:' + challengeId, async (idempotencyKey) => {
@@ -885,17 +932,16 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,234,215,0.16),transparent_28%),linear-gradient(180deg,rgba(223,230,232,0.04),rgba(223,230,232,0.16))]" />
 
       <ZoneLayer map={mapForLayer} snapshot={snapshot} />
-      <ChallengeAreaLayer map={mapForLayer} challenges={teamChallenges} selectedId={selectedPointChallengeId} onSelect={focusPointChallenge} />
-      <PointChallengeLayer map={mapForLayer} challenges={teamChallenges} selectedId={selectedPointChallengeId} onSelect={focusPointChallenge} />
-      {selectedPointChallenge ? (
-        <PointChallengeCard
-          key={selectedPointChallenge.id}
-          challenge={selectedPointChallenge}
-          distanceMeters={selectedPointDistance}
-          locationStatus={locationStatus}
-          pending={isPending('capture:' + selectedPointChallenge.id)}
-          onClose={() => setSelectedPointChallengeId(null)}
-          onComplete={(extras) => { handleCaptureChallenge(selectedPointChallenge.id, null, extras); }}
+      <ChallengeAreaLayer map={mapForLayer} challenges={teamChallenges} selectedId={selectedPointChallengeId} onSelect={openCardFromMap} />
+      <PointChallengeLayer map={mapForLayer} challenges={teamChallenges} selectedId={selectedPointChallengeId} onSelect={openCardFromMap} />
+      {cardViewer && viewerChallenges.length ? (
+        <CardViewer
+          challenges={viewerChallenges}
+          getContext={getCardContext}
+          isPending={(challengeId) => isPending('capture:' + challengeId)}
+          onClose={closeCardViewer}
+          onComplete={(challengeId, extras) => handleCaptureChallenge(challengeId, null, extras)}
+          startId={cardViewer.startId}
         />
       ) : null}
 
@@ -1049,32 +1095,44 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                     : 'pointer-events-none mt-0 max-h-0 translate-y-8 overflow-hidden opacity-0',
                 ].join(' ')}
               >
-                <ChallengeDeck
-                  allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones === true}
-                  animatedChallengeIds={animatedChallengeIds}
-                  challenges={deckChallenges}
-                  variant={isPointMode ? 'anywhere' : 'zones'}
-                  getCardKind={getCardKind}
-                  distanceTo={distanceToChallenge}
-                  onLocateChallenge={focusPointChallenge}
-                  rerollState={snapshot.challengeReroll}
-                  teamId={snapshot.team?.id ?? null}
-                  completedCards={completedCards}
-                  currentZoneId={currentZone?.id ?? null}
-                  currentZoneName={currentZone?.name ?? null}
-                  isActionPending={isPending}
-                  isPeeking={false}
-                  locationMessage={locationErrorMessage}
-                  locationStatus={locationStatus}
-                  onCaptureChallenge={handleCaptureChallenge}
-                  onToggleRerollVote={handleToggleRerollVote}
-                  onFocusCompletedCard={handleFocusCompletedCard}
-                  onOpen={() => {}}
-                  onSelectChallenge={setSelectedChallengeId}
-                  progressLabel={challengeProgressLabel}
-                  selectedChallengeId={selectedChallengeId}
-                  zones={snapshot.zones}
-                />
+{isPointMode ? (
+                  <PointDeck
+                    challenges={deckChallenges}
+                    distanceTo={distanceToChallenge}
+                    getSuit={getCardKind}
+                    isInRange={isChallengeInRange}
+                    isPeeking={false}
+                    onOpen={() => {}}
+                    onOpenCard={openCardViewer}
+                  />
+                ) : (
+                                  <ChallengeDeck
+                    allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones === true}
+                    animatedChallengeIds={animatedChallengeIds}
+                    challenges={deckChallenges}
+                    variant={isPointMode ? 'anywhere' : 'zones'}
+                    getCardKind={getCardKind}
+                    distanceTo={distanceToChallenge}
+                    onLocateChallenge={focusPointChallenge}
+                    rerollState={snapshot.challengeReroll}
+                    teamId={snapshot.team?.id ?? null}
+                    completedCards={completedCards}
+                    currentZoneId={currentZone?.id ?? null}
+                    currentZoneName={currentZone?.name ?? null}
+                    isActionPending={isPending}
+                    isPeeking={false}
+                    locationMessage={locationErrorMessage}
+                    locationStatus={locationStatus}
+                    onCaptureChallenge={handleCaptureChallenge}
+                    onToggleRerollVote={handleToggleRerollVote}
+                    onFocusCompletedCard={handleFocusCompletedCard}
+                    onOpen={() => {}}
+                    onSelectChallenge={setSelectedChallengeId}
+                    progressLabel={challengeProgressLabel}
+                    selectedChallengeId={selectedChallengeId}
+                    zones={snapshot.zones}
+                  />
+                )}
               </div>
             </section>
           ) : null}
@@ -1095,7 +1153,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               ...mobileBottomInsetStyle,
               transform: isDeckOpen
                 ? `translateY(${deckDragY}px)`
-                : `translateY(${Math.max(0, deckWrapperHeightRef.current - 72)}px)`,
+                : `translateY(${Math.max(0, deckWrapperHeight - DECK_PEEK_PX)}px)`,
               transition: isDraggingDeck ? 'none' : 'transform 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
             }}
             onPointerDown={isDeckOpen ? handleDeckPointerDown : undefined}
@@ -1104,32 +1162,44 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
             onPointerCancel={isDeckOpen ? handleDeckPointerCancel : undefined}
           >
 
-            <ChallengeDeck
-              allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones === true}
-              animatedChallengeIds={animatedChallengeIds}
-              challenges={deckChallenges}
-              variant={isPointMode ? 'anywhere' : 'zones'}
-              getCardKind={getCardKind}
-              distanceTo={distanceToChallenge}
-              onLocateChallenge={(id) => { setIsDeckOpen(false); focusPointChallenge(id); }}
-              rerollState={snapshot.challengeReroll}
-              teamId={snapshot.team?.id ?? null}
-              completedCards={completedCards}
-              currentZoneId={currentZone?.id ?? null}
-              currentZoneName={currentZone?.name ?? null}
-              isActionPending={isPending}
-              isPeeking={!isDeckOpen}
-              locationMessage={locationErrorMessage}
-              locationStatus={locationStatus}
-              onCaptureChallenge={handleCaptureChallenge}
-              onToggleRerollVote={handleToggleRerollVote}
-              onFocusCompletedCard={handleFocusCompletedCard}
-              onOpen={() => setIsDeckOpen(true)}
-              onSelectChallenge={setSelectedChallengeId}
-              progressLabel={challengeProgressLabel}
-              selectedChallengeId={selectedChallengeId}
-              zones={snapshot.zones}
-            />
+{isPointMode ? (
+              <PointDeck
+                challenges={deckChallenges}
+                distanceTo={distanceToChallenge}
+                getSuit={getCardKind}
+                isInRange={isChallengeInRange}
+                isPeeking={!isDeckOpen}
+                onOpen={() => setIsDeckOpen(true)}
+                onOpenCard={openCardViewer}
+              />
+            ) : (
+                          <ChallengeDeck
+                allowReclaimZones={snapshot.game.settings?.allow_reclaim_zones === true}
+                animatedChallengeIds={animatedChallengeIds}
+                challenges={deckChallenges}
+                variant={isPointMode ? 'anywhere' : 'zones'}
+                getCardKind={getCardKind}
+                distanceTo={distanceToChallenge}
+                onLocateChallenge={(id) => { setIsDeckOpen(false); focusPointChallenge(id); }}
+                rerollState={snapshot.challengeReroll}
+                teamId={snapshot.team?.id ?? null}
+                completedCards={completedCards}
+                currentZoneId={currentZone?.id ?? null}
+                currentZoneName={currentZone?.name ?? null}
+                isActionPending={isPending}
+                isPeeking={!isDeckOpen}
+                locationMessage={locationErrorMessage}
+                locationStatus={locationStatus}
+                onCaptureChallenge={handleCaptureChallenge}
+                onToggleRerollVote={handleToggleRerollVote}
+                onFocusCompletedCard={handleFocusCompletedCard}
+                onOpen={() => setIsDeckOpen(true)}
+                onSelectChallenge={setSelectedChallengeId}
+                progressLabel={challengeProgressLabel}
+                selectedChallengeId={selectedChallengeId}
+                zones={snapshot.zones}
+              />
+            )}
 
             {/* Completed row — only in open mode, expands on swipe-up */}
             {isDeckOpen && completedCards.length > 0 ? (

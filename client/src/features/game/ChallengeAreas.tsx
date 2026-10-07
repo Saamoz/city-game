@@ -1,15 +1,13 @@
 import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
-import { bbox as turfBbox, centroid as turfCentroid, point as turfPoint, pointToPolygonDistance } from '@turf/turf';
+import { bbox as turfBbox, point as turfPoint, pointToPolygonDistance } from '@turf/turf';
 import { CHALLENGE_AREA_EDGE_TOLERANCE_METERS, getChallengeArea, type Challenge, type GeoJsonMultiPolygon, type GeoJsonPolygon } from '@city-game/shared';
 
 // Challenges tied to a drawn area: shaded on the map, completed from anywhere inside.
 
 const AREA_SOURCE_ID = 'challenge-areas';
-const AREA_LABEL_SOURCE_ID = 'challenge-area-labels';
 const AREA_FILL_LAYER_ID = 'challenge-area-fill';
 const AREA_LINE_LAYER_ID = 'challenge-area-line';
-const AREA_LABEL_LAYER_ID = 'challenge-area-label';
 
 export function isAreaChallenge(challenge: Challenge): boolean {
   return getChallengeArea(challenge.config) !== null;
@@ -54,32 +52,15 @@ export function ChallengeAreaLayer({ map, challenges, selectedId, onSelect }: La
         properties: { id: challenge.id, selected: challenge.id === selectedId },
       })),
     };
-    const labels: GeoJSON.FeatureCollection = {
-      type: 'FeatureCollection',
-      features: visible.map((challenge) => ({
-        ...turfCentroid(getChallengeArea(challenge.config) as GeoJSON.Polygon),
-        properties: { id: challenge.id, title: challenge.title },
-      })),
-    };
 
     const sync = () => {
-      if (!map.isStyleLoaded()) throw new Error('style not ready');
+      // Not isStyleLoaded(): that stays false while tiles load. addSource throws until the style itself is in.
       upsertSource(map, AREA_SOURCE_ID, shapes);
-      upsertSource(map, AREA_LABEL_SOURCE_ID, labels);
       if (!map.getLayer(AREA_FILL_LAYER_ID)) {
-        map.addLayer({ id: AREA_FILL_LAYER_ID, type: 'fill', source: AREA_SOURCE_ID, paint: { 'fill-color': '#d97a37', 'fill-opacity': ['case', ['get', 'selected'], 0.26, 0.13] } });
+        map.addLayer({ id: AREA_FILL_LAYER_ID, type: 'fill', source: AREA_SOURCE_ID, paint: { 'fill-color': '#a9774f', 'fill-opacity': ['case', ['get', 'selected'], 0.24, 0.14] } });
       }
       if (!map.getLayer(AREA_LINE_LAYER_ID)) {
-        map.addLayer({ id: AREA_LINE_LAYER_ID, type: 'line', source: AREA_SOURCE_ID, paint: { 'line-color': '#b4602a', 'line-width': ['case', ['get', 'selected'], 3, 2], 'line-dasharray': [2, 1.5], 'line-opacity': 0.9 } });
-      }
-      if (!map.getLayer(AREA_LABEL_LAYER_ID)) {
-        map.addLayer({
-          id: AREA_LABEL_LAYER_ID,
-          type: 'symbol',
-          source: AREA_LABEL_SOURCE_ID,
-          layout: { 'text-field': ['get', 'title'], 'text-size': 12, 'text-max-width': 9, 'text-allow-overlap': false },
-          paint: { 'text-color': '#7a3f17', 'text-halo-color': '#fff8eb', 'text-halo-width': 1.6 },
-        });
+        map.addLayer({ id: AREA_LINE_LAYER_ID, type: 'line', source: AREA_SOURCE_ID, paint: { 'line-color': '#7d5a3f', 'line-width': ['case', ['get', 'selected'], 2.4, 1.5], 'line-dasharray': [3, 2], 'line-opacity': 0.7 } });
       }
     };
 
@@ -107,19 +88,21 @@ export function ChallengeAreaLayer({ map, challenges, selectedId, onSelect }: La
 
   useEffect(() => {
     if (!map) return;
-    const handleClick = (event: mapboxgl.MapLayerMouseEvent) => {
-      const id = event.features?.[0]?.properties?.id;
+    // Listen on the map and look up the area under the tap: layer-scoped listeners attached before the
+    // layer exists never fire.
+    const areaAt = (point: mapboxgl.Point) => map.getLayer(AREA_FILL_LAYER_ID) ? map.queryRenderedFeatures(point, { layers: [AREA_FILL_LAYER_ID] })[0] : undefined;
+    const handleClick = (event: mapboxgl.MapMouseEvent) => {
+      const id = areaAt(event.point)?.properties?.id;
       if (typeof id === 'string') onSelectRef.current(id);
     };
-    const setPointer = () => { map.getCanvas().style.cursor = 'pointer'; };
-    const clearPointer = () => { map.getCanvas().style.cursor = ''; };
-    map.on('click', AREA_FILL_LAYER_ID, handleClick);
-    map.on('mouseenter', AREA_FILL_LAYER_ID, setPointer);
-    map.on('mouseleave', AREA_FILL_LAYER_ID, clearPointer);
+    const handleMove = (event: mapboxgl.MapMouseEvent) => {
+      map.getCanvas().style.cursor = areaAt(event.point) ? 'pointer' : '';
+    };
+    map.on('click', handleClick);
+    map.on('mousemove', handleMove);
     return () => {
-      map.off('click', AREA_FILL_LAYER_ID, handleClick);
-      map.off('mouseenter', AREA_FILL_LAYER_ID, setPointer);
-      map.off('mouseleave', AREA_FILL_LAYER_ID, clearPointer);
+      map.off('click', handleClick);
+      map.off('mousemove', handleMove);
     };
   }, [map]);
 

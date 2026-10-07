@@ -546,7 +546,7 @@ export function ChallengeDeck({
   );
 }
 
-function useDragRefs(): DragStateRefs {
+export function useDragRefs(): DragStateRefs {
   return {
     pointerId: useRef<number | null>(null),
     startX: useRef(0),
@@ -557,7 +557,7 @@ function useDragRefs(): DragStateRefs {
   };
 }
 
-function handlePointerDown(
+export function handlePointerDown(
   event: ReactPointerEvent<HTMLDivElement>,
   container: HTMLDivElement | null,
   dragRefs: DragStateRefs,
@@ -575,7 +575,7 @@ function handlePointerDown(
   // scroll container, which causes click events to fire on it instead of the card article.
 }
 
-function handlePointerMove(
+export function handlePointerMove(
   event: ReactPointerEvent<HTMLDivElement>,
   container: HTMLDivElement | null,
   dragRefs: DragStateRefs,
@@ -607,7 +607,7 @@ function handlePointerMove(
   event.preventDefault();
 }
 
-function handlePointerEnd(
+export function handlePointerEnd(
   event: ReactPointerEvent<HTMLDivElement>,
   container: HTMLDivElement | null,
   dragRefs: DragStateRefs,
@@ -637,7 +637,7 @@ function clearDragState(dragRefs: DragStateRefs): void {
   dragRefs.didDrag.current = false;
 }
 
-function consumeSuppressedClick(dragRefs: DragStateRefs): boolean {
+export function consumeSuppressedClick(dragRefs: DragStateRefs): boolean {
   if (!dragRefs.suppressClick.current) {
     return false;
   }
