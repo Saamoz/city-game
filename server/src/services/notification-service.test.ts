@@ -225,6 +225,34 @@ describe('notification service', () => {
     expect(logger.info).not.toHaveBeenCalled();
   });
 
+  it('skips the excluded player', async () => {
+    await seedBaseState({ pushSubscription: { ...PUSH_SUBSCRIPTION, endpoint: 'https://push.example/actor' } });
+    await testDatabase.db.insert(players).values(createTestPlayer({
+      id: '44444444-4444-4444-8444-444444444444',
+      displayName: 'Teammate',
+      pushSubscription: PUSH_SUBSCRIPTION,
+    }));
+    const delivered: string[] = [];
+
+    const service = createNotificationService({
+      db: testDatabase.db,
+      pushClient: createPushClient({ onSendNotification: async (subscription) => { delivered.push(subscription.endpoint); } }),
+      vapidPublicKey: 'test-public-key',
+      vapidPrivateKey: 'test-private-key',
+      vapidSubject: 'mailto:test@example.com',
+    });
+
+    await service.sendTeamNotification({
+      gameId: GAME_ID,
+      teamId: TEAM_ID,
+      excludePlayerId: PLAYER_ID,
+      title: 'Challenge completed',
+      body: 'Sam completed "Bean selfie".',
+    });
+
+    expect(delivered).toEqual([PUSH_SUBSCRIPTION.endpoint]);
+  });
+
   async function seedBaseState(playerOverrides: Record<string, unknown> = {}) {
     await testDatabase.db.insert(games).values(createTestGame());
     await testDatabase.db.insert(teams).values(createTestTeam());

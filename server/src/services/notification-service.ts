@@ -1,4 +1,4 @@
-import { and, eq, isNotNull } from 'drizzle-orm';
+import { and, eq, isNotNull, ne } from 'drizzle-orm';
 import type { PushSubscription as WebPushSubscription, RequestOptions } from 'web-push';
 // web-push is CommonJS: under Node ESM its functions only exist on the default export.
 import webPush from 'web-push';
@@ -14,6 +14,8 @@ export interface TeamNotificationInput {
   body: string;
   priority?: 'high' | 'medium' | 'low';
   meta?: JsonObject;
+  // Skip this player, e.g. the one whose action caused the notification.
+  excludePlayerId?: string;
 }
 
 export interface NotificationService {
@@ -102,6 +104,7 @@ export function createNotificationService(options: NotificationServiceOptions): 
             eq(players.gameId, input.gameId),
             eq(players.teamId, input.teamId),
             isNotNull(players.pushSubscription),
+            input.excludePlayerId ? ne(players.id, input.excludePlayerId) : undefined,
           ),
         );
 

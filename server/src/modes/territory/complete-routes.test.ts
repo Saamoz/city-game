@@ -603,6 +603,67 @@ describe('territory complete route', () => {
     ]);
   });
 
+  it('notifies teammates and rival teams when a Challenge Hunt challenge is completed', async () => {
+    const notifications: TeamNotificationInput[] = [];
+    await seedGame({ modeKey: 'point_challenge' });
+    await seedTeam({ name: 'Gold Team' });
+    await seedTeam({ id: TEAM_TWO_ID, name: 'Other Team', color: '#2563eb', joinCode: 'TEAM9999' });
+    await seedPlayer({ sessionToken: 'hunt-notify-session', displayName: 'Sam' });
+    await seedChallenge({ title: 'Bean selfie', zoneId: null, isDeckActive: true, config: { portable: true, location_mode: 'portable' }, scoring: { points: 20 } });
+    app = await createTestApp({ db: testDatabase.db, notificationService: notificationRecorder(notifications) });
+
+    const response = await completeRequest({ sessionToken: 'hunt-notify-session', actionId: 'hunt-notify', payload: { gps: validGpsPayload() } });
+
+    expect(response.statusCode).toBe(200);
+    await waitFor(async () => notifications.length === 2);
+    const meta = { challengeId: CHALLENGE_ID, eventType: 'challenge_completed' };
+    expect(notifications).toEqual([
+      {
+        gameId: GAME_ID,
+        teamId: TEAM_ONE_ID,
+        excludePlayerId: PLAYER_ONE_ID,
+        title: 'Challenge completed',
+        body: 'Sam completed "Bean selfie" (+20 pts).',
+        priority: 'medium',
+        meta,
+      },
+      {
+        gameId: GAME_ID,
+        teamId: TEAM_TWO_ID,
+        title: 'Rival completed a challenge',
+        body: 'Gold Team completed "Bean selfie". It\'s off the board.',
+        priority: 'medium',
+        meta,
+      },
+    ]);
+  });
+
+  it('only tells teammates about a judged Challenge Hunt submission', async () => {
+    const notifications: TeamNotificationInput[] = [];
+    await seedGame({ modeKey: 'point_challenge' });
+    await seedTeam();
+    await seedTeam({ id: TEAM_TWO_ID, name: 'Other Team', color: '#2563eb', joinCode: 'TEAM9999' });
+    await seedPlayer({ sessionToken: 'hunt-judged-session', displayName: 'Sam' });
+    await seedChallenge({ title: 'Best costume', zoneId: null, isDeckActive: true, config: { portable: true, location_mode: 'portable', judged: true, judging_type: 'pass_fail' }, scoring: { points: 5 } });
+    app = await createTestApp({ db: testDatabase.db, notificationService: notificationRecorder(notifications) });
+
+    const response = await completeRequest({ sessionToken: 'hunt-judged-session', actionId: 'hunt-judged', payload: { gps: validGpsPayload() } });
+
+    expect(response.statusCode).toBe(200);
+    await waitFor(async () => notifications.length === 1);
+    expect(notifications).toEqual([
+      {
+        gameId: GAME_ID,
+        teamId: TEAM_ONE_ID,
+        excludePlayerId: PLAYER_ONE_ID,
+        title: 'Submitted for judging',
+        body: 'Sam submitted "Best costume" for judging.',
+        priority: 'medium',
+        meta: { challengeId: CHALLENGE_ID, eventType: 'challenge_completed' },
+      },
+    ]);
+  });
+
   it('replays the same successful completion for the same idempotency key', async () => {
     await seedGame();
     await seedTeam();

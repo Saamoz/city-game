@@ -14,7 +14,7 @@ interface NotificationMenuItemProps {
 
 type ItemState = 'idle' | 'subscribing' | 'enabled' | 'error';
 
-// In-game way to turn on zone alerts, for players who never saw the lobby prompt
+// In-game way to turn on game alerts, for players who never saw the lobby prompt
 // (joined mid-game, came back later, or dismissed it).
 export function NotificationMenuItem({ isSubscribed }: NotificationMenuItemProps) {
   const [state, setState] = useState<ItemState>(isSubscribed ? 'enabled' : 'idle');
@@ -29,13 +29,13 @@ export function NotificationMenuItem({ isSubscribed }: NotificationMenuItemProps
   }
 
   if (state === 'enabled' || isSubscribed) {
-    return <p className="px-3 py-1.5 text-xs text-[#5a676c]">Zone alerts are on for this device.</p>;
+    return <p className="px-3 py-1.5 text-xs text-[#5a676c]">Alerts are on for this device.</p>;
   }
 
   if (getNotificationPermission() === 'denied') {
     return (
       <p className="px-3 py-1.5 text-xs leading-5 text-[#5a676c]">
-        Notifications are blocked for this site. Allow them in your browser or phone settings to get zone alerts.
+        Notifications are blocked for this site. Allow them in your browser or phone settings to get game alerts.
       </p>
     );
   }
@@ -60,7 +60,7 @@ export function NotificationMenuItem({ isSubscribed }: NotificationMenuItemProps
         onClick={() => { void enable(); }}
         type="button"
       >
-        {state === 'subscribing' ? 'Turning on alerts…' : 'Turn on zone alerts'}
+        {state === 'subscribing' ? 'Turning on alerts…' : 'Turn on game alerts'}
       </button>
       {message ? <p className="mt-1 px-1 text-xs text-[#8a5a42]">{message}</p> : null}
     </div>

@@ -291,13 +291,6 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
       return;
     }
 
-    // Only Turf War sends pushes (zone captures and claim expiry warnings).
-    if (game.modeKey !== 'territory') {
-      setPushPromptState('hidden');
-      setPushPromptMessage(null);
-      return;
-    }
-
     if (!supportsPushNotifications()) {
       setPushPromptState(needsHomeScreenInstallForPush() ? 'install_hint' : 'hidden');
       setPushPromptMessage(null);

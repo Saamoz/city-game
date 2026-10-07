@@ -132,6 +132,7 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       let postCommitData: TerritoryPostCommitData | null = null;
+      let modeKey: string | null = null;
 
       if (hasGpsPayload(request.body)) {
         await app.validateGps(request, reply);
@@ -162,6 +163,7 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
           );
 
           postCommitData = isTerritoryPostCommitData(result.postCommitData) ? result.postCommitData : null;
+          modeKey = handler.modeKey;
 
           return {
             gameId: result.gameId,
@@ -248,6 +250,9 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
           }
 
           await sendZoneCaptureNotifications(app, postCommitData);
+          if (modeKey === 'point_challenge' && request.player) {
+            await sendChallengeHuntNotifications(app, postCommitData, request.player);
+          }
 
           const winConditionResult = await evaluateConfiguredWinConditions(app.db, app.modeRegistry, {
             gameId: postCommitData.gameId,
@@ -427,6 +432,63 @@ function hasGpsPayload(body: unknown): boolean {
 
 function isTerritoryPostCommitData(value: unknown): value is TerritoryPostCommitData {
   return Boolean(value && typeof value === 'object' && 'type' in value && 'stateVersion' in value && 'gameId' in value);
+}
+
+// Challenge Hunt: teammates hear about every completion; rivals hear when a challenge leaves the board.
+async function sendChallengeHuntNotifications(
+  app: FastifyInstance,
+  data: Extract<TerritoryPostCommitData, { type: 'challenge_completed' }>,
+  actor: { id: string; displayName: string },
+) {
+  const title = data.challenge.title;
+  const meta = { challengeId: data.challenge.id, eventType: 'challenge_completed' };
+
+  if (data.claim.status === 'submitted') {
+    // Judged: the challenge stays open for other teams until judging, so only teammates are told.
+    await app.notificationService.sendTeamNotification({
+      gameId: data.gameId,
+      teamId: data.claim.teamId,
+      excludePlayerId: actor.id,
+      title: 'Submitted for judging',
+      body: `${actor.displayName} submitted "${title}" for judging.`,
+      priority: 'medium',
+      meta,
+    });
+    return;
+  }
+
+  const points = data.resourcesAwarded.points ?? 0;
+  const pointsLabel = points > 0 ? ` (+${points} pts)` : '';
+  await app.notificationService.sendTeamNotification({
+    gameId: data.gameId,
+    teamId: data.claim.teamId,
+    excludePlayerId: actor.id,
+    title: 'Challenge completed',
+    body: `${actor.displayName} completed "${title}"${pointsLabel}.`,
+    priority: 'medium',
+    meta,
+  });
+
+  const teamRows = await app.db
+    .select({ id: teams.id, name: teams.name })
+    .from(teams)
+    .where(eq(teams.gameId, data.gameId));
+  const teamName = teamRows.find((team) => team.id === data.claim.teamId)?.name ?? 'Another team';
+
+  for (const team of teamRows) {
+    if (team.id === data.claim.teamId) {
+      continue;
+    }
+
+    await app.notificationService.sendTeamNotification({
+      gameId: data.gameId,
+      teamId: team.id,
+      title: 'Rival completed a challenge',
+      body: `${teamName} completed "${title}". It's off the board.`,
+      priority: 'medium',
+      meta,
+    });
+  }
 }
 
 async function sendZoneCaptureNotifications(app: FastifyInstance, data: Extract<TerritoryPostCommitData, { type: 'challenge_completed' }>) {

@@ -1333,7 +1333,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               >
                 Feed
               </button>
-              {snapshot?.game.modeKey === 'territory' && snapshot.player?.teamId ? (
+              {snapshot?.player?.teamId ? (
                 <NotificationMenuItem isSubscribed={Boolean(snapshot.player.pushSubscription)} />
               ) : null}
               <button

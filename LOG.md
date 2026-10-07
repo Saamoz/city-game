@@ -305,3 +305,10 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Other players' `pushSubscription` is no longer sent in snapshots or public player payloads.
 - Verified locally: the service worker shows a delivered push (CDP `deliverPushMessage`) with the logo icon; the server sends a VAPID-signed aes128gcm push to a local fake push service, which decrypts to the expected payload. Real subscription needs a phone (headless Chromium has no push service).
 - Logo: the trail now runs along the ground in front of the skyline, ending at the pin.
+
+## Challenge Hunt Push Notifications (2026-10-07)
+
+- Completing a Challenge Hunt challenge now pushes to teammates ("Challenge completed": "Sam completed "X" (+20 pts).", not to the player who did it) and to rival teams ("Rival completed a challenge": "Gold Team completed "X". It's off the board.").
+- A judged submission only tells teammates ("Submitted for judging"); the challenge stays open for other teams until judging.
+- `TeamNotificationInput.excludePlayerId` skips the acting player.
+- The lobby prompt and in-game menu item now appear in both modes, with "Challenge Alerts" wording in Challenge Hunt.

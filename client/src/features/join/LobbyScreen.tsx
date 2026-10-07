@@ -133,8 +133,12 @@ export function LobbyScreen({
               <div className="mx-auto mt-5 max-w-2xl rounded-[1.4rem] border border-[#d2c19d]/70 bg-[#fbf6ea]/96 px-4 py-4 text-left shadow-[0_16px_34px_rgba(31,42,47,0.08)] sm:px-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-[11px] uppercase tracking-[0.24em] text-[#8c7a57]">Zone Alerts</p>
-                    <p className="mt-1 text-sm leading-6 text-[#44545b]">Get notified when rival teams capture a zone.</p>
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-[#8c7a57]">{game.modeKey === 'territory' ? 'Zone Alerts' : 'Challenge Alerts'}</p>
+                    <p className="mt-1 text-sm leading-6 text-[#44545b]">
+                      {game.modeKey === 'territory'
+                        ? 'Get notified when rival teams capture a zone.'
+                        : 'Get notified when your teammates or a rival team complete a challenge.'}
+                    </p>
                     {notificationPromptMessage ? (
                       <p className="mt-2 text-sm text-[#8a5a42]">{notificationPromptMessage}</p>
                     ) : null}
@@ -162,7 +166,7 @@ export function LobbyScreen({
             ) : null}
             {showNotificationInstallHint ? (
               <div className="mx-auto mt-5 max-w-2xl rounded-[1.4rem] border border-[#d2c19d]/70 bg-[#fbf6ea]/96 px-4 py-4 text-left shadow-[0_16px_34px_rgba(31,42,47,0.08)] sm:px-5">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-[#8c7a57]">Zone Alerts</p>
+                <p className="text-[11px] uppercase tracking-[0.24em] text-[#8c7a57]">{game.modeKey === 'territory' ? 'Zone Alerts' : 'Challenge Alerts'}</p>
                 <PushInstallHint className="mt-1" />
               </div>
             ) : null}
