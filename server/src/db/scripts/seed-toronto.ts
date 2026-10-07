@@ -34,7 +34,7 @@ const zones: ZoneSeed[] = loadZoneFixture('toronto-zones.json').map((zone) => ({
 
 const config: SampleSeedConfig = {
   seedKey: 'toronto_sample_v1',
-  name: 'Toronto Territory Demo',
+  name: 'Toronto Turf War Demo',
   mapName: 'Toronto Base Map',
   centerLat: 43.6888,
   centerLng: -79.446,

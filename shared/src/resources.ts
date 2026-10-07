@@ -17,11 +17,11 @@ export const resourceDefinitions = {
   points: {
     label: 'Points',
     scope: 'team',
-    description: 'Primary scoring resource for Territory win conditions and standings.',
+    description: 'Primary scoring resource for win conditions and standings.',
   },
   coins: {
     label: 'Coins',
     scope: 'team',
-    description: 'Secondary team currency reserved for future Territory mechanics.',
+    description: 'Secondary team currency reserved for future mechanics.',
   },
 } as const satisfies Record<BuiltInResourceType, ResourceDefinition>;

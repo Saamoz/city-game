@@ -17,7 +17,7 @@ interface PointDeckProps {
   onOpenCard(challengeId: string, ordered: Challenge[]): void;
 }
 
-// Point Challenge deck: a centred fan of small cards when closed, a row of dense mini cards when
+// Challenge Hunt deck: a centred fan of small cards when closed, a row of dense mini cards when
 // open. Tapping a mini card opens the full-screen card viewer.
 export function PointDeck({ gameName, challenges, getSuit, distanceTo, isInRange, isPeeking, onOpen, onOpenCard }: PointDeckProps) {
   const [filter, setFilter] = useState<DeckFilter>('all');

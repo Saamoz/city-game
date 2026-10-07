@@ -234,7 +234,7 @@ export async function cloneChallengeSetToGame(
     throw new AppError(errorCodes.validationError, { message: 'Every challenge item must match its challenge set placement mode.' });
   }
   if (modeKey === 'point_challenge' && challengeSet.locationMode !== 'point') {
-    throw new AppError(errorCodes.validationError, { message: 'Point Challenge games require a point-linked challenge set.' });
+    throw new AppError(errorCodes.validationError, { message: 'Challenge Hunt games require a point-linked challenge set.' });
   }
 
   const shuffledItems = shuffleChallengeSetItems(items);

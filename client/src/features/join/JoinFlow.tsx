@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { socketServerEventTypes, type Game, type GameEventRecord, type MapDefinition, type MapZone, type Player, type SocketEventPayloadMap, type Team, type TeamLocation, type Zone } from '@city-game/shared';
+import { GAME_MODE_LABELS, PLATFORM_NAME, socketServerEventTypes, type Game, type GameEventRecord, type MapDefinition, type MapZone, type Player, type SocketEventPayloadMap, type Team, type TeamLocation, type Zone } from '@city-game/shared';
 import {
   ApiError,
   getActiveGame,
@@ -796,7 +796,7 @@ function HomeScreen(props: {
           <>
             <div>
               <p className="text-center font-['IBM_Plex_Mono',monospace] text-[11px] uppercase tracking-[0.38em] text-[#8c7a57]">
-                TERRITORY
+                {PLATFORM_NAME} · {GAME_MODE_LABELS[props.game.modeKey]}
               </p>
             </div>
 
@@ -1020,7 +1020,7 @@ function LoadingScreen() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f5f0e8] px-6 text-center text-[#5a676c]">
       <div>
-        <p className="font-['IBM_Plex_Mono',monospace] text-[11px] uppercase tracking-[0.36em] text-[#8c7a57]">Territory</p>
+        <p className="font-['IBM_Plex_Mono',monospace] text-[11px] uppercase tracking-[0.36em] text-[#8c7a57]">{PLATFORM_NAME}</p>
         <p className="mt-4 font-[Georgia,Times_New_Roman,serif] text-2xl text-[#223238]">Loading current game…</p>
       </div>
     </main>

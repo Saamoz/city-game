@@ -47,7 +47,7 @@ interface ChallengeDeckProps {
   isActionPending(actionKey: string): boolean;
   isPeeking: boolean;
   onOpen(): void;
-  // 'anywhere' = Point Challenge games: every challenge is a card. Anywhere cards complete in place;
+  // 'anywhere' = Challenge Hunt games: every challenge is a card. Anywhere cards complete in place;
   // pinned cards hand off to the map pin. Judged cards behave the same, with a small marker.
   variant?: 'zones' | 'anywhere';
   getCardKind?(challenge: Challenge): CardKind;

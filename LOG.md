@@ -282,3 +282,9 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - `POST /players/me/location` reads the player and game in one query and only broadcasts `team_locations_updated` when the updating player is the team's representative, built from that row (no game-wide `listTeamLocationsByGame`).
 - New hourly job (`jobs/receipt-pruning.ts`) deletes `action_receipts` older than 24 h; migration 0016 indexes `created_at`.
 - `broadcastFullStateToGame` loads game state once (`loadGameState`) and shapes it per socket (`buildViewerSnapshot`) instead of rebuilding the full snapshot for every connected player.
+
+## Rename: Saadventure, Turf War, Challenge Hunt (2026-10-07)
+
+- The app is now called Saadventure (`PLATFORM_NAME`): page title, home-screen name, push notification fallback title, join and loading screens, admin subtitle. Favicon is a compass.
+- Modes have player-facing names from `GAME_MODE_LABELS` in `shared/src/constants.ts`: `territory` → Turf War, `point_challenge` → Challenge Hunt. The stored `mode_key` values are unchanged, so existing games keep working. The join screen header shows "Saadventure · <mode>".
+- Seed demo games are named "<City> Turf War Demo".

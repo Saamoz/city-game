@@ -1,4 +1,4 @@
-export const PLATFORM_NAME = 'Territory';
+export const PLATFORM_NAME = 'Saadventure';
 export const API_PREFIX = '/api/v1';
 export const SESSION_COOKIE_NAME = 'session_token';
 export const IDEMPOTENCY_KEY_HEADER = 'Idempotency-Key';
@@ -15,6 +15,11 @@ export const DEFAULT_LOCATION_RETENTION_HOURS = 48;
 export const MAX_DELTA_SYNC_GAP = 1000;
 
 export const GAME_MODE_KEYS = ['territory', 'point_challenge'] as const;
+// Player-facing names. The stored keys stay as they are so existing games keep working.
+export const GAME_MODE_LABELS = {
+  territory: 'Turf War',
+  point_challenge: 'Challenge Hunt',
+} as const satisfies Record<(typeof GAME_MODE_KEYS)[number], string>;
 export const GAME_STATUS_VALUES = ['setup', 'active', 'paused', 'completed'] as const;
 export const CHALLENGE_KIND_VALUES = ['visit', 'text', 'photo', 'quiz', 'multi_step', 'custom'] as const;
 export const CHALLENGE_STATUS_VALUES = ['available', 'claimed', 'completed', 'skipped'] as const;

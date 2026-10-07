@@ -36,7 +36,7 @@ const zones: ZoneSeed[] = loadZoneFixture('chicago-zones.json').map((zone) => ({
 
 const config: SampleSeedConfig = {
   seedKey: 'chicago_sample_v1',
-  name: 'Chicago Territory Demo',
+  name: 'Chicago Turf War Demo',
   mapName: 'Chicago Base Map',
   centerLat: 41.8895,
   centerLng: -87.6624,

@@ -7,10 +7,10 @@ self.addEventListener('push', (event) => {
   try {
     payload = event.data.json();
   } catch {
-    payload = { title: 'Territory', body: event.data.text() };
+    payload = { title: 'Saadventure', body: event.data.text() };
   }
 
-  const title = typeof payload.title === 'string' && payload.title ? payload.title : 'Territory';
+  const title = typeof payload.title === 'string' && payload.title ? payload.title : 'Saadventure';
   const body = typeof payload.body === 'string' ? payload.body : '';
   const gameId = typeof payload.gameId === 'string' ? payload.gameId : null;
 

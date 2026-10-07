@@ -764,7 +764,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
         return null;
       }
 
-      // Anywhere cards in Point Challenge games only record location, so a GPS failure must not block them.
+      // Anywhere cards in Challenge Hunt games only record location, so a GPS failure must not block them.
       const gpsIsOptional = !isMapChallenge(challenge) && (isPointMode || isJudgedChallenge(challenge));
       const attemptCapture = async (gpsCapturedAtOverride?: string) => {
         const gps = gpsPayload ?? (gpsIsOptional ? await refreshLocation().catch(() => null) : await refreshLocation());

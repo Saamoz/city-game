@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { GAME_MODE_KEYS, GAME_MODE_LABELS, PLATFORM_NAME } from '@city-game/shared';
 import type {
   Challenge,
   ChallengeSet,
@@ -610,7 +611,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
             <div>
               <p className="text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-[#718089]">Admin</p>
               <h1 className="mt-2 text-2xl font-semibold text-[#182126]">Game Control</h1>
-              <p className="mt-2 text-sm text-[#5b6870]">Desktop-first management for authored maps, challenge sets, and live Territory sessions.</p>
+              <p className="mt-2 text-sm text-[#5b6870]">Desktop-first management for authored maps, challenge sets, and live {PLATFORM_NAME} games.</p>
             </div>
             <button
               type="button"
@@ -713,8 +714,9 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                     onChange={(event) => { setGameForm((current) => ({ ...current, modeKey: event.target.value as Game['modeKey'] })); }}
                     className={inputClassName}
                   >
-                    <option value="territory">Territory</option>
-                    <option value="point_challenge">Point Challenges</option>
+                    {GAME_MODE_KEYS.map((modeKey) => (
+                      <option key={modeKey} value={modeKey}>{GAME_MODE_LABELS[modeKey]}</option>
+                    ))}
                   </select>
                 </Field>
                 <Field label="Map">
