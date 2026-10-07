@@ -45,7 +45,7 @@ describe('judged challenges', () => {
 
     const repeat = await submit('team-one-session', 'judged-2', null);
     expect(repeat.statusCode).toBe(409);
-    expect(repeat.json().error.message).toBe('Your team already submitted this challenge for judging.');
+    expect(repeat.json().error.message).toBe('Your team already completed this challenge.');
 
     const snapshot = await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/map-state', cookies: { [SESSION_COOKIE_NAME]: 'team-two-session' } });
     const snapshotClaims = snapshot.json().claims ?? snapshot.json().snapshot?.claims;
@@ -95,6 +95,41 @@ describe('judged challenges', () => {
     expect(republish.statusCode).toBe(200);
     expect(await pointsFor(TEAM_ONE_ID)).toBe(2);
     expect(await pointsFor(TEAM_TWO_ID)).toBe(3);
+  });
+
+  it('publishes on its own when the game ends with every submission already judged', async () => {
+    await seedPointGame();
+    app = await createTestApp({ db: testDatabase.db });
+
+    expect((await submit('team-one-session', 'judged-1', null)).statusCode).toBe(200);
+    const sheet = (await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/judging' })).json().judging;
+    // The admin judges during the game.
+    await setPoints(sheet.challenges[0].submissions[0].claimId, 4);
+
+    const end = await app.inject({ method: 'POST', url: '/api/v1/game/' + GAME_ID + '/end', headers: { 'idempotency-key': 'end-1' } });
+    expect(end.statusCode).toBe(200);
+    expect(await pointsFor(TEAM_ONE_ID)).toBe(4);
+    const recap = await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/public-recap' });
+    expect(recap.json().recap.judging.status).toBe('published');
+  });
+
+  it('has nothing to wait for when no team submitted a judged challenge', async () => {
+    await seedPointGame();
+    app = await createTestApp({ db: testDatabase.db });
+
+    expect((await app.inject({ method: 'POST', url: '/api/v1/game/' + GAME_ID + '/end', headers: { 'idempotency-key': 'end-1' } })).statusCode).toBe(200);
+    const recap = await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/public-recap' });
+    expect(recap.json().recap.judging.status).not.toBe('pending');
+  });
+
+  it('keeps players waiting when the game ends with unjudged submissions', async () => {
+    await seedPointGame();
+    app = await createTestApp({ db: testDatabase.db });
+
+    expect((await submit('team-one-session', 'judged-1', null)).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: '/api/v1/game/' + GAME_ID + '/end', headers: { 'idempotency-key': 'end-1' } })).statusCode).toBe(200);
+    const recap = await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/public-recap' });
+    expect(recap.json().recap.judging).toMatchObject({ status: 'pending', submissionCount: 1 });
   });
 
   it('scores yes/no and best-team judging from the judge decision', async () => {

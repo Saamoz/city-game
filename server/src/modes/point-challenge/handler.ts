@@ -1,6 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { isJudgedChallengeConfig, type ScoreboardEntry, type Team } from '@city-game/shared';
 import { challengeClaims, challenges, teams } from '../../db/schema.js';
+import { publishJudgingIfDecided } from '../../services/judging-service.js';
 import { getAllBalances } from '../../services/resource-service.js';
 import type { ModeHandler } from '../types.js';
 import { createTerritoryModeHandler } from '../territory/handler.js';
@@ -12,6 +13,10 @@ export function createPointChallengeModeHandler(): ModeHandler {
     modeKey: 'point_challenge',
     registerRoutes() {
       // The shared challenge routes dispatch to the active game's mode handler.
+    },
+    async onGameEnd(input) {
+      await base.onGameEnd(input);
+      await publishJudgingIfDecided(input.db, input.game.id);
     },
     async computeScoreboard({ db, game }) {
       const [teamRows, balances] = await Promise.all([

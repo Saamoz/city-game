@@ -105,7 +105,7 @@ export function ChallengeCardFace({ gameName, challenge, suit, distanceMeters, i
 
         <div className="mt-3 space-y-2">
           <div className="flex items-baseline justify-between px-1">
-            <span className="text-xs text-[#6d6150]">{judged ? 'Judges award the points after the game' : bonuses.length ? base + ' + ' + (total - base) + ' bonus' : 'Points'}</span>
+            <span className="text-xs text-[#6d6150]">{judged ? 'Bonus · judges say yes or no' : bonuses.length ? base + ' + ' + (total - base) + ' bonus' : 'Points'}</span>
             {<span className="font-[Georgia,Times_New_Roman,serif] text-xl font-semibold" style={{ color: INK }}>{total} {total === 1 ? 'pt' : 'pts'}</span>}
           </div>
           <div className="flex gap-2">

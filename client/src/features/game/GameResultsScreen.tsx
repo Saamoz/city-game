@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import mapboxgl from 'mapbox-gl';
-import type { GameRecap, GameRecapMoment, Game, Team, TeamRecapPath, Zone } from '@city-game/shared';
+import { PLATFORM_NAME, type GameRecap, type GameRecapMoment, type Game, type Team, type TeamRecapPath, type Zone } from '@city-game/shared';
+import { BrandMark } from '../../components/BrandMark';
+import { SkylineBackdrop } from '../../components/SkylineBackdrop';
 import { getGameRecap, getPublicGameRecap } from '../../lib/api';
 import { FeedOverlay, buildFeedEntriesForTeams } from './Phase32Panels';
 import { buildRenderedZoneGeometry, collectGeometryPositions } from './mapGeometry';
@@ -45,16 +47,17 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
     return () => controller.abort();
   }, [game.id, publicAccess]);
 
-  // While judges score judged challenges, keep checking so the final standings appear without a reload.
+  // While the judges work, players wait on a holding screen. Publishing bumps the game's state
+  // version, so check right away when it changes and every few seconds as a fallback.
   const isAwaitingJudging = recap?.judging?.status === 'pending';
   useEffect(() => {
     if (!isAwaitingJudging) return;
     const controller = new AbortController();
-    const timer = window.setInterval(() => {
-      void (publicAccess ? getPublicGameRecap : getGameRecap)(game.id, controller.signal).then(setRecap).catch(() => {});
-    }, 20_000);
+    const refresh = () => { void (publicAccess ? getPublicGameRecap : getGameRecap)(game.id, controller.signal).then(setRecap).catch(() => {}); };
+    refresh();
+    const timer = window.setInterval(refresh, 10_000);
     return () => { window.clearInterval(timer); controller.abort(); };
-  }, [game.id, isAwaitingJudging, publicAccess]);
+  }, [game.id, game.stateVersion, isAwaitingJudging, publicAccess]);
 
   useEffect(() => {
     if (!isPlaying || !recap) return;
@@ -95,15 +98,17 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
     setProgress(nextProgress);
   };
 
+  // Point scores depend on the judges, so hold the results until the recap says they are final.
+  if (isAwaitingJudging || (game.modeKey === 'point_challenge' && !recap && !recapError)) {
+    return <AwaitingJudgingScreen gameName={game.name} isLoading={!recap} onLeave={onLeave} submissionCount={recap?.judging?.submissionCount ?? 0} />;
+  }
+
   const activeMoment = recap ? findActiveMoment(recap, progress) : null;
   const spectatorWinner = scoreboard[0]?.team.name ?? null;
-  const title = isAwaitingJudging ? 'Judges are scoring' : viewerTeam
+  const title = viewerTeam
     ? didViewerWin ? (isTie ? "It's a draw!" : 'Victory!') : 'Game over'
     : isTie ? "It's a draw!" : spectatorWinner ? `${spectatorWinner} won!` : 'Game over';
-  const judgedCount = recap?.judging?.submissionCount ?? 0;
-  const subtitle = isAwaitingJudging
-    ? `${judgedCount} judged ${judgedCount === 1 ? 'submission is' : 'submissions are'} being scored. The winner is announced here once the judges publish their scores.`
-    : viewerTeam
+  const subtitle = viewerTeam
     ? didViewerWin
       ? isTie
         ? `${viewerTeam.name} tied for first with ${viewerEntry?.zoneCount ?? 0} ${scoreNoun}.`
@@ -156,7 +161,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
         </>
       ) : (
         <section className="results-atlas-surface absolute inset-0 z-20 overflow-y-auto overscroll-contain px-3 pb-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] sm:px-6 sm:pt-6">
-          {!isAwaitingJudging && !isTie && (didViewerWin || (!viewerTeam && Boolean(spectatorWinner))) ? <CelebrationSparks /> : null}
+          {!isTie && (didViewerWin || (!viewerTeam && Boolean(spectatorWinner))) ? <CelebrationSparks /> : null}
           <div className="relative z-10 mx-auto w-full max-w-4xl pb-4">
             <header className="flex items-center justify-between gap-4 px-1 text-[#304349]">
               <div className="min-w-0">
@@ -176,14 +181,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
                   <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#58666a] sm:text-base">{subtitle}</p>
                 </div>
 
-                {isAwaitingJudging ? (
-                  <div className="results-winner-stamp mx-auto mt-6 flex min-h-44 w-full max-w-sm flex-col items-center justify-center px-6 py-5 text-center" style={{ '--winner-color': '#5b4a86' } as CSSProperties}>
-                    <span className="text-2xl text-[#5b4a86]" aria-hidden="true">★</span>
-                    <p className="mt-1 font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#5b4a86]">Awaiting judges</p>
-                    <h2 className="mt-2 max-w-full font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold leading-tight text-[#203239] sm:text-3xl">Winner to be announced</h2>
-                    <p className="mt-2 font-['IBM_Plex_Mono',monospace] text-[10px] uppercase tracking-[0.16em] text-[#667277]">This page updates on its own</p>
-                  </div>
-                ) : scoreboard[0] ? (
+                {scoreboard[0] ? (
                   <div className="results-winner-stamp mx-auto mt-6 flex min-h-44 w-full max-w-sm flex-col items-center justify-center px-6 py-5 text-center" style={{ '--winner-color': scoreboard[0].team.color } as CSSProperties}>
                     <span className="text-2xl text-[#8d7138]" aria-hidden="true">✦</span>
                     <p className="mt-1 font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#7d6738]">{isTie ? 'First-place tie' : 'Winner'}</p>
@@ -198,7 +196,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
                   <div className="flex items-end justify-between gap-3 border-b border-[#8c7a54]/55 pb-2">
                     <div>
                       <p className="font-['IBM_Plex_Mono',monospace] text-[9px] font-bold uppercase tracking-[0.28em] text-[#866d37]">Score</p>
-                      <h2 className="mt-1 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#293a3f]">{isAwaitingJudging ? 'Standings before judging' : 'Final standings'}</h2>
+                      <h2 className="mt-1 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#293a3f]">Final standings</h2>
                     </div>
                     <span className="font-['IBM_Plex_Mono',monospace] text-[9px] uppercase tracking-[0.13em] text-[#758085]">{game.modeKey === 'point_challenge' ? 'Points' : 'Zones held'}</span>
                   </div>
@@ -237,6 +235,36 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
       )}
 
       {showFeed ? <FeedOverlay entries={buildFeedEntriesForTeams(recap?.events ?? [], teams)} errorMessage={recapError} isLoading={!recap && !recapError} onClose={() => setShowFeed(false)} onFocusZone={() => { setShowFeed(false); setView('map'); }} /> : null}
+    </main>
+  );
+}
+
+// Shown after the game while the judges are still deciding judged challenges. The results replace
+// it on their own once the judges finish.
+function AwaitingJudgingScreen({ gameName, submissionCount, isLoading, onLeave }: { gameName: string; submissionCount: number; isLoading: boolean; onLeave?(): void }) {
+  return (
+    <main className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-[#f5f0e8] px-6 pb-36 pt-[calc(env(safe-area-inset-top,0px)+2rem)] text-center text-[#223238]">
+      <SkylineBackdrop />
+      <div className="relative flex max-w-md flex-col items-center">
+        <BrandMark className="h-16 w-16" decorative />
+        <p className="mt-5 font-['IBM_Plex_Mono',monospace] text-[11px] uppercase tracking-[0.36em] text-[#8c7a57]">{PLATFORM_NAME} · Game over</p>
+        <p className="mt-2 text-sm text-[#6d6758]">{gameName}</p>
+        {isLoading ? (
+          <h1 className="mt-6 font-[Georgia,Times_New_Roman,serif] text-3xl font-semibold leading-tight sm:text-4xl">Tallying the final scores…</h1>
+        ) : (
+          <>
+            <h1 className="mt-6 font-[Georgia,Times_New_Roman,serif] text-3xl font-semibold leading-tight sm:text-4xl">Waiting for the judges</h1>
+            <p className="mt-3 text-sm leading-6 text-[#5a676c] sm:text-base">
+              {submissionCount === 1 ? 'One judged challenge is' : `${submissionCount} judged challenges are`} still being reviewed. The final results and the winner appear here as soon as the judges are done.
+            </p>
+          </>
+        )}
+        <div aria-hidden="true" className="mt-6 flex gap-2">
+          {[0, 1, 2].map((index) => <span key={index} className="h-2 w-2 animate-pulse rounded-full bg-[#b07a3a]" style={{ animationDelay: `${index * 0.25}s` }} />)}
+        </div>
+        <p className="mt-4 font-['IBM_Plex_Mono',monospace] text-[10px] uppercase tracking-[0.16em] text-[#8a8370]">This page updates on its own</p>
+        {onLeave ? <button className="mt-8 border-b border-[#6f644c] px-1 py-1 font-['IBM_Plex_Mono',monospace] text-[10px] font-bold uppercase tracking-[0.13em] text-[#43545a]" onClick={onLeave} type="button">Back to lobby</button> : null}
+      </div>
     </main>
   );
 }

@@ -18,9 +18,10 @@ type Section = 'todo' | 'done';
 
 const REFRESH_MS = 15_000;
 
-// Judging page: every judged challenge with the teams that completed it. Yes/no challenges get a
-// verdict per team (plus approval of the bonuses each team claimed); best-team challenges get a
-// winner pick; "judge sets points" challenges get a number. Nothing reaches players until Publish.
+// Judging page: every judged challenge with the teams that completed it. Judged challenges are
+// yes/no: each team gets a verdict (plus approval of the bonuses it claimed). Older challenge sets
+// may still have best-team or set-points challenges, so those keep their controls. Decisions can be
+// made any time; once the game is over, players wait on a holding screen until "Show results".
 export function AdminJudging({ initialGameId }: AdminJudgingProps) {
   const [games, setGames] = useState<Game[]>([]);
   const [gameId, setGameId] = useState<string | null>(initialGameId);
@@ -88,11 +89,11 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
   const publish = async () => {
     if (!gameId || !sheet) return;
     const openCount = sheet.challenges.filter((entry) => !isChallengeJudged(entry)).length;
-    if (openCount > 0 && !window.confirm(openCount + (openCount === 1 ? ' challenge is' : ' challenges are') + ' not fully judged. Undecided teams get 0. Publish anyway?')) return;
+    if (openCount > 0 && !window.confirm(openCount + (openCount === 1 ? ' challenge is' : ' challenges are') + ' not fully judged. Teams without a decision get no points. Show results anyway?')) return;
     setIsPublishing(true);
     try {
       setSheet(await publishJudgedScores(gameId));
-      setNotice('Scores published. Players now see the final standings.');
+      setNotice('Results are out. Players now see the final standings.');
     } catch (reason) {
       setError(getErrorMessage(reason));
     } finally {
@@ -169,7 +170,7 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
         <footer className="fixed inset-x-0 bottom-0 z-20 border-t border-[#c9ae6d]/40 bg-[#f3ecd8]/95 px-4 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] pt-3 backdrop-blur lg:px-8">
           <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
             <p className="text-xs leading-5 text-[#5a6a70]">
-              {sheet.publishedAt ? 'Published ' + formatTime(sheet.publishedAt) + '. Changes need republishing.' : canPublish ? 'Scores stay hidden from players until you publish.' : 'Judge any time. Publishing unlocks when the game ends.'}
+              {sheet.publishedAt ? 'Results shown ' + formatTime(sheet.publishedAt) + '. Changes need republishing.' : canPublish ? 'Players are waiting for the results. Show them once judging is done.' : 'Judge any time. Results can be shown once the game ends.'}
             </p>
             <button
               className="shrink-0 rounded-full bg-[#3f3360] px-5 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-white disabled:bg-[#b5aec4]"
@@ -177,7 +178,7 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
               onClick={() => { void publish(); }}
               type="button"
             >
-              {isPublishing ? 'Publishing…' : sheet.publishedAt ? 'Republish' : 'Publish scores'}
+              {isPublishing ? 'Publishing…' : sheet.publishedAt ? 'Republish' : 'Show results'}
             </button>
           </div>
         </footer>

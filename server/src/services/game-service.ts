@@ -244,6 +244,9 @@ async function applyLifecycleTransition(
 
   if (transition === 'end') {
     await modeHandler.onGameEnd({ db, game: updatedGame });
+    // onGameEnd can change settings (publishing judged scores), so the event carries the fresh row.
+    const [endedGame] = await db.select().from(games).where(eq(games.id, currentGame.id)).limit(1);
+    runtimeGame = endedGame ?? runtimeGame;
   }
 
   const stateVersion = await incrementVersion(db, currentGame.id);

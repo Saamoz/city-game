@@ -151,9 +151,6 @@ function buildRecapMoments(
       progress: progressAt(new Date(event.createdAt).getTime(), startedAtMs, gameDurationMs),
     };
 
-    if (event.eventType === 'CHALLENGE_COMPLETED' && event.meta.judged === true) {
-      return [{ ...base, type: 'challenge_completed', title: `${teamName ?? 'A team'} submitted ${challenge?.name ?? 'a challenge'} for judging`, detail: null }];
-    }
     if (event.eventType === 'CHALLENGE_COMPLETED') {
       return [{ ...base, type: 'challenge_completed', title: `${teamName ?? 'A team'} completed ${challenge?.name ?? 'a challenge'}`, detail: zone?.name ? `${zone.name} captured` : null }];
     }

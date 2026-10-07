@@ -536,7 +536,7 @@ export function ChallengeDeck({
             </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-2"><ScoreChips challenge={detailChallenge} />{isJudgedChallengeConfig(detailChallenge.config) ? <JudgedMark challenge={detailChallenge} /> : null}</div>
-            {isJudgedChallengeConfig(detailChallenge.config) ? <p className="mt-2 text-xs text-[#6b777b]">Judged: complete it like any challenge; the judges award the points after the game.</p> : null}
+            {isJudgedChallengeConfig(detailChallenge.config) ? <p className="mt-2 text-xs text-[#6b777b]">Judged bonus: complete it like any challenge. The judges decide yes or no, and a yes earns the points.</p> : null}
             <p className="mt-4 text-sm leading-7 text-[#44545c]">{getLongDescription(detailChallenge)}</p>
             <div className="mt-4"><BonusList challenge={detailChallenge} /></div>
 

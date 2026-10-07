@@ -1059,7 +1059,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
             <a href={'/admin/judging?gameId=' + currentGame.id} className="flex items-center justify-between gap-4 rounded-[1.75rem] border border-[#cbc3dc] bg-white p-5 shadow-[0_20px_50px_rgba(21,31,37,0.08)] transition hover:border-[#8f80b8]">
               <div>
                 <h2 className="text-lg font-semibold text-[#182126]">★ Judging</h2>
-                <p className="mt-1 text-sm text-[#5d6a72]">Judge the challenges teams have completed and publish the scores.</p>
+                <p className="mt-1 text-sm text-[#5d6a72]">Mark each judged challenge yes or no. After the game, players wait for results until you show them.</p>
               </div>
               <span className="shrink-0 rounded-full bg-[#3f3360] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white">Open</span>
             </a>

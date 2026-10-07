@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   errorCodes,
   eventTypes,
@@ -23,9 +23,11 @@ import { appendEvents, type AppendEventInput } from './event-service.js';
 import { getGameById, lockGameById } from './game-service.js';
 import { transactInTransaction } from './resource-service.js';
 
-// Judged challenges: teams submit during the game (status 'submitted' claims), judges enter draft
-// points on each submission at any time, and publishing after the game turns those drafts into
-// ledger entries. Publishing writes deltas, so judges can correct a score and publish again.
+// Judged challenges are yes/no bonuses: teams complete them like any challenge (status 'submitted'
+// claims), the admin judges each one at any time, and publishing after the game turns the decisions
+// into ledger entries. Players see a waiting screen instead of the results until then. A game whose
+// submissions are all decided by the time it ends publishes on its own. Publishing writes deltas, so
+// a judge can correct a decision and publish again.
 
 const JUDGED_AWARD_REASON = 'judged_award';
 
@@ -142,6 +144,19 @@ export async function publishJudging(db: DatabaseClient, gameId: string, now = n
   return { stateVersion, resourceEntries };
 }
 
+// Called when a game ends: publishes straight away when nothing is left to judge, so players only
+// wait for the judges when there is something to wait for.
+export async function publishJudgingIfDecided(db: DatabaseClient, gameId: string, now = new Date()): Promise<boolean> {
+  const challengeRows = await db.select({ config: challenges.config }).from(challenges).where(eq(challenges.gameId, gameId));
+  if (!challengeRows.some((row) => isJudgedChallengeConfig(row.config))) return false;
+  const [undecided] = await db.select({ id: challengeClaims.id }).from(challengeClaims)
+    .where(and(eq(challengeClaims.gameId, gameId), eq(challengeClaims.status, 'submitted'), isNull(challengeClaims.judgedDecision)))
+    .limit(1);
+  if (undecided) return false;
+  await publishJudging(db, gameId, now);
+  return true;
+}
+
 export async function getJudgingSummary(db: DatabaseClient, gameId: string, settings: unknown): Promise<GameJudgingSummary> {
   const challengeRows = await db.select({ config: challenges.config }).from(challenges).where(eq(challenges.gameId, gameId));
   if (!challengeRows.some((row) => isJudgedChallengeConfig(row.config))) {
@@ -149,8 +164,13 @@ export async function getJudgingSummary(db: DatabaseClient, gameId: string, sett
   }
   const [countRow] = await db.select({ count: sql<number>`COUNT(*)::int` }).from(challengeClaims)
     .where(and(eq(challengeClaims.gameId, gameId), eq(challengeClaims.status, 'submitted')));
+  const submissionCount = Number(countRow?.count ?? 0);
   const publishedAt = getPublishedAt(settings);
-  return { status: publishedAt ? 'published' : 'pending', submissionCount: Number(countRow?.count ?? 0), publishedAt };
+  // Nothing was submitted, so there is nothing to wait for.
+  if (submissionCount === 0 && !publishedAt) {
+    return { status: 'none', submissionCount: 0, publishedAt: null };
+  }
+  return { status: publishedAt ? 'published' : 'pending', submissionCount, publishedAt };
 }
 
 function getPublishedAt(settings: unknown): string | null {

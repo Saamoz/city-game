@@ -445,7 +445,7 @@ function formatFeedEntry(
       if (zone) return null;
       const teamName = event.actorTeamId ? teamNameById.get(event.actorTeamId) ?? 'A team' : 'A team';
       if (event.meta.judged === true) {
-        return { id: event.id, title: `${teamName} submitted ${challenge?.name ?? 'a challenge'} for judging`, body: 'Scored by the judges after the game.', createdAt: event.createdAt, accentColor: event.actorTeamId ? teamColorById.get(event.actorTeamId) : undefined };
+        return { id: event.id, title: `${teamName} completed ${challenge?.name ?? 'a challenge'}`, body: 'Judged bonus', createdAt: event.createdAt, accentColor: event.actorTeamId ? teamColorById.get(event.actorTeamId) : undefined };
       }
       const awardedPoints = asRecord(event.meta.resourcesAwarded)?.points;
       return { id: event.id, title: `${teamName} completed ${challenge?.name ?? 'a challenge'}`, body: typeof awardedPoints === 'number' && awardedPoints !== 0 ? '+' + awardedPoints + (Math.abs(awardedPoints) === 1 ? ' pt' : ' pts') : null, createdAt: event.createdAt, accentColor: event.actorTeamId ? teamColorById.get(event.actorTeamId) : undefined };

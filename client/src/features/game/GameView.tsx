@@ -779,8 +779,9 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           idempotencyKey,
         );
         applyCompletedMutation(gameId, response);
+        // Judged challenges complete like any other; their points arrive once the judges say yes.
         setToast(response.claim.status === 'submitted'
-          ? { tone: 'success', title: 'Challenge submitted', body: '★ Judged: points are awarded after the game.' }
+          ? { tone: 'success', title: 'Challenge completed', body: 'Judged: the points are added once the judges approve it.' }
           : { tone: 'success', title: response.zone ? `${response.zone.name} captured` : 'Challenge completed', body: describeAward(response.resourcesAwarded) });
         return response;
       };

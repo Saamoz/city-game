@@ -317,3 +317,11 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 
 - The notification service no longer drops pushes inside a player's rate-limit window (`PUSH_RATE_LIMIT_MS`, 60 s). The first push goes out immediately; later ones are held and sent as one when the window ends: "{count} challenges completed" / "{count} zone captures" (from `batchTitle`), or "{count} game updates" for mixed batches, with up to three bodies and "+N more". Held pushes live in memory and are lost if the server restarts mid-window.
 - Challenge Hunt completions only notify rival teams, titled "Challenge completed" for judged and regular challenges alike. Regular ones add "It's off the board."; judged ones don't, since they stay open for other teams until judged.
+
+## Judged Challenges: Yes/No Bonuses, Wait for Judges (2026-10-07)
+
+- Judged challenges are yes/no bonuses. The challenge editor no longer offers "best team wins" or "judge sets points" (always saves `judging_type: 'pass_fail'`); the judging page still handles those types for older challenge sets.
+- Players complete them like any challenge: toast and feed say "Challenge completed", with a small "Judged" marker; the "submitted for judging" wording is gone.
+- The admin can judge any time (during or after the game) at `/admin/judging`.
+- Game end: if every judged submission already has a decision (or there were none), the point-challenge `onGameEnd` publishes straight away (`publishJudgingIfDecided`). Otherwise players see a "Waiting for the judges" screen instead of the results; it refreshes on state-version change and every 10 s, and turns into the results once the admin presses "Show results" (the old "Publish scores").
+- `getJudgingSummary` reports `none` when no team submitted a judged challenge, so such games never wait.

@@ -294,7 +294,7 @@ async function submitJudgedChallenge(db: DatabaseClient, input: { challenge: typ
   if (input.challenge.status !== 'available') throw new AppError(errorCodes.challengeNotAvailable);
   const [existing] = await db.select({ id: challengeClaims.id }).from(challengeClaims)
     .where(and(eq(challengeClaims.challengeId, input.challenge.id), eq(challengeClaims.teamId, input.teamId), eq(challengeClaims.status, 'submitted'))).limit(1);
-  if (existing) throw new AppError(errorCodes.challengeNotAvailable, { message: 'Your team already submitted this challenge for judging.', details: { challengeId: input.challenge.id } });
+  if (existing) throw new AppError(errorCodes.challengeNotAvailable, { message: 'Your team already completed this challenge.', details: { challengeId: input.challenge.id } });
 
   if (getChallengeArea(input.challenge.config)) await assertInsideChallengeArea(db, input.challenge, input.gpsPayload, input.settings);
   const point = getPointLocation(input.challenge.config);
