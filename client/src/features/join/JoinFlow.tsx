@@ -748,23 +748,42 @@ function HomeScreen(props: {
     () => buildFeedEntriesForTeams(props.spectatorEvents, props.spectatorTeams),
     [props.spectatorEvents, props.spectatorTeams],
   );
+  const isLiveSpectatorView = showSpectatorView && props.game.status !== 'completed';
+
+  // The spectator screen is a full-screen map like the game view, so lock the page the same way:
+  // no scrolling the screen half out of view (100vh on iPhone is taller than what is visible).
+  useEffect(() => {
+    if (!isLiveSpectatorView) return;
+    document.documentElement.classList.add('game-view-active');
+    document.body.classList.add('game-view-active');
+    window.scrollTo(0, 0);
+    return () => {
+      document.documentElement.classList.remove('game-view-active');
+      document.body.classList.remove('game-view-active');
+    };
+  }, [isLiveSpectatorView]);
 
   if (props.game.status === 'completed') {
     return <GameResultsScreen game={props.game} publicAccess teams={props.spectatorTeams} zones={props.spectatorZones} />;
   }
 
   return (
-    <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#f5f0e8] px-5 py-8 sm:px-8">
+    <main
+      className={showSpectatorView
+        ? 'fixed inset-0 flex h-[100dvh] flex-col overflow-hidden overscroll-none bg-[#f5f0e8] px-5 pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] pt-[calc(env(safe-area-inset-top,0px)+1rem)] sm:px-8'
+        : 'relative flex min-h-screen flex-col overflow-hidden bg-[#f5f0e8] px-5 py-8 sm:px-8'}
+      data-safe-area={showSpectatorView ? '' : undefined}
+    >
       {showSpectatorView ? <SpectatorMapBackground game={props.game} teams={props.spectatorTeams} teamLocations={props.spectatorTeamLocations} zones={props.spectatorZones} /> : null}
       {showSpectatorView ? <div className="pointer-events-none absolute inset-0 bg-[rgba(245,240,232,0.18)]" /> : null}
       {showSpectatorView ? null : <SkylineBackdrop />}
       <div className={[
-        'relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] w-full flex-col justify-between',
-        showSpectatorView ? 'pointer-events-none max-w-none' : 'max-w-3xl',
+        'relative z-10 mx-auto flex w-full flex-col justify-between',
+        showSpectatorView ? 'pointer-events-none min-h-0 max-w-none flex-1' : 'min-h-[calc(100vh-4rem)] max-w-3xl',
       ].join(' ')}>
         {showSpectatorView ? (
-          <div className="pointer-events-none flex min-h-[calc(100vh-4rem)] flex-col justify-between gap-4">
-            <div className="space-y-3">
+          <div className="pointer-events-none flex min-h-0 flex-1 flex-col justify-between gap-4">
+            <div className="shrink-0 space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#d8c6a0]/75 bg-[#f7efdc]/94 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#5d4d33] shadow-[0_12px_28px_rgba(24,32,36,0.12)] backdrop-blur">
                   <span className="h-2.5 w-2.5 rounded-full bg-[#c8a86b]" />
@@ -955,7 +974,7 @@ function SpectatorTeamPanel(props: {
   const visibleTeams = expanded ? rankedTeams : rankedTeams.slice(0, 3);
 
   return (
-    <section className="pointer-events-auto mb-1 w-full max-w-md self-start rounded-[1.4rem] border border-[#d8c6a0]/80 bg-[#f7efdc]/94 p-3 shadow-[0_18px_42px_rgba(24,32,36,0.16)] backdrop-blur sm:mb-0 sm:p-4">
+    <section className="pointer-events-auto mb-1 flex min-h-0 w-full max-w-md flex-col self-start rounded-[1.4rem] border border-[#d8c6a0]/80 bg-[#f7efdc]/94 p-3 shadow-[0_18px_42px_rgba(24,32,36,0.16)] backdrop-blur sm:mb-0 sm:p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8c7a57]">{props.isCompleted ? 'Final score' : 'Teams'}</p>
@@ -974,7 +993,7 @@ function SpectatorTeamPanel(props: {
 
       {props.canJoin && !props.player ? (
         <input
-          className="mt-3 w-full rounded-2xl border border-[#d5c59f] bg-[#fffaf0] px-4 py-3 text-sm text-[#223238] outline-none transition placeholder:text-[#8a8476] focus:border-[#c8a86b] focus:bg-[#fffdf8]"
+          className="mt-3 w-full rounded-2xl border border-[#d5c59f] bg-[#fffaf0] px-4 py-3 text-base text-[#223238] outline-none transition placeholder:text-[#8a8476] focus:border-[#c8a86b] focus:bg-[#fffdf8]"
           maxLength={100}
           onChange={(event) => props.onNameChange(event.target.value)}
           placeholder="Your name"
@@ -982,7 +1001,7 @@ function SpectatorTeamPanel(props: {
         />
       ) : null}
 
-      <div className={["mt-3 space-y-2 overflow-y-auto pr-1", expanded ? 'max-h-[52vh]' : 'max-h-56'].join(' ')}>
+      <div className={["mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1", expanded ? 'max-h-[52vh]' : 'max-h-56'].join(' ')}>
         {visibleTeams.map((team) => {
           const teamPlayers = playersByTeamId.get(team.id) ?? [];
           const isJoining = props.joiningTeamId === team.id;
