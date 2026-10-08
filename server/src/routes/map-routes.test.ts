@@ -285,6 +285,39 @@ describe('map routes', () => {
     expect(realOverlap.json().error.message).toContain('overlap');
   });
 
+  it('recomputes cached playability when a map\'s zones change', async () => {
+    app = await createTestApp({ db: testDatabase.db, pool: testDatabase.pool });
+
+    const mapResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/maps',
+      headers: idempotencyHeaders('create-cache-map'),
+      payload: { name: 'Cache Map', centerLat: 49.8951, centerLng: -97.1384, defaultZoom: 12 },
+    });
+    const mapId = mapResponse.json().map.id as string;
+    const getPlayability = async () => (await app.inject({ method: 'GET', url: '/api/v1/maps/playability' })).json().maps
+      .find((entry: { mapId: string }) => entry.mapId === mapId);
+
+    expect(await getPlayability()).toEqual({ mapId, isPlayable: false, reason: 'no_zones' });
+
+    const zoneResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/maps/${mapId}/zones`,
+      headers: idempotencyHeaders('cache-zone'),
+      payload: { name: 'Only', geometry: createRectangle(-97.15, 49.88, -97.13, 49.90) },
+    });
+    expect(zoneResponse.statusCode).toBe(201);
+    expect(await getPlayability()).toEqual({ mapId, isPlayable: true, reason: null });
+
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/map-zones/${zoneResponse.json().zone.id as string}`,
+      headers: idempotencyHeaders('cache-zone-delete'),
+    });
+    expect(deleteResponse.statusCode).toBe(204);
+    expect(await getPlayability()).toEqual({ mapId, isPlayable: false, reason: 'no_zones' });
+  });
+
   it('heals a hidden adjacency gap that connectivity validation alone does not catch', async () => {
     app = await createTestApp({ db: testDatabase.db, pool: testDatabase.pool });
 

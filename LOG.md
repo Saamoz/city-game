@@ -331,3 +331,9 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 
 - Turf War deck cards now use Challenge Hunt's parchment card language (inner frame, game name on the edge, corner index with points and a flag suit, flourish divider, ink/rust buttons) while keeping the peeking, swipeable deck and Claim → Confirm flow. Details opens a parchment card too.
 - Standings and feed (both modes, plus the results-screen timeline) are a crumpled scrap of notepaper: crease shading, torn edges, tape, handwriting (Caveat + Kalam, self-hosted in `client/public/fonts`), ballpoint-blue ink, the leader's score circled in red pen, your team highlighted, and a ruled notepad with time in the margin for the feed. The sheet unfolds from a ball when opened and crumples away when closed.
+
+## Sagnik Offerings Judged Separately; Faster Admin Load (2026-10-08)
+
+- Sagnik bday set: Costco chicken, Ethiopian food, Metra balloon and La Fournette are regular challenges again and score live. Each "offer it to Sagnik" part is its own judged challenge ("Chicken / Ethiopian / Birthday balloon / Pastry for Sagnik", anywhere, "At the party"). Imported to production; games already running keep their old copy.
+- `/maps/playability` took ~16 s in production because every admin load re-ran the overlap and connectivity checks for every map. Results are now cached in memory per map against an md5 fingerprint of zone ids + geometries (the checks' only inputs), so they recompute only after a zone edit and stay correct across instances.
+- The admin panel no longer waits for playability before showing (only the map picker uses it), and a game id in the URL loads alongside the game, map and set lists.

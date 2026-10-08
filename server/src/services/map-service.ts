@@ -204,9 +204,45 @@ export async function isMapZonePartitionClean(db: DatabaseClient, mapId: string)
   return Boolean(result.rows[0]?.connected) && Boolean(result.rows[0]?.noOverlaps);
 }
 
+// The overlap and connectivity checks are slow on big maps (seconds each), and the admin panel asks
+// for every map on each load. Results are cached per map against a fingerprint of its zone ids and
+// geometries, which are the only inputs, so the cache stays correct across edits and server instances.
+const playabilityCache = new Map<string, { fingerprint: string; result: MapPlayability }>();
+
 export async function getMapPlayability(db: DatabaseClient, mapId: string): Promise<MapPlayability> {
   await getMapByIdOrThrow(db, mapId);
+  const [entry] = await getZoneFingerprints(db, mapId);
+  return getCachedMapPlayability(db, mapId, entry?.fingerprint ?? '');
+}
 
+export async function listMapPlayability(db: DatabaseClient): Promise<MapPlayability[]> {
+  const entries = await getZoneFingerprints(db, null);
+  return Promise.all(entries.map((entry) => getCachedMapPlayability(db, entry.mapId, entry.fingerprint)));
+}
+
+async function getZoneFingerprints(db: DatabaseClient, mapId: string | null): Promise<Array<{ mapId: string; fingerprint: string }>> {
+  const result = await db.execute<{ mapId: string; fingerprint: string }>(sql`
+    SELECT
+      ${maps.id} AS "mapId",
+      COALESCE(md5(string_agg(${mapZones.id}::text || ':' || md5(ST_AsEWKB(${mapZones.geometry})), ',' ORDER BY ${mapZones.id})), '') AS fingerprint
+    FROM ${maps}
+    LEFT JOIN ${mapZones} ON ${mapZones.mapId} = ${maps.id}
+    ${mapId ? sql`WHERE ${maps.id} = ${mapId}::uuid` : sql``}
+    GROUP BY ${maps.id}, ${maps.createdAt}
+    ORDER BY ${maps.createdAt}
+  `);
+  return result.rows.map((row) => ({ mapId: row.mapId, fingerprint: row.fingerprint }));
+}
+
+async function getCachedMapPlayability(db: DatabaseClient, mapId: string, fingerprint: string): Promise<MapPlayability> {
+  const cached = playabilityCache.get(mapId);
+  if (cached && cached.fingerprint === fingerprint) return cached.result;
+  const result = await computeMapPlayability(db, mapId);
+  playabilityCache.set(mapId, { fingerprint, result });
+  return result;
+}
+
+async function computeMapPlayability(db: DatabaseClient, mapId: string): Promise<MapPlayability> {
   const summary = await db.execute<{ zoneCount: number; hasOverlaps: boolean }>(sql`
     SELECT
       COUNT(*)::integer AS "zoneCount",
@@ -240,11 +276,6 @@ export async function getMapPlayability(db: DatabaseClient, mapId: string): Prom
   }
 
   return { mapId, isPlayable: true, reason: null };
-}
-
-export async function listMapPlayability(db: DatabaseClient): Promise<MapPlayability[]> {
-  const mapRows = await db.select({ id: maps.id }).from(maps).orderBy(asc(maps.createdAt));
-  return Promise.all(mapRows.map((map) => getMapPlayability(db, map.id)));
 }
 
 export async function assertMapPlayable(db: DatabaseClient, mapId: string): Promise<void> {

@@ -197,23 +197,30 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     setErrorMessage(null);
 
     try {
-      const [nextGames, nextMaps, nextMapPlayability, nextChallengeSets] = await Promise.all([
+      // Map playability is only needed by the map picker and can be slow, so the panel shows without it.
+      const playabilityRequest = listMapPlayability();
+      playabilityRequest.then(setMapPlayability, () => undefined);
+      // A game id in the URL can load alongside the lists instead of after them.
+      const knownGameId = preferredGameId?.trim() || null;
+      const earlyBundle = knownGameId ? loadGameBundle(knownGameId) : null;
+      earlyBundle?.catch(() => undefined);
+
+      const [nextGames, nextMaps, nextChallengeSets] = await Promise.all([
         listGames(),
         listMaps(),
-        listMapPlayability(),
         listChallengeSets(),
       ]);
 
       setGames(nextGames);
       setMaps(nextMaps);
-      setMapPlayability(nextMapPlayability);
       setChallengeSets(nextChallengeSets);
 
-      const resolvedGameId = preferredGameId?.trim() || nextGames[0]?.id || null;
+      const resolvedGameId = knownGameId || nextGames[0]?.id || null;
       setSelectedGameId(resolvedGameId);
       syncRoute(resolvedGameId);
 
       if (!resolvedGameId) {
+        const nextMapPlayability = await playabilityRequest;
         setCurrentGame(null);
         setGameForm({
           ...INITIAL_GAME_FORM,
@@ -234,7 +241,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
         return;
       }
 
-      await loadGameBundle(resolvedGameId);
+      await (earlyBundle ?? loadGameBundle(resolvedGameId));
       setStatus('ready');
     } catch (error) {
       setStatus('error');
