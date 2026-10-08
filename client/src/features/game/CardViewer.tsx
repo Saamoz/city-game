@@ -123,7 +123,7 @@ export function CardViewer({ gameName, challenges, startId, getContext, isPendin
               className="pointer-events-none absolute inset-0 flex items-center justify-center px-4"
               style={{ transform: `translateX(calc(${offset}% + ${dragX}px))`, transition: isDragging ? 'none' : 'transform 0.32s cubic-bezier(0.22,1,0.36,1)' }}
             >
-              <div className="pointer-events-auto h-[min(74dvh,640px)] w-[min(92vw,400px)]" style={{ transform: `rotate(${(position - index) * 2}deg)` }}>
+              <div className="pointer-events-auto h-[min(74dvh,640px)] w-[min(92vw,400px)]">
                 <ChallengeCardFace
                   gameName={gameName}
                   key={challenge.id}
