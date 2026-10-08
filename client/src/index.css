@@ -56,10 +56,16 @@ body.game-view-active #root {
 #root main:not([data-safe-area]):not(main main)::after { height: env(safe-area-inset-bottom, 0px); }
 
 /* In a Safari tab iOS won't let the page draw behind the status bar; it fills that strip with the
-   page background instead. This beige continues the fade at the top of the game screen. */
+   page background instead. Beige for the parchment screens (lobby, countdown). */
 html.game-view-active,
 body.game-view-active {
   background: #f1eadb;
+}
+/* On the map itself the strip matches the map's land colour instead, so the map seems to carry on
+   up to the top of the screen. */
+html.game-map-active,
+body.game-map-active {
+  background: #f5f3ef;
 }
 
 /* In the Home Screen app the map runs behind the status bar, whose clock and icons are white there.

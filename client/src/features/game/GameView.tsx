@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import mapboxgl from 'mapbox-gl';
 import {
@@ -79,6 +79,8 @@ interface CompletedCardViewModel {
 
 // How much of the closed deck stays on screen.
 const DECK_PEEK_PX = 76;
+// The map style's land colour, for the strip Safari paints under the status bar.
+const MAP_LAND_COLOR = '#f5f3ef';
 
 const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env.MAPBOX_ACCESS_TOKEN ?? '').trim();
 
@@ -105,11 +107,11 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const [isDeckOpen, setIsDeckOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showMobileCompleted, setShowMobileCompleted] = useState(false);
-  const [deckDragY, setDeckDragY] = useState(0);
-  const [isDraggingDeck, setIsDraggingDeck] = useState(false);
+  // While a finger drags the deck: how far it has moved, and whether the deck was open when it started.
+  const [deckDrag, setDeckDrag] = useState<{ fromOpen: boolean; dy: number } | null>(null);
   const deckWrapperRef = useRef<HTMLDivElement | null>(null);
   const [deckWrapperHeight, setDeckWrapperHeight] = useState(320);
-  const deckSwipeRef = useRef({ active: false, startX: 0, startY: 0, startTime: 0, committed: false });
+  const deckSwipeRef = useRef({ active: false, startX: 0, startY: 0, startTime: 0, committed: false, fromOpen: false });
   const feedAbortRef = useRef<AbortController | null>(null);
   const [activeOverlay, setActiveOverlay] = useState<'scoreboard' | 'feed' | null>(null);
   const [recentEvents, setRecentEvents] = useState<GameEventRecord[]>([]);
@@ -140,8 +142,12 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     const body = document.body;
     const previousScrollY = window.scrollY;
 
-    html.classList.add('game-view-active');
-    body.classList.add('game-view-active');
+    html.classList.add('game-view-active', 'game-map-active');
+    body.classList.add('game-view-active', 'game-map-active');
+    // Safari tints the status bar strip from the page; match the map so it reads as more map.
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    const previousTheme = themeMeta?.getAttribute('content') ?? null;
+    themeMeta?.setAttribute('content', MAP_LAND_COLOR);
     window.scrollTo(0, 0);
     // Safari ignores touch-action for pinches that start outside the map; its gesture events
     // still let us stop the whole page from zooming. Map pinches use touch events, unaffected.
@@ -152,8 +158,9 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     return () => {
       document.removeEventListener('gesturestart', preventPageZoom);
       document.removeEventListener('gesturechange', preventPageZoom);
-      html.classList.remove('game-view-active');
-      body.classList.remove('game-view-active');
+      html.classList.remove('game-view-active', 'game-map-active');
+      body.classList.remove('game-view-active', 'game-map-active');
+      if (themeMeta && previousTheme) themeMeta.setAttribute('content', previousTheme);
       window.scrollTo(0, previousScrollY);
     };
   }, []);
@@ -213,6 +220,11 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     setDeckWrapperHeight(element.offsetHeight);
     return () => observer.disconnect();
   }, [Boolean(snapshot)]);
+  // The content swaps between the fan and the open row as a drag starts or ends; measure before the
+  // paint so the deck doesn't jump for a frame.
+  useLayoutEffect(() => {
+    if (deckWrapperRef.current) setDeckWrapperHeight(deckWrapperRef.current.offsetHeight);
+  }, [isDeckOpen]);
 
 
 
@@ -617,7 +629,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   );
   const controlledZoneCount = useMemo(() => buildControlledZoneCount(snapshotZones, viewerTeamId), [snapshotZones, viewerTeamId]);
   const mobileBottomInsetStyle = { paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1rem)' } as const;
-  const mobileBottomShelfStyle = { height: 'calc(env(safe-area-inset-bottom, 0px) + 4.5rem)' } as const;
+  // How far the deck slides between open and closed (closed leaves just the peek strip on screen).
+  const deckTravel = Math.max(0, deckWrapperHeight - DECK_PEEK_PX);
   const snapshotPlayers = snapshot?.players;
   const snapshotTeamResources = snapshot?.teamResources;
   const scoreboardEntries = useMemo(
@@ -862,12 +875,14 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       }
     });
   };
+  // The deck follows the finger both ways: drag the closed fan up to pull the deck open, or the open
+  // deck down to put it away. On release it settles open or closed, by where it is and how fast it went.
   const handleDeckPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.target instanceof Element && e.target.closest('[data-deck-interactive="true"]')) {
       return;
     }
-    deckSwipeRef.current = { active: true, startX: e.clientX, startY: e.clientY, startTime: Date.now(), committed: false };
-  }, []);
+    deckSwipeRef.current = { active: true, startX: e.clientX, startY: e.clientY, startTime: Date.now(), committed: false, fromOpen: isDeckOpen };
+  }, [isDeckOpen]);
 
   const handleDeckPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     const ref = deckSwipeRef.current;
@@ -881,50 +896,57 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
         deckSwipeRef.current.active = false;
         return;
       }
-      if (Math.abs(deltaY) > 10) {
+      // A closed deck only drags upward; an open one either way.
+      if (ref.fromOpen ? Math.abs(deltaY) > 10 : deltaY < -10) {
         deckSwipeRef.current.committed = true;
-        setIsDraggingDeck(true);
-        // The deck follows the finger, which can end up below it; capture so the release still lands here.
+        // The open row replaces the fan as soon as the drag starts, and follows the finger from there.
+        setIsDeckOpen(true);
+        // The finger can end up off the deck; capture so the moves and release still land here.
         e.currentTarget.setPointerCapture(e.pointerId);
+        setDeckDrag({ fromOpen: ref.fromOpen, dy: deltaY });
       }
       return;
     }
     e.preventDefault();
-    // open mode only: free downward (toward close), resist upward
-    setDeckDragY(deltaY > 0 ? deltaY : Math.round(deltaY * 0.25));
+    setDeckDrag({ fromOpen: ref.fromOpen, dy: deltaY });
   }, []);
 
-  const handleDeckPointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>, currentShowCompleted: boolean, hasCompleted: boolean) => {
+  const handleDeckPointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>, currentShowCompleted: boolean, hasCompleted: boolean, travel: number) => {
     const ref = deckSwipeRef.current;
     if (!ref.active) {
       return;
     }
     deckSwipeRef.current.active = false;
-    setIsDraggingDeck(false);
+    setDeckDrag(null);
+    if (!ref.committed) {
+      return;
+    }
     const deltaY = e.clientY - ref.startY;
     const velocity = deltaY / Math.max(Date.now() - ref.startTime, 1);
+    const position = (ref.fromOpen ? 0 : travel) + deltaY;
 
-    // open mode: swipe down to close, swipe up to reveal completed tray
-    if (deltaY > 80 || (deltaY > 30 && velocity > 0.5)) {
-      if (currentShowCompleted) {
-        setShowMobileCompleted(false);
-      } else {
-        setIsDeckOpen(false);
-        setShowMobileCompleted(false);
-        setSelectedChallengeId(null);
-      }
-    } else if (deltaY < -50 || (deltaY < -20 && velocity < -0.4)) {
-      if (!currentShowCompleted && hasCompleted) {
-        setShowMobileCompleted(true);
-      }
+    if (ref.fromOpen && currentShowCompleted && (deltaY > 50 || (deltaY > 20 && velocity > 0.4))) {
+      setShowMobileCompleted(false);
+      return;
     }
-    setDeckDragY(0);
+    // Pushed up past fully open: reveal the completed tray.
+    if (ref.fromOpen && (deltaY < -50 || (deltaY < -20 && velocity < -0.4))) {
+      if (!currentShowCompleted && hasCompleted) setShowMobileCompleted(true);
+      return;
+    }
+    const open = velocity < -0.3 ? true : velocity > 0.3 ? false : position < travel / 2;
+    if (!open) {
+      setIsDeckOpen(false);
+      setShowMobileCompleted(false);
+      setSelectedChallengeId(null);
+    }
   }, []);
 
   const handleDeckPointerCancel = useCallback(() => {
+    const wasDragging = deckSwipeRef.current.active && deckSwipeRef.current.committed;
     deckSwipeRef.current.active = false;
-    setIsDraggingDeck(false);
-    setDeckDragY(0);
+    setDeckDrag(null);
+    if (wasDragging && !deckSwipeRef.current.fromOpen) setIsDeckOpen(false);
   }, []);
 
   const openMenu = useCallback(() => {
@@ -999,7 +1021,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
         />
       ) : null}
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-[linear-gradient(180deg,rgba(243,236,220,0.9),rgba(243,236,220,0))] px-4 pb-10 pt-[calc(env(safe-area-inset-top,0px)+1rem)] lg:px-8">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 px-4 pb-10 pt-[calc(env(safe-area-inset-top,0px)+1rem)] lg:px-8">
         <div className="pointer-events-auto mx-auto max-w-7xl">
 
           {/* Mobile top bar */}
@@ -1007,7 +1029,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
             <div className="min-w-0 space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 {team ? (
-                  <span className="inline-flex items-center gap-2 rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] backdrop-blur-sm">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a]">
                     <span
                       className="h-3 w-3 rounded-full border border-[#f8f1df]"
                       style={{ backgroundColor: team.color }}
@@ -1016,7 +1038,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                   </span>
                 ) : null}
                 {team ? (
-                  <span className="rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] backdrop-blur-sm">
+                  <span className="rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a]">
                     {isPointMode
                       ? teamPoints + ' ' + (teamPoints === 1 ? 'pt' : 'pts')
                       : controlledZoneCount + ' ' + (controlledZoneCount === 1 ? 'zone' : 'zones')}
@@ -1027,13 +1049,13 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 <PointModeLegend pinCount={regularPinCount} anywhereCount={anywhereAvailableCount} showAnywhere={showDeck} />
               ) : null}
               {currentZone ? (
-                <span className="inline-flex max-w-full rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a] backdrop-blur-sm">
+                <span className="inline-flex max-w-full rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#24343a]">
                   <span className="truncate">{currentZone.name}</span>
                 </span>
               ) : null}
             </div>
             <button
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#c9ae6d]/55 bg-[#f3ecd8]/90 text-sm text-[#24343a] shadow-sm backdrop-blur-sm"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#c9ae6d]/55 bg-[#f3ecd8] text-sm text-[#24343a]"
               onClick={openMenu}
               type="button"
               aria-label="Menu"
@@ -1199,23 +1221,17 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       {snapshot && snapshot.game.status !== 'paused' && showDeck ? (
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 lg:hidden">
           <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#f3e2d8]/92 via-[#f3e2d8]/72 to-transparent"
-            style={mobileBottomShelfStyle}
-          />
-          <div
             ref={deckWrapperRef}
             className={isDeckOpen ? 'pointer-events-auto px-4 [touch-action:none]' : 'pointer-events-none flex justify-center'}
             style={{
               ...mobileBottomInsetStyle,
-              transform: isDeckOpen
-                ? `translateY(${deckDragY}px)`
-                : `translateY(${Math.max(0, deckWrapperHeight - DECK_PEEK_PX)}px)`,
-              transition: isDraggingDeck ? 'none' : 'transform 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
+              transform: `translateY(${getDeckOffset(deckDrag, isDeckOpen, deckTravel)}px)`,
+              transition: deckDrag ? 'none' : 'transform 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
             }}
-            onPointerDown={isDeckOpen ? handleDeckPointerDown : undefined}
-            onPointerMove={isDeckOpen ? handleDeckPointerMove : undefined}
-            onPointerUp={isDeckOpen ? (e) => handleDeckPointerUp(e, showMobileCompleted, completedCards.length > 0) : undefined}
-            onPointerCancel={isDeckOpen ? handleDeckPointerCancel : undefined}
+            onPointerDown={handleDeckPointerDown}
+            onPointerMove={handleDeckPointerMove}
+            onPointerUp={(e) => handleDeckPointerUp(e, showMobileCompleted, completedCards.length > 0, deckTravel)}
+            onPointerCancel={handleDeckPointerCancel}
           >
 
 {isPointMode ? (
@@ -1488,12 +1504,12 @@ function getTeamSubmittedIds(claims: ChallengeClaim[] | undefined, teamId: strin
 function PointModeLegend({ pinCount, anywhereCount, showAnywhere }: { pinCount: number; anywhereCount: number; showAnywhere: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#24343a]">
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 backdrop-blur-sm">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8] px-3 py-1.5">
         <span className="h-2.5 w-2.5 rotate-45 rounded-[50%_50%_50%_12%] bg-[#d97a37]" />
         {pinCount} on map
       </span>
       {showAnywhere ? (
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8]/92 px-3 py-1.5 backdrop-blur-sm">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-[#c8b48a]/55 bg-[#f3ecd8] px-3 py-1.5">
           <span className="h-2.5 w-2 rounded-[2px] border border-[#647d74] bg-[#fff8eb]" />
           {anywhereCount} anywhere
         </span>
@@ -1885,4 +1901,12 @@ function getMutationErrorMessage(error: unknown): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
+}
+
+// The deck's slide offset: 0 is fully open, travel is closed. Mid-drag it follows the finger, with a
+// little give past fully open.
+function getDeckOffset(drag: { fromOpen: boolean; dy: number } | null, isOpen: boolean, travel: number): number {
+  if (!drag) return isOpen ? 0 : travel;
+  const position = (drag.fromOpen ? 0 : travel) + drag.dy;
+  return Math.min(travel, position < 0 ? Math.round(position * 0.25) : position);
 }

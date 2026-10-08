@@ -23,7 +23,6 @@ export function PointDeck({ gameName, challenges, getSuit, distanceTo, isInRange
   const [filter, setFilter] = useState<DeckFilter>('all');
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRefs = useDragRefs();
-  const swipeRef = useRef({ active: false, startY: 0, startTime: 0 });
   const available = challenges.filter((challenge) => challenge.status === 'available');
   const counts = {
     all: available.length,
@@ -43,23 +42,14 @@ export function PointDeck({ gameName, challenges, getSuit, distanceTo, isInRange
       <button
         aria-label={'Open challenges, ' + available.length + ' left'}
         className="pointer-events-auto relative mx-auto block h-[7.5rem] w-[11rem] [touch-action:none]"
+        // Tap to open; dragging it up is handled by the deck around it, which follows the finger.
         onClick={onOpen}
-        // Swipe up on the stack to open it, as well as tapping it.
-        onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); swipeRef.current = { active: true, startY: event.clientY, startTime: Date.now() }; }}
-        onPointerCancel={() => { swipeRef.current.active = false; }}
-        onPointerUp={(event) => {
-          if (!swipeRef.current.active) return;
-          swipeRef.current.active = false;
-          const dy = event.clientY - swipeRef.current.startY;
-          const velocity = dy / Math.max(Date.now() - swipeRef.current.startTime, 1);
-          if (dy < -20 || (dy < -8 && velocity < -0.25)) onOpen();
-        }}
         type="button"
       >
         {fan.slice(1).reverse().map((challenge, position) => (
-          <span key={challenge.id} className="absolute inset-x-0 top-0 h-full rounded-[0.9rem] border border-[#a98c5a] bg-[#efe3c6] shadow-[0_6px_16px_rgba(40,30,15,0.18)]" style={{ transform: `rotate(${position === 0 ? -7 : -3.5}deg) translateY(${position === 0 ? 6 : 3}px)` }} />
+          <span key={challenge.id} className="absolute inset-x-0 top-0 h-full rounded-[0.9rem] border border-[#a98c5a] bg-[#efe3c6] shadow-[0_1px_3px_rgba(40,30,15,0.14)]" style={{ transform: `rotate(${position === 0 ? -7 : -3.5}deg) translateY(${position === 0 ? 6 : 3}px)` }} />
         ))}
-        <span className="absolute inset-x-0 top-0 flex h-full flex-col items-center rounded-[0.9rem] border border-[#a98c5a] bg-[radial-gradient(circle_at_30%_20%,#fbf6e8,#f1e6cc)] pt-3 shadow-[0_10px_24px_rgba(40,30,15,0.22)]" style={{ transform: 'rotate(2deg)' }}>
+        <span className="absolute inset-x-0 top-0 flex h-full flex-col items-center rounded-[0.9rem] border border-[#a98c5a] bg-[radial-gradient(circle_at_30%_20%,#fbf6e8,#f1e6cc)] pt-3 shadow-[0_2px_5px_rgba(40,30,15,0.16)]" style={{ transform: 'rotate(2deg)' }}>
           <span aria-hidden="true" className="pointer-events-none absolute inset-[5px] rounded-[0.7rem] border border-[#c4a874]/70" />
           <EdgeLabel size="mini" text={gameName} />
           <span className="font-[Georgia,Times_New_Roman,serif] text-xl font-semibold" style={{ color: INK }}>Challenges</span>
@@ -130,7 +120,7 @@ function MiniCard({ challenge, gameName, suit, distance, inRange, tilt, onOpen }
   const where = [hint ?? (suit === 'anywhere' ? 'Anywhere' : distanceLabel ? null : suit === 'area' ? 'Area' : 'On map'), distanceLabel].filter(Boolean).join(' · ');
   return (
     <button
-      className="relative flex h-[12.25rem] w-[8.75rem] shrink-0 flex-col rounded-[0.9rem] border border-[#a98c5a] bg-[radial-gradient(circle_at_30%_18%,#fbf6e8,#f1e6cc_70%,#eadcbc)] px-2.5 pb-2.5 pt-2 text-left shadow-[0_8px_20px_rgba(40,30,15,0.16)] transition active:scale-[0.98]"
+      className="relative flex h-[12.25rem] w-[8.75rem] shrink-0 flex-col rounded-[0.9rem] border border-[#a98c5a] bg-[radial-gradient(circle_at_30%_18%,#fbf6e8,#f1e6cc_70%,#eadcbc)] px-2.5 pb-2.5 pt-2 text-left shadow-[0_2px_5px_rgba(40,30,15,0.14)] transition active:scale-[0.98]"
       onClick={(event) => { if (Math.hypot(event.clientX - pressRef.current.x, event.clientY - pressRef.current.y) < 12) onOpen(); }}
       onPointerDown={(event) => { pressRef.current = { x: event.clientX, y: event.clientY }; }}
       style={{ transform: `rotate(${tilt * 0.6}deg)` }}
