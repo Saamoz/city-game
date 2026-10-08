@@ -141,6 +141,12 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     return counts;
   }, [players]);
 
+  // Sets written for the chosen map first, then generic ones. The saved set stays listed even if it
+  // predates set maps, so the picker never shows blank.
+  const challengeSetOptions = useMemo(() => {
+    const fitting = challengeSets.filter((entry) => challengeSetFitsMap(entry, gameForm.mapId) || entry.id === gameForm.challengeSetId);
+    return [...fitting.filter((entry) => entry.mapId), ...fitting.filter((entry) => !entry.mapId)];
+  }, [challengeSets, gameForm.challengeSetId, gameForm.mapId]);
   const playabilityByMapId = useMemo(
     () => new Map(mapPlayability.map((entry) => [entry.mapId, entry])),
     [mapPlayability],
@@ -221,11 +227,12 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
 
       if (!resolvedGameId) {
         const nextMapPlayability = await playabilityRequest;
+        const draftMapId = nextMaps.find((map) => nextMapPlayability.find((entry) => entry.mapId === map.id)?.isPlayable)?.id ?? '';
         setCurrentGame(null);
         setGameForm({
           ...INITIAL_GAME_FORM,
-          mapId: nextMaps.find((map) => nextMapPlayability.find((entry) => entry.mapId === map.id)?.isPlayable)?.id ?? '',
-          challengeSetId: nextChallengeSets[0]?.id ?? '',
+          mapId: draftMapId,
+          challengeSetId: nextChallengeSets.find((entry) => challengeSetFitsMap(entry, draftMapId))?.id ?? '',
         });
         setTeams([]);
         setPlayers([]);
@@ -313,7 +320,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     setGameForm({
       ...INITIAL_GAME_FORM,
       mapId: firstPlayableMapId,
-      challengeSetId: challengeSets[0]?.id ?? '',
+      challengeSetId: challengeSets.find((entry) => challengeSetFitsMap(entry, firstPlayableMapId))?.id ?? '',
     });
     setTeams([]);
     setPlayers([]);
@@ -733,7 +740,14 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                 <Field label="Map">
                   <select
                     value={gameForm.mapId}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, mapId: event.target.value })); }}
+                    onChange={(event) => {
+                      const mapId = event.target.value;
+                      // A set written for another city doesn't carry over to the new map.
+                      setGameForm((current) => {
+                        const currentSet = challengeSets.find((entry) => entry.id === current.challengeSetId);
+                        return { ...current, mapId, challengeSetId: currentSet && !challengeSetFitsMap(currentSet, mapId) ? '' : current.challengeSetId };
+                      });
+                    }}
                     className={inputClassName}
                     disabled={!canEditSetupBindings}
                   >
@@ -756,8 +770,8 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                     disabled={!canEditSetupBindings}
                   >
                     <option value="">Select a set</option>
-                    {challengeSets.map((challengeSet) => (
-                      <option key={challengeSet.id} value={challengeSet.id}>{challengeSet.name}</option>
+                    {challengeSetOptions.map((challengeSet) => (
+                      <option key={challengeSet.id} value={challengeSet.id}>{challengeSet.name}{challengeSet.mapId ? '' : ' (any city)'}</option>
                     ))}
                   </select>
                 </Field>
@@ -1374,6 +1388,10 @@ function CompactList(props: { title: string; items: Array<{ id: string; label: s
       </div>
     </div>
   );
+}
+
+function challengeSetFitsMap(challengeSet: ChallengeSet, mapId: string): boolean {
+  return !challengeSet.mapId || challengeSet.mapId === mapId;
 }
 
 function mapPlayabilityLabel(reason: MapPlayability['reason']): string {

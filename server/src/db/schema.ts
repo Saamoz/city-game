@@ -66,6 +66,8 @@ export const challengeSets = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     name: varchar('name', { length: 255 }).notNull(),
     description: text('description'),
+    // The city the set is written for. Null means a generic set that works on any map.
+    mapId: uuid('map_id').references(() => maps.id, { onDelete: 'set null' }),
     metadata: jsonb('metadata').notNull().default(defaultJsonObject),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

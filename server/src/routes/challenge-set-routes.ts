@@ -38,6 +38,7 @@ const challengeSetBodySchema = {
     name: { type: 'string', minLength: 1, maxLength: 255 },
     description: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     locationMode: { type: 'string', enum: ['portable', 'zone', 'point'] },
+    mapId: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
     metadata: { type: 'object', additionalProperties: true },
   },
 } as const;
@@ -50,6 +51,7 @@ const challengeSetUpdateBodySchema = {
     name: { type: 'string', minLength: 1, maxLength: 255 },
     description: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     locationMode: { type: 'string', enum: ['portable', 'zone', 'point'] },
+    mapId: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
     metadata: { type: 'object', additionalProperties: true },
   },
 } as const;
@@ -102,7 +104,7 @@ export const challengeSetRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/challenge-sets', { schema: { body: challengeSetBodySchema } }, async (request, reply) => {
-    const body = request.body as { name: string; description?: string | null; locationMode?: 'portable' | 'zone' | 'point'; metadata?: JsonObject };
+    const body = request.body as { name: string; description?: string | null; locationMode?: 'portable' | 'zone' | 'point'; mapId?: string | null; metadata?: JsonObject };
     const challengeSet = await createChallengeSet(app.db, body);
     reply.code(201).send({ challengeSet });
   });
@@ -114,7 +116,7 @@ export const challengeSetRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch('/challenge-sets/:id', { schema: { params: idParamsSchema, body: challengeSetUpdateBodySchema } }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = request.body as { name?: string; description?: string | null; locationMode?: 'portable' | 'zone' | 'point'; metadata?: JsonObject };
+    const body = request.body as { name?: string; description?: string | null; locationMode?: 'portable' | 'zone' | 'point'; mapId?: string | null; metadata?: JsonObject };
     reply.send({ challengeSet: await updateChallengeSet(app.db, id, body) });
   });
 

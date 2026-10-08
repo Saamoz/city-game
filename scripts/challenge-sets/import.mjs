@@ -7,7 +7,7 @@
 //     --base https://adventure.saamoz.com [--apply] [--replace] [--map-id <uuid>] [--token <admin token>]
 //
 // --replace also deletes challenges in the set that are not in the file.
-// --map-id picks the source map for pinned challenges; otherwise it reuses the set's map, or the
+// --map-id picks the set's map (where pins and areas go); otherwise it reuses the set's map, or the
 // first map with "Chicago" in its name.
 
 import { randomUUID } from 'node:crypto';
@@ -51,6 +51,10 @@ if (set && set.locationMode !== 'point') {
 
 const needsMap = definition.items.some((item) => item.where.placement !== 'anywhere');
 const mapId = needsMap ? await resolveMapId(existing) : null;
+if (set && mapId && set.mapId !== mapId) {
+  console.log(`Tying the set to map ${mapId}.`);
+  if (apply) set = (await api('PATCH', `/challenge-sets/${set.id}`, { mapId })).challengeSet;
+}
 
 const byTitle = new Map(existing.map((item) => [item.title.trim().toLowerCase(), item]));
 const seen = new Set();
@@ -98,7 +102,7 @@ function buildPayload(item, index, sourceMapId) {
 async function resolveMapId(items) {
   const explicit = flag('--map-id');
   if (explicit) return explicit;
-  const reused = items.map((item) => item.metadata?.sourceMapId).find(Boolean);
+  const reused = set?.mapId ?? items.map((item) => item.metadata?.sourceMapId).find(Boolean);
   if (reused) return reused;
   const { maps } = await api('GET', '/maps');
   const chicago = maps.find((map) => /chicago/i.test(map.name));

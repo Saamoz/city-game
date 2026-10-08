@@ -282,7 +282,7 @@ export async function getChallengeSet(challengeSetId: string, signal?: AbortSign
   return response.challengeSet;
 }
 
-export async function createChallengeSetDefinition(input: { name: string; description?: string | null; locationMode?: ChallengeSet['locationMode']; metadata?: JsonObject }): Promise<ChallengeSet> {
+export async function createChallengeSetDefinition(input: { name: string; description?: string | null; locationMode?: ChallengeSet['locationMode']; mapId?: string | null; metadata?: JsonObject }): Promise<ChallengeSet> {
   const response = await apiRequest<ChallengeSetResponse>('/challenge-sets', {
     method: 'POST',
     body: input,
@@ -292,7 +292,7 @@ export async function createChallengeSetDefinition(input: { name: string; descri
 
 export async function updateChallengeSetDefinition(
   challengeSetId: string,
-  input: { name?: string; description?: string | null; locationMode?: ChallengeSet['locationMode']; metadata?: JsonObject },
+  input: { name?: string; description?: string | null; locationMode?: ChallengeSet['locationMode']; mapId?: string | null; metadata?: JsonObject },
 ): Promise<ChallengeSet> {
   const response = await apiRequest<ChallengeSetResponse>('/challenge-sets/' + challengeSetId, {
     method: 'PATCH',

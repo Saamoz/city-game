@@ -15,6 +15,7 @@ interface ChallengeSetRow {
   id: string;
   name: string;
   description: string | null;
+  mapId: string | null;
   metadata: JsonObject;
   createdAt: Date;
   updatedAt: Date;
@@ -39,6 +40,7 @@ interface ChallengeSetItemRow {
 
 export interface ChallengeSetInput {
   locationMode?: 'portable' | 'zone' | 'point';
+  mapId?: string | null;
   name: string;
   description?: string | null;
   metadata?: JsonObject;
@@ -46,6 +48,7 @@ export interface ChallengeSetInput {
 
 export interface ChallengeSetUpdateInput {
   locationMode?: 'portable' | 'zone' | 'point';
+  mapId?: string | null;
   name?: string;
   description?: string | null;
   metadata?: JsonObject;
@@ -99,9 +102,11 @@ export async function getChallengeSetByIdOrThrow(db: DatabaseClient, challengeSe
 }
 
 export async function createChallengeSet(db: DatabaseClient, input: ChallengeSetInput): Promise<ChallengeSet> {
+  if (input.mapId) await assertMapExists(db, input.mapId);
   const [inserted] = await db.insert(challengeSets).values({
     name: input.name,
     description: normalizeNullableString(input.description),
+    mapId: input.mapId ?? null,
     metadata: { ...(input.metadata ?? {}), locationMode: input.locationMode ?? 'portable' },
   }).returning({ id: challengeSets.id });
 
@@ -110,10 +115,13 @@ export async function createChallengeSet(db: DatabaseClient, input: ChallengeSet
 
 export async function updateChallengeSet(db: DatabaseClient, challengeSetId: string, input: ChallengeSetUpdateInput): Promise<ChallengeSet> {
   const existing = await getChallengeSetByIdOrThrow(db, challengeSetId);
+  const nextMapId = input.mapId === undefined ? existing.mapId : input.mapId;
+  if (nextMapId !== existing.mapId) await assertSetCanMoveToMap(db, challengeSetId, nextMapId);
 
   await db.update(challengeSets).set({
     name: input.name ?? existing.name,
     description: input.description === undefined ? existing.description : normalizeNullableString(input.description),
+    mapId: nextMapId,
     metadata: { ...(input.metadata ?? existing.metadata), locationMode: input.locationMode ?? existing.locationMode },
     updatedAt: new Date(),
   }).where(eq(challengeSets.id, challengeSetId));
@@ -151,15 +159,14 @@ export async function getChallengeSetItemByIdOrThrow(db: DatabaseClient, challen
 export async function createChallengeSetItem(db: DatabaseClient, input: ChallengeSetItemInput): Promise<ChallengeSetItem> {
   const challengeSet = await getChallengeSetByIdOrThrow(db, input.setId);
 
-  const nextMetadata = input.metadata ?? {};
-  const sourceMapId = getSourceMapId(nextMetadata);
   const nextMapZoneId = input.mapZoneId ?? null;
   const nextMapPoint = input.mapPoint ?? null;
+  const nextConfig = input.config ?? {};
 
   assertPlacementMatchesSet(challengeSet.locationMode, nextMapZoneId, nextMapPoint);
   assertBonusLimit(input.config);
-  await assertAreaIsValid(db, challengeSet.locationMode, input.config ?? {}, nextMapZoneId, nextMapPoint);
-  await assertPlacementIsValid(db, { mapZoneId: nextMapZoneId, mapPoint: nextMapPoint, sourceMapId });
+  await assertAreaIsValid(db, challengeSet.locationMode, nextConfig, nextMapZoneId, nextMapPoint);
+  const nextMetadata = await resolveItemMap(db, challengeSet, input.metadata ?? {}, { mapZoneId: nextMapZoneId, mapPoint: nextMapPoint, config: nextConfig });
 
   const [inserted] = await db.insert(challengeSetItems).values({
     setId: input.setId,
@@ -167,7 +174,7 @@ export async function createChallengeSetItem(db: DatabaseClient, input: Challeng
     title: input.title,
     description: input.description,
     kind: input.kind ?? 'text',
-    config: buildPersistedConfig(input.config ?? {}, nextMapZoneId, nextMapPoint),
+    config: buildPersistedConfig(nextConfig, nextMapZoneId, nextMapPoint),
     completionMode: input.completionMode ?? 'self_report',
     scoring: input.scoring ?? {},
     difficulty: normalizeNullableString(input.difficulty),
@@ -181,22 +188,21 @@ export async function createChallengeSetItem(db: DatabaseClient, input: Challeng
 export async function updateChallengeSetItem(db: DatabaseClient, challengeSetItemId: string, input: ChallengeSetItemUpdateInput): Promise<ChallengeSetItem> {
   const existing = await getChallengeSetItemByIdOrThrow(db, challengeSetItemId);
   const challengeSet = await getChallengeSetByIdOrThrow(db, existing.setId);
-  const nextMetadata = input.metadata ?? existing.metadata;
-  const sourceMapId = getSourceMapId(nextMetadata);
   const nextMapZoneId = input.mapZoneId === undefined ? existing.mapZoneId : input.mapZoneId;
   const nextMapPoint = input.mapPoint === undefined ? existing.mapPoint : input.mapPoint;
+  const nextConfig = input.config ?? existing.config;
 
   assertPlacementMatchesSet(challengeSet.locationMode, nextMapZoneId, nextMapPoint);
   assertBonusLimit(input.config);
-  await assertAreaIsValid(db, challengeSet.locationMode, input.config ?? existing.config, nextMapZoneId, nextMapPoint);
-  await assertPlacementIsValid(db, { mapZoneId: nextMapZoneId, mapPoint: nextMapPoint, sourceMapId });
+  await assertAreaIsValid(db, challengeSet.locationMode, nextConfig, nextMapZoneId, nextMapPoint);
+  const nextMetadata = await resolveItemMap(db, challengeSet, input.metadata ?? existing.metadata, { mapZoneId: nextMapZoneId, mapPoint: nextMapPoint, config: nextConfig });
 
   await db.update(challengeSetItems).set({
     mapZoneId: nextMapZoneId,
     title: input.title ?? existing.title,
     description: input.description ?? existing.description,
     kind: input.kind ?? existing.kind,
-    config: buildPersistedConfig(input.config ?? existing.config, nextMapZoneId, nextMapPoint),
+    config: buildPersistedConfig(nextConfig, nextMapZoneId, nextMapPoint),
     completionMode: input.completionMode ?? existing.completionMode,
     scoring: input.scoring ?? existing.scoring,
     difficulty: input.difficulty === undefined ? existing.difficulty : normalizeNullableString(input.difficulty),
@@ -411,6 +417,71 @@ async function assertPlacementIsValid(
   }
 }
 
+// Pins, areas and zones belong to the set's map. A set without a map takes the map of its first
+// placed challenge. Returns the item metadata with sourceMapId set for placed items.
+async function resolveItemMap(
+  db: DatabaseClient,
+  challengeSet: ChallengeSet,
+  metadata: JsonObject,
+  item: { mapZoneId: string | null; mapPoint: GeoJsonPoint | null; config: JsonObject },
+): Promise<JsonObject> {
+  const isPlaced = Boolean(item.mapZoneId || item.mapPoint || getChallengeArea(item.config));
+  if (!isPlaced) return metadata;
+
+  let itemMapId = getSourceMapId(metadata);
+  if (item.mapZoneId) {
+    const [zone] = await db.select({ mapId: mapZones.mapId }).from(mapZones).where(eq(mapZones.id, item.mapZoneId)).limit(1);
+    if (zone && !itemMapId) itemMapId = zone.mapId;
+  }
+  const mapId = challengeSet.mapId ?? itemMapId;
+  if (challengeSet.mapId && itemMapId && itemMapId !== challengeSet.mapId) {
+    throw new AppError(errorCodes.validationError, { message: 'This challenge is placed on a different map from its set. Place it on the set\'s map.' });
+  }
+  if (!mapId) {
+    throw new AppError(errorCodes.validationError, { message: 'Choose a map for this set before placing challenges on it.' });
+  }
+
+  await assertPlacementIsValid(db, { mapZoneId: item.mapZoneId, mapPoint: item.mapPoint, sourceMapId: mapId });
+  if (!challengeSet.mapId) {
+    await db.update(challengeSets).set({ mapId, updatedAt: new Date() }).where(eq(challengeSets.id, challengeSet.id));
+  }
+  return { ...metadata, sourceMapId: mapId };
+}
+
+// A set's placed challenges sit on its map, so the map can only change once none are on another one.
+async function assertSetCanMoveToMap(db: DatabaseClient, challengeSetId: string, mapId: string | null): Promise<void> {
+  if (mapId) await assertMapExists(db, mapId);
+  const items = await listChallengeSetItems(db, challengeSetId);
+  const placed = items.filter((item) => item.mapZoneId || item.mapPoint || getChallengeArea(item.config));
+  if (placed.length === 0) return;
+  const zoneMapIds = new Map<string, string>();
+  const zoneIds = placed.map((item) => item.mapZoneId).filter((id): id is string => Boolean(id));
+  if (zoneIds.length) {
+    for (const row of await db.select({ id: mapZones.id, mapId: mapZones.mapId }).from(mapZones).where(inArray(mapZones.id, zoneIds))) zoneMapIds.set(row.id, row.mapId);
+  }
+  const offMap = placed.filter((item) => (item.mapZoneId ? zoneMapIds.get(item.mapZoneId) : getSourceMapId(item.metadata)) !== mapId);
+  if (offMap.length > 0) {
+    throw new AppError(errorCodes.validationError, {
+      message: mapId
+        ? offMap.length + ' challenge' + (offMap.length === 1 ? ' is' : 's are') + ' placed on another map. Remove or re-place them before changing the set\'s map.'
+        : 'This set has challenges placed on its map, so it needs a map. Remove or switch them to "anywhere" first.',
+    });
+  }
+}
+
+async function assertMapExists(db: DatabaseClient, mapId: string): Promise<void> {
+  const [row] = await db.select({ id: maps.id }).from(maps).where(eq(maps.id, mapId)).limit(1);
+  if (!row) throw new AppError(errorCodes.validationError, { message: 'Map not found.' });
+}
+
+// Games can only use a set written for their map, or a generic set.
+export async function assertChallengeSetFitsMap(db: DatabaseClient, challengeSetId: string, mapId: string | null): Promise<void> {
+  const challengeSet = await getChallengeSetByIdOrThrow(db, challengeSetId);
+  if (!challengeSet.mapId || challengeSet.mapId === mapId) return;
+  const [row] = await db.select({ name: maps.name }).from(maps).where(eq(maps.id, challengeSet.mapId)).limit(1);
+  throw new AppError(errorCodes.validationError, { message: '"' + challengeSet.name + '" is written for the ' + (row?.name ?? 'another') + ' map. Pick that map or a different challenge set.' });
+}
+
 function getSourceMapId(metadata: JsonObject): string | null {
   const raw = metadata.sourceMapId;
   return typeof raw === 'string' && raw.length > 0 ? raw : null;
@@ -446,6 +517,7 @@ const challengeSetSelectFields = {
   id: challengeSets.id,
   name: challengeSets.name,
   description: challengeSets.description,
+  mapId: challengeSets.mapId,
   metadata: challengeSets.metadata,
   createdAt: challengeSets.createdAt,
   updatedAt: challengeSets.updatedAt,
@@ -474,6 +546,7 @@ function serializeChallengeSetRow(row: ChallengeSetRow): ChallengeSet {
     id: row.id,
     name: row.name,
     description: row.description,
+    mapId: row.mapId,
     metadata: row.metadata,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

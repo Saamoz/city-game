@@ -172,6 +172,7 @@ export interface ChallengeSet {
   id: Uuid;
   name: string;
   description: string | null;
+  mapId: Uuid | null; // the city the set is written for; null for a generic set that fits any map
   metadata: JsonObject;
   createdAt: IsoTimestamp;
   updatedAt: IsoTimestamp;

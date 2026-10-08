@@ -337,3 +337,10 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - Sagnik bday set: Costco chicken, Ethiopian food, Metra balloon and La Fournette are regular challenges again and score live. Each "offer it to Sagnik" part is its own judged challenge ("Chicken / Ethiopian / Birthday balloon / Pastry for Sagnik", anywhere, "At the party"). Imported to production; games already running keep their old copy.
 - `/maps/playability` took ~16 s in production because every admin load re-ran the overlap and connectivity checks for every map. Results are now cached in memory per map against an md5 fingerprint of zone ids + geometries (the checks' only inputs), so they recompute only after a zone edit and stay correct across instances.
 - The admin panel no longer waits for playability before showing (only the map picker uses it), and a game id in the URL loads alongside the game, map and set lists.
+
+## Challenge Sets Belong to a Map (2026-10-08)
+
+- `challenge_sets.map_id` (nullable, `ON DELETE SET NULL`, migration 0017). Null means a generic "any city" set. The migration fills it in from each set's first placed challenge (zone's map or `metadata.sourceMapId`).
+- Server rules: placed items (pin, area, zone) must sit on the set's map; their `sourceMapId` is filled in from it. A set without a map takes the map of its first placed item, so older import scripts keep working. A set's map can't change or clear while placed items sit on another map. Games (create, and map/set edits in setup) reject a set written for another map (`assertChallengeSetFitsMap`); generic sets fit any map.
+- Challenge editor: a Map picker on the set (saved like placement; items stay locked until it's saved), the set list shows each set's map, and items show the set's map instead of their own picker. Import/export carry `mapId`; importing into an existing set deletes the old items before switching the map.
+- Game form: the set dropdown lists the chosen map's sets, then generic ones marked "(any city)". Changing the map clears a set that no longer fits.

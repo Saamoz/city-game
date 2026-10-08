@@ -110,6 +110,47 @@ describe('challenge set routes', () => {
     expect(listItemsResponse.json().items[1].title).toBe('Station Proof');
   });
 
+  it('ties a set to the map of its first pin, keeps its pins on that map and only pairs it with that map', async () => {
+    app = await createChallengeSetTestApp(testDatabase);
+    const authored = await seedAuthoredMap(app);
+    const otherMap = await app.inject({ method: 'POST', url: '/api/v1/maps', headers: idempotencyHeaders('other-map'), payload: { name: 'Other City', centerLat: 49.8951, centerLng: -97.1384, defaultZoom: 12 } });
+    const otherMapId = otherMap.json().map.id as string;
+
+    const setResponse = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets', headers: idempotencyHeaders('city-set'), payload: { name: 'City Set', locationMode: 'point' } });
+    const challengeSetId = setResponse.json().challengeSet.id as string;
+    expect(setResponse.json().challengeSet.mapId).toBeNull();
+
+    const pin = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets/' + challengeSetId + '/items', headers: idempotencyHeaders('city-pin'), payload: { title: 'Pin', description: 'Visit.', mapPoint: { type: 'Point', coordinates: [-79.381, 43.647] }, metadata: { sourceMapId: authored.mapId } } });
+    expect(pin.statusCode).toBe(201);
+    expect((await app.inject({ method: 'GET', url: '/api/v1/challenge-sets/' + challengeSetId })).json().challengeSet.mapId).toBe(authored.mapId);
+
+    // A pin without its own map goes on the set's map; one on another map is refused.
+    const implicitPin = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets/' + challengeSetId + '/items', headers: idempotencyHeaders('implicit-pin'), payload: { title: 'Implicit', description: 'Visit.', mapPoint: { type: 'Point', coordinates: [-79.382, 43.647] } } });
+    expect(implicitPin.statusCode).toBe(201);
+    expect(implicitPin.json().item.metadata.sourceMapId).toBe(authored.mapId);
+    const offMapPin = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets/' + challengeSetId + '/items', headers: idempotencyHeaders('off-map-pin'), payload: { title: 'Elsewhere', description: 'Visit.', mapPoint: { type: 'Point', coordinates: [-97.13, 49.89] }, metadata: { sourceMapId: otherMapId } } });
+    expect(offMapPin.statusCode).toBe(400);
+
+    // The set's map cannot move or be cleared while pins sit on it.
+    const moveSet = await app.inject({ method: 'PATCH', url: '/api/v1/challenge-sets/' + challengeSetId, headers: idempotencyHeaders('move-set'), payload: { mapId: otherMapId } });
+    expect(moveSet.statusCode).toBe(400);
+    const clearSet = await app.inject({ method: 'PATCH', url: '/api/v1/challenge-sets/' + challengeSetId, headers: idempotencyHeaders('clear-set'), payload: { mapId: null } });
+    expect(clearSet.statusCode).toBe(400);
+
+    // Games only take a set written for their map; generic sets fit any map.
+    const wrongGame = await app.inject({ method: 'POST', url: '/api/v1/game', headers: adminHeaders('wrong-map-game'), payload: { name: 'Wrong', modeKey: 'point_challenge', mapId: otherMapId, challengeSetId } });
+    expect(wrongGame.statusCode).toBe(400);
+    expect(wrongGame.json().error.message).toContain('City Set');
+    const rightGame = await app.inject({ method: 'POST', url: '/api/v1/game', headers: adminHeaders('right-map-game'), payload: { name: 'Right', modeKey: 'point_challenge', mapId: authored.mapId, challengeSetId } });
+    expect(rightGame.statusCode).toBe(201);
+    const moveGame = await app.inject({ method: 'PATCH', url: '/api/v1/game/' + (rightGame.json().game.id as string), headers: adminHeaders('move-game'), payload: { mapId: otherMapId } });
+    expect(moveGame.statusCode).toBe(400);
+
+    const genericSet = await app.inject({ method: 'POST', url: '/api/v1/challenge-sets', headers: idempotencyHeaders('generic-set'), payload: { name: 'Generic', locationMode: 'point' } });
+    const genericGame = await app.inject({ method: 'POST', url: '/api/v1/game', headers: adminHeaders('generic-game'), payload: { name: 'Generic', modeKey: 'point_challenge', mapId: otherMapId, challengeSetId: genericSet.json().challengeSet.id } });
+    expect(genericGame.statusCode).toBe(201);
+  });
+
   it('clones every item in a point-linked set as an active map challenge without runtime zones', async () => {
     app = await createChallengeSetTestApp(testDatabase);
     const authored = await seedAuthoredMap(app);

@@ -46,6 +46,7 @@ interface NoticeState {
 
 interface SetFormState {
   locationMode: ChallengeSetItemLocationMode;
+  mapId: string; // '' for a generic set that fits any map
   name: string;
   description: string;
 }
@@ -86,6 +87,7 @@ const DIFFICULTY_OPTIONS: Array<{ value: Exclude<ChallengeSetItem['difficulty'],
 
 const INITIAL_SET_FORM: SetFormState = {
   locationMode: 'portable',
+  mapId: '',
   name: '',
   description: '',
 };
@@ -130,6 +132,10 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
   const sortedSets = useMemo(() => [...sets].sort((left, right) => left.name.localeCompare(right.name)), [sets]);
   const sortedMaps = useMemo(() => [...maps].sort((left, right) => left.name.localeCompare(right.name)), [maps]);
   const currentMapZones = useMemo(() => itemForm.mapId ? (zoneOptionsByMapId[itemForm.mapId] ?? []) : [], [itemForm.mapId, zoneOptionsByMapId]);
+  const mapNameById = useMemo(() => new Map(maps.map((map) => [map.id, map.name])), [maps]);
+  const setMapId = currentSet?.mapId ?? '';
+  // Placement and map changes must be saved first, since items are validated against the saved set.
+  const hasUnsavedSetPlacement = Boolean(currentSet) && (setForm.locationMode !== currentSet?.locationMode || setForm.mapId !== setMapId);
   const selectedMap = useMemo(() => sortedMaps.find((map) => map.id === itemForm.mapId) ?? null, [itemForm.mapId, sortedMaps]);
 
   const loadZoneOptions = useCallback(async (mapId: string) => {
@@ -189,13 +195,13 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
       syncRoute(challengeSet.id);
 
       if (challengeItems[0]) {
-        const nextForm = buildItemForm(challengeItems[0]);
+        const nextForm = buildItemForm(challengeItems[0], challengeSet.mapId);
         setItemForm(nextForm);
         if (nextForm.mapId) {
           void loadZoneOptions(nextForm.mapId);
         }
       } else {
-        setItemForm(INITIAL_ITEM_FORM);
+        setItemForm({ ...INITIAL_ITEM_FORM, mapId: challengeSet.mapId ?? '' });
       }
 
       setStatus('ready');
@@ -211,16 +217,17 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
 
   useEffect(() => {
     if (!selectedItem) {
-      setItemForm(INITIAL_ITEM_FORM);
+      setItemForm({ ...INITIAL_ITEM_FORM, mapId: setMapId });
+      if (setMapId) void loadZoneOptions(setMapId);
       return;
     }
 
-    const nextForm = buildItemForm(selectedItem);
+    const nextForm = buildItemForm(selectedItem, setMapId || null);
     setItemForm(nextForm);
     if (nextForm.mapId) {
       void loadZoneOptions(nextForm.mapId);
     }
-  }, [loadZoneOptions, selectedItem]);
+  }, [loadZoneOptions, selectedItem, setMapId]);
 
   const handleSelectSet = async (challengeSet: ChallengeSet) => {
     setCurrentSet(challengeSet);
@@ -252,7 +259,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
       setSetForm(buildSetForm(created));
       setItems([]);
       setSelectedItemId(null);
-      setItemForm({ ...INITIAL_ITEM_FORM, mapId: sortedMaps[0]?.id ?? '' });
+      setItemForm(INITIAL_ITEM_FORM);
       setNewSetName('');
       syncRoute(created.id);
       setNotice({ tone: 'success', message: 'Challenge set created.' });
@@ -274,6 +281,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
         name: setForm.name.trim(),
         description: setForm.description.trim() || null,
         locationMode: setForm.locationMode,
+        mapId: setForm.mapId || null,
         metadata: currentSet.metadata,
       });
       setCurrentSet(updated);
@@ -326,7 +334,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
     }
 
     setSelectedItemId(null);
-    setItemForm({ ...INITIAL_ITEM_FORM, mapId: sortedMaps[0]?.id ?? '' });
+    setItemForm({ ...INITIAL_ITEM_FORM, mapId: setMapId });
   };
 
   const handleSaveItem = async () => {
@@ -334,8 +342,8 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
       return;
     }
 
-    if (setForm.locationMode !== currentSet.locationMode) {
-      setNotice({ tone: 'info', message: 'Save the set placement before editing its challenges.' });
+    if (hasUnsavedSetPlacement) {
+      setNotice({ tone: 'info', message: 'Save the set placement and map before editing its challenges.' });
       return;
     }
 
@@ -363,19 +371,22 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
       return;
     }
 
-    if (setForm.locationMode === 'zone' && (!itemForm.mapId || !itemForm.mapZoneId)) {
-      setNotice({ tone: 'error', message: 'Choose a source map and zone.' });
-      return;
-    }
-
     const isPinned = setForm.locationMode === 'point' && itemForm.placement === 'pinned';
     const isArea = setForm.locationMode === 'point' && itemForm.placement === 'area';
-    if (isArea && (!itemForm.mapId || !itemForm.area)) {
-      setNotice({ tone: 'error', message: 'Choose a source map and draw the challenge area.' });
+    if ((setForm.locationMode === 'zone' || isPinned || isArea) && !itemForm.mapId) {
+      setNotice({ tone: 'error', message: 'Choose a map for this set and save it before placing challenges.' });
       return;
     }
-    if (isPinned && (!itemForm.mapId || !itemForm.mapPoint)) {
-      setNotice({ tone: 'error', message: 'Choose a source map and place a point.' });
+    if (setForm.locationMode === 'zone' && !itemForm.mapZoneId) {
+      setNotice({ tone: 'error', message: 'Choose a zone.' });
+      return;
+    }
+    if (isArea && !itemForm.area) {
+      setNotice({ tone: 'error', message: 'Draw the challenge area.' });
+      return;
+    }
+    if (isPinned && !itemForm.mapPoint) {
+      setNotice({ tone: 'error', message: 'Place a point on the map.' });
       return;
     }
 
@@ -506,13 +517,16 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
     setIsImporting(true);
     try {
       const parsed = JSON.parse(await file.text()) as {
-        challengeSet?: { name?: string; description?: string | null; locationMode?: ChallengeSetItemLocationMode; metadata?: JsonObject };
+        challengeSet?: { name?: string; description?: string | null; locationMode?: ChallengeSetItemLocationMode; mapId?: string | null; metadata?: JsonObject };
         items?: ChallengeSetItem[];
       };
 
       const importedItems = Array.isArray(parsed.items) ? parsed.items : [];
       const importedSet = parsed.challengeSet ?? {};
       const importedLocationMode = importedSet.locationMode ?? inferImportedSetLocationMode(importedItems);
+      // Keep the set's map when it exists here; older exports only name it on their placed items.
+      const importedMapId = [importedSet.mapId, ...importedItems.map((item) => item.metadata?.sourceMapId)]
+        .find((id): id is string => typeof id === 'string' && maps.some((map) => map.id === id)) ?? null;
 
       let targetSet = currentSet;
       if (!targetSet) {
@@ -520,23 +534,27 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
           name: importedSet.name?.trim() || file.name.replace(/\.json$/i, ''),
           description: importedSet.description ?? '',
           locationMode: importedLocationMode,
+          mapId: importedMapId,
           metadata: importedSet.metadata ?? {},
         });
         setSets((current) => [...current, targetSet!]);
         setCurrentSet(targetSet);
         syncRoute(targetSet.id);
       } else {
+        // Clear the old items first: the set's map can only change once nothing is placed on it.
+        for (const item of items) {
+          await deleteChallengeSetItemDefinition(item.id);
+        }
         targetSet = await updateChallengeSetDefinition(targetSet.id, {
           name: importedSet.name?.trim() || targetSet.name,
           description: importedSet.description ?? targetSet.description,
           locationMode: importedLocationMode,
+          mapId: importedMapId,
           metadata: importedSet.metadata ?? targetSet.metadata,
         });
         setCurrentSet(targetSet);
+        setSetForm(buildSetForm(targetSet));
         setSets((current) => current.map((entry) => entry.id === targetSet!.id ? targetSet! : entry));
-        for (const item of items) {
-          await deleteChallengeSetItemDefinition(item.id);
-        }
       }
 
       const createdItems: ChallengeSetItem[] = [];
@@ -571,13 +589,6 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
       setNotice({ tone: 'error', message: getApiErrorMessage(error) });
     } finally {
       setIsImporting(false);
-    }
-  };
-
-  const handleItemMapChange = async (mapId: string) => {
-    setItemForm((current) => ({ ...current, mapId, mapZoneId: '', mapPoint: null, area: null }));
-    if (mapId) {
-      await loadZoneOptions(mapId);
     }
   };
 
@@ -624,6 +635,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                   type="button"
                 >
                   <p className="font-semibold text-[#24343a]">{challengeSet.name}</p>
+                  <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#936718]">{challengeSet.mapId ? (mapNameById.get(challengeSet.mapId) ?? 'Unknown map') : 'Any city'}</p>
                   <p className="mt-1 text-sm text-[#5a6a70] line-clamp-2">{challengeSet.description || 'No description.'}</p>
                 </button>
               );
@@ -654,12 +666,19 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                   <Field label="Set Name">
                     <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={setForm.name} onChange={(event) => setSetForm((current) => ({ ...current, name: event.target.value }))} />
                   </Field>
+                  <Field label="Map">
+                    <select className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={setForm.mapId} onChange={(event) => setSetForm((current) => ({ ...current, mapId: event.target.value }))}>
+                      <option value="">Any city (generic)</option>
+                      {sortedMaps.map((map) => <option key={map.id} value={map.id}>{map.name}</option>)}
+                    </select>
+                    <p className="mt-2 text-xs leading-5 text-[#6b777b]">The city this set is written for. Games on other maps can't use it. Pins, areas and zones go on this map. Generic sets fit any map but can only have "anywhere" challenges.</p>
+                  </Field>
                   <Field label="Set Placement">
                     <select className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={setForm.locationMode} onChange={(event) => setSetForm((current) => ({ ...current, locationMode: event.target.value as ChallengeSetItemLocationMode }))}>
                       <option value="portable">Portable</option><option value="zone">Zone Linked</option><option value="point">Point Linked (pins, areas, anywhere)</option>
                     </select>
                     <p className="mt-2 text-xs leading-5 text-[#6b777b]">{setForm.locationMode === 'point' ? 'Each challenge is pinned to a map point, tied to an area you draw, or doable anywhere. Pins and areas appear on the map.' : 'Every challenge in this set uses this placement type.'} Save the set before editing its items.</p>
-                    {setForm.locationMode !== currentSet.locationMode ? <p className="mt-2 rounded-xl border border-[#d59b45]/45 bg-[#fff0ce] px-3 py-2 text-xs leading-5 text-[#765018]">Save this placement change before creating or editing challenges.</p> : null}
+                    {hasUnsavedSetPlacement ? <p className="mt-2 rounded-xl border border-[#d59b45]/45 bg-[#fff0ce] px-3 py-2 text-xs leading-5 text-[#765018]">Save this placement or map change before creating or editing challenges.</p> : null}
                   </Field>
                   <Field label="Description">
                     <textarea className="h-36 w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={setForm.description} onChange={(event) => setSetForm((current) => ({ ...current, description: event.target.value }))} />
@@ -784,11 +803,12 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
             ) : null}
 
             {setForm.locationMode === 'zone' || (setForm.locationMode === 'point' && itemForm.placement !== 'anywhere') ? (
-              <Field label="Source Map">
-                <select className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={itemForm.mapId} onChange={(event) => void handleItemMapChange(event.target.value)}>
-                  <option value="">Choose a map</option>
-                  {sortedMaps.map((map) => <option key={map.id} value={map.id}>{map.name}</option>)}
-                </select>
+              <Field label="Map">
+                {itemForm.mapId ? (
+                  <p className="rounded-2xl border border-[#c8b48a]/40 bg-[#f7efdc] px-4 py-3 text-sm text-[#24343a]">{mapNameById.get(itemForm.mapId) ?? 'Unknown map'} <span className="text-[#6b777b]">· the set's map</span></p>
+                ) : (
+                  <p className="rounded-xl border border-[#d59b45]/45 bg-[#fff0ce] px-3 py-2 text-xs leading-5 text-[#765018]">Choose a map for this set on the left and save it, then place challenges on it.</p>
+                )}
               </Field>
             ) : null}
 
@@ -833,7 +853,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
               </div>
             ) : null}
 
-            <button className="mt-2 w-full rounded-2xl border border-[#24343a] bg-[#24343a] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#f4ead7] disabled:cursor-not-allowed disabled:opacity-50" disabled={isSavingItem || !currentSet || setForm.locationMode !== currentSet.locationMode} onClick={() => void handleSaveItem()} type="button">{selectedItem ? 'Save Item' : 'Create Item'}</button>
+            <button className="mt-2 w-full rounded-2xl border border-[#24343a] bg-[#24343a] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#f4ead7] disabled:cursor-not-allowed disabled:opacity-50" disabled={isSavingItem || !currentSet || hasUnsavedSetPlacement} onClick={() => void handleSaveItem()} type="button">{selectedItem ? 'Save Item' : 'Create Item'}</button>
           </div>
         </aside>
       </div>
@@ -868,13 +888,14 @@ function normalizeImportedItemConfig(config: ChallengeSetItem['config']): JsonOb
 function buildSetForm(challengeSet: ChallengeSet): SetFormState {
   return {
     locationMode: challengeSet.locationMode,
+    mapId: challengeSet.mapId ?? '',
     name: challengeSet.name,
     description: challengeSet.description ?? '',
   };
 }
 
-function buildItemForm(item: ChallengeSetItem): ItemFormState {
-  const sourceMapId = getSourceMapId(item);
+function buildItemForm(item: ChallengeSetItem, setMapId: string | null): ItemFormState {
+  const sourceMapId = setMapId || getSourceMapId(item);
   return {
     title: item.title,
     shortDescription: getShortDescription(item),

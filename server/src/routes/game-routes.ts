@@ -13,7 +13,7 @@ import {
   transitionGameLifecycle,
   type LifecycleTransition,
 } from '../services/game-service.js';
-import { getChallengeSetByIdOrThrow } from '../services/challenge-set-service.js';
+import { assertChallengeSetFitsMap } from '../services/challenge-set-service.js';
 import { applyMapDefaultsToGame } from '../services/map-service.js';
 
 const winConditionItemSchema = {
@@ -177,7 +177,7 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
         const nextSettings = normalizeGameSettings(body.settings as JsonObject | undefined);
 
         if (body.challengeSetId) {
-          await getChallengeSetByIdOrThrow(db, body.challengeSetId);
+          await assertChallengeSetFitsMap(db, body.challengeSetId, body.mapId ?? null);
         }
 
         const mapDefaults = body.mapId ? await applyMapDefaultsToGame(db, body.mapId) : null;
@@ -279,8 +279,8 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
 
         const nextMapId = body.mapId === undefined ? existingGame.mapId : body.mapId;
         const nextChallengeSetId = body.challengeSetId === undefined ? existingGame.challengeSetId : body.challengeSetId;
-        if (nextChallengeSetId) {
-          await getChallengeSetByIdOrThrow(db, nextChallengeSetId);
+        if (nextChallengeSetId && (body.mapId !== undefined || body.challengeSetId !== undefined)) {
+          await assertChallengeSetFitsMap(db, nextChallengeSetId, nextMapId ?? null);
         }
         const mapDefaults = nextMapId ? await applyMapDefaultsToGame(db, nextMapId) : null;
 
