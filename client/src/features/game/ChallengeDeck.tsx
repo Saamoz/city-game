@@ -248,7 +248,7 @@ export function ChallengeDeck({
             ? () => { peekPointerRef.current.active = false; }
             : (event) => handlePointerEnd(event, scrollRef.current, dragRefs)}
           onPointerDown={isPeeking
-            ? (e) => { peekPointerRef.current = { active: true, startY: e.clientY, startTime: Date.now(), moved: false }; }
+            ? (e) => { e.currentTarget.setPointerCapture(e.pointerId); peekPointerRef.current = { active: true, startY: e.clientY, startTime: Date.now(), moved: false }; }
             : (event) => handlePointerDown(event, scrollRef.current, dragRefs)}
           onPointerMove={isPeeking
             ? (e) => { if (peekPointerRef.current.active && Math.abs(e.clientY - peekPointerRef.current.startY) > 8) peekPointerRef.current.moved = true; }

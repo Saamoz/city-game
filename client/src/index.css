@@ -62,6 +62,20 @@ body.game-view-active {
   background: #f1eadb;
 }
 
+/* In the Home Screen app the map runs behind the status bar, whose clock and icons are white there.
+   A soft dark fade under them keeps them readable over the light map and the parchment screens. */
+@media (display-mode: standalone) {
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0 0 auto;
+    z-index: 9999;
+    height: calc(env(safe-area-inset-top, 0px) + 0.75rem);
+    pointer-events: none;
+    background: linear-gradient(180deg, rgba(24, 33, 38, 0.42), rgba(24, 33, 38, 0));
+  }
+}
+
 /* The game screen is an app, not a page: no pinch or double-tap zoom of the whole screen. The map
    still pinch-zooms itself (Mapbox sets touch-action: none on its canvas and handles it). */
 html.game-view-active {

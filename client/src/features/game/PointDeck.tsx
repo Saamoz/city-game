@@ -23,6 +23,7 @@ export function PointDeck({ gameName, challenges, getSuit, distanceTo, isInRange
   const [filter, setFilter] = useState<DeckFilter>('all');
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRefs = useDragRefs();
+  const swipeRef = useRef({ active: false, startY: 0, startTime: 0 });
   const available = challenges.filter((challenge) => challenge.status === 'available');
   const counts = {
     all: available.length,
@@ -39,7 +40,22 @@ export function PointDeck({ gameName, challenges, getSuit, distanceTo, isInRange
   if (isPeeking) {
     const fan = visible.slice(0, 3);
     return (
-      <button aria-label={'Open challenges, ' + available.length + ' left'} className="pointer-events-auto relative mx-auto block h-[7.5rem] w-[11rem]" onClick={onOpen} type="button">
+      <button
+        aria-label={'Open challenges, ' + available.length + ' left'}
+        className="pointer-events-auto relative mx-auto block h-[7.5rem] w-[11rem] [touch-action:none]"
+        onClick={onOpen}
+        // Swipe up on the stack to open it, as well as tapping it.
+        onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); swipeRef.current = { active: true, startY: event.clientY, startTime: Date.now() }; }}
+        onPointerCancel={() => { swipeRef.current.active = false; }}
+        onPointerUp={(event) => {
+          if (!swipeRef.current.active) return;
+          swipeRef.current.active = false;
+          const dy = event.clientY - swipeRef.current.startY;
+          const velocity = dy / Math.max(Date.now() - swipeRef.current.startTime, 1);
+          if (dy < -20 || (dy < -8 && velocity < -0.25)) onOpen();
+        }}
+        type="button"
+      >
         {fan.slice(1).reverse().map((challenge, position) => (
           <span key={challenge.id} className="absolute inset-x-0 top-0 h-full rounded-[0.9rem] border border-[#a98c5a] bg-[#efe3c6] shadow-[0_6px_16px_rgba(40,30,15,0.18)]" style={{ transform: `rotate(${position === 0 ? -7 : -3.5}deg) translateY(${position === 0 ? 6 : 3}px)` }} />
         ))}
