@@ -1,3 +1,5 @@
+import { getJudgedBonuses } from './scoring.js';
+
 // A judged challenge stays open all game: each team may submit once, and judges award points afterwards.
 export function isJudgedChallengeConfig(config: unknown): boolean {
   return Boolean(config && typeof config === 'object' && !Array.isArray(config) && (config as { judged?: unknown }).judged === true);
@@ -26,8 +28,16 @@ export type JudgingVerdict = 'pass' | 'fail' | 'winner' | 'points';
 
 export interface JudgingDecision {
   verdict: JudgingVerdict;
-  bonusIds?: string[];
+  bonusIds?: string[]; // approved bonuses
+  rejectedBonusIds?: string[]; // judged bonuses marked no (a regular challenge's judged bonuses)
   points?: number;
+}
+
+// A regular challenge with judged bonuses is judged once each of them is marked yes or no.
+export function isJudgedBonusDecisionComplete(config: unknown, decision: JudgingDecision | null | undefined): boolean {
+  if (!decision) return false;
+  const decided = new Set([...(decision.bonusIds ?? []), ...(decision.rejectedBonusIds ?? [])]);
+  return getJudgedBonuses(config).every((bonus) => decided.has(bonus.id));
 }
 
 export const JUDGING_TYPE_LABELS: Record<JudgingType, string> = {

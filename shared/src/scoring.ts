@@ -1,6 +1,7 @@
 // Challenge scoring: a base award in `scoring.points` plus optional bonus tasks in `config.bonuses`.
 // Teams self-report which bonuses they did when they complete; the server only counts bonus ids
-// that exist on the challenge.
+// that exist on the challenge. A judged bonus is the exception: teams can't tick it, and the admin
+// marks it yes or no for the completing team after the game (e.g. "offer it to Sagnik" at the party).
 
 export const DEFAULT_CHALLENGE_POINTS = 1;
 export const MAX_CHALLENGE_BONUSES = 3;
@@ -10,6 +11,7 @@ export interface ChallengeBonus {
   label: string;
   points: number;
   description?: string; // optional longer explanation, shown behind an info toggle
+  judged?: boolean; // awarded by the judges after the game, not ticked by the team
 }
 
 export function getChallengeBonuses(config: unknown): ChallengeBonus[] {
@@ -18,13 +20,14 @@ export function getChallengeBonuses(config: unknown): ChallengeBonus[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((entry): ChallengeBonus[] => {
     if (!entry || typeof entry !== 'object') return [];
-    const { id, label, points, description } = entry as { id?: unknown; label?: unknown; points?: unknown; description?: unknown };
+    const { id, label, points, description, judged } = entry as { id?: unknown; label?: unknown; points?: unknown; description?: unknown; judged?: unknown };
     if (typeof id !== 'string' || !id || typeof label !== 'string' || !label.trim()) return [];
     return [{
       id,
       label: label.trim(),
       points: typeof points === 'number' && Number.isFinite(points) ? Math.round(points) : 0,
       ...(typeof description === 'string' && description.trim() ? { description: description.trim() } : {}),
+      ...(judged === true ? { judged: true } : {}),
     }];
   });
 }
@@ -45,6 +48,15 @@ export function getClaimedBonuses(config: unknown, submission: unknown): Challen
   if (!Array.isArray(raw)) return [];
   const claimed = new Set(raw.filter((id): id is string => typeof id === 'string'));
   return getChallengeBonuses(config).filter((bonus) => claimed.has(bonus.id));
+}
+
+// Bonuses a team ticks itself when completing, as opposed to judged ones.
+export function getSelfReportedBonuses(config: unknown): ChallengeBonus[] {
+  return getChallengeBonuses(config).filter((bonus) => !bonus.judged);
+}
+
+export function getJudgedBonuses(config: unknown): ChallengeBonus[] {
+  return getChallengeBonuses(config).filter((bonus) => bonus.judged);
 }
 
 export function sumBonusPoints(bonuses: ChallengeBonus[]): number {

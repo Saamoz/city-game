@@ -34,7 +34,7 @@ export function BonusList({ challenge }: { challenge: Challenge }) {
       <ul className="mt-2 space-y-1.5">
         {bonuses.map((bonus) => (
           <li key={bonus.id} className="flex items-start justify-between gap-3 text-sm text-[#3f4d52]">
-            <span>{bonus.label}</span>
+            <span>{bonus.judged ? '★ ' : ''}{bonus.label}{bonus.judged ? <span className="block text-[11px] italic text-[#6b5a86]">Judged after the game</span> : null}</span>
             <span className="shrink-0 font-semibold text-[#7a5413]">+{formatPoints(bonus.points)}</span>
           </li>
         ))}
@@ -56,6 +56,16 @@ export function BonusChecklist({ bonuses, selected, onToggle }: ChecklistProps) 
       <div className="space-y-1">
         {bonuses.map((bonus) => {
           const checked = selected.has(bonus.id);
+          // Judged after the game, so there is nothing to tick now.
+          if (bonus.judged) {
+            return (
+              <div key={bonus.id} className="flex items-center gap-3 rounded-xl px-2 py-2 text-sm text-[#4f5b5f]">
+                <span aria-hidden="true" className="grid h-5 w-5 shrink-0 place-items-center text-[#6b5a86]">★</span>
+                <span className="min-w-0 flex-1">{bonus.label}<span className="block text-[11px] italic text-[#6b5a86]">Judged after the game</span></span>
+                <span className="shrink-0 font-semibold text-[#7a5413]">+{bonus.points}</span>
+              </div>
+            );
+          }
           return (
             <label key={bonus.id} className={['flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 text-sm transition', checked ? 'bg-[#f6e3b4] text-[#2c2a20]' : 'text-[#4f5b5f] hover:bg-[#f9ecca]'].join(' ')}>
               <input checked={checked} className="h-5 w-5 shrink-0 accent-[#9b6b16]" onChange={() => onToggle(bonus.id)} type="checkbox" />

@@ -1,12 +1,14 @@
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import {
   errorCodes,
   eventTypes,
   getBasePoints,
   getChallengeBonuses,
   getClaimedBonuses,
+  getJudgedBonuses,
   getJudgedMaxPoints,
   getJudgingType,
+  isJudgedBonusDecisionComplete,
   isJudgedChallengeConfig,
   type GameJudgingSheet,
   type GameJudgingSummary,
@@ -28,17 +30,22 @@ import { transactInTransaction } from './resource-service.js';
 // into ledger entries. Players see a waiting screen instead of the results until then. A game whose
 // submissions are all decided by the time it ends publishes on its own. Publishing writes deltas, so
 // a judge can correct a decision and publish again.
+//
+// Regular challenges can also carry judged bonuses (e.g. "offer it to Sagnik"): the completing team
+// scores the base points live, and the judge later marks each judged bonus yes or no on that
+// team's completed claim. Those decisions publish the same way.
 
 const JUDGED_AWARD_REASON = 'judged_award';
 
 export async function getJudgingSheet(db: DatabaseClient, gameId: string): Promise<GameJudgingSheet> {
   const game = await getGameById(db, gameId);
   const challengeRows = (await db.select().from(challenges).where(eq(challenges.gameId, gameId)).orderBy(asc(challenges.sortOrder), asc(challenges.createdAt)))
-    .filter((row) => isJudgedChallengeConfig(row.config));
+    .filter((row) => getJudgingKind(row.config) !== null);
   const claimRows = challengeRows.length
-    ? await db.select().from(challengeClaims)
-      .where(and(inArray(challengeClaims.challengeId, challengeRows.map((row) => row.id)), eq(challengeClaims.status, 'submitted')))
-      .orderBy(asc(challengeClaims.completedAt))
+    ? (await db.select().from(challengeClaims)
+      .where(and(inArray(challengeClaims.challengeId, challengeRows.map((row) => row.id)), inArray(challengeClaims.status, ['submitted', 'completed'])))
+      .orderBy(asc(challengeClaims.completedAt)))
+      .filter((claim) => claim.status === JUDGEABLE_CLAIM_STATUS[getJudgingKind(challengeRows.find((row) => row.id === claim.challengeId)!.config)!])
     : [];
 
   return {
@@ -47,9 +54,9 @@ export async function getJudgingSheet(db: DatabaseClient, gameId: string): Promi
     challenges: challengeRows.map((row) => ({
       challenge: serializeChallenge(row),
       maxPoints: getJudgedMaxPoints(row.config),
-      judgingType: getJudgingType(row.config),
+      judgingType: getJudgingKind(row.config) === 'bonus' ? 'bonus' as const : getJudgingType(row.config),
       basePoints: getBasePoints(row.scoring),
-      bonuses: getChallengeBonuses(row.config),
+      bonuses: getJudgingKind(row.config) === 'bonus' ? getJudgedBonuses(row.config) : getChallengeBonuses(row.config),
       submissions: claimRows.filter((claim) => claim.challengeId === row.id).map((claim) => ({
         claimId: claim.id,
         teamId: claim.teamId,
@@ -69,16 +76,28 @@ export async function setSubmissionDecision(db: DatabaseClient, claimId: string,
   const [row] = await db.select({ claim: challengeClaims, challenge: challenges })
     .from(challengeClaims).innerJoin(challenges, eq(challenges.id, challengeClaims.challengeId))
     .where(eq(challengeClaims.id, claimId)).limit(1);
-  if (!row || row.claim.status !== 'submitted') {
+  const kind = row ? getJudgingKind(row.challenge.config) : null;
+  if (!row || !kind || row.claim.status !== JUDGEABLE_CLAIM_STATUS[kind]) {
     throw new AppError(errorCodes.validationError, { message: 'Judged submission not found.' });
   }
   const points = decision ? computeDecisionPoints(row.challenge, decision) : null;
-  const stored = decision ? { ...decision, bonusIds: getChallengeBonuses(row.challenge.config).filter((bonus) => decision.bonusIds?.includes(bonus.id)).map((bonus) => bonus.id) } : null;
+  const bonusIds = getChallengeBonuses(row.challenge.config).map((bonus) => bonus.id);
+  const stored = decision
+    ? {
+      ...decision,
+      bonusIds: bonusIds.filter((id) => decision.bonusIds?.includes(id)),
+      ...(decision.rejectedBonusIds ? { rejectedBonusIds: bonusIds.filter((id) => decision.rejectedBonusIds?.includes(id) && !decision.bonusIds?.includes(id)) } : {}),
+    }
+    : null;
   await db.update(challengeClaims).set({ judgedPoints: points, judgedDecision: stored, judgedAt: new Date() }).where(eq(challengeClaims.id, claimId));
   return points;
 }
 
 function computeDecisionPoints(challenge: typeof challenges.$inferSelect, decision: JudgingDecision): number {
+  // A regular challenge's base points already scored, so only its approved judged bonuses count.
+  if (getJudgingKind(challenge.config) === 'bonus') {
+    return getJudgedBonuses(challenge.config).filter((bonus) => decision.bonusIds?.includes(bonus.id)).reduce((total, bonus) => total + bonus.points, 0);
+  }
   const type = getJudgingType(challenge.config);
   const base = getBasePoints(challenge.scoring);
   const approvedBonus = getChallengeBonuses(challenge.config).filter((bonus) => decision.bonusIds?.includes(bonus.id)).reduce((total, bonus) => total + bonus.points, 0);
@@ -100,13 +119,22 @@ export async function publishJudging(db: DatabaseClient, gameId: string, now = n
     throw new AppError(errorCodes.invalidGameStateTransition, { message: 'Judged scores can be published once the game has ended.', details: { currentStatus: game.status } });
   }
 
-  const claims = await db.select().from(challengeClaims).where(and(eq(challengeClaims.gameId, gameId), eq(challengeClaims.status, 'submitted')));
-  const awardedRows = claims.length
-    ? await db.select({ referenceId: resourceLedger.referenceId, total: sql<number>`COALESCE(SUM(${resourceLedger.delta}), 0)::int` })
-      .from(resourceLedger)
-      .where(and(eq(resourceLedger.gameId, gameId), eq(resourceLedger.reason, JUDGED_AWARD_REASON)))
-      .groupBy(resourceLedger.referenceId)
-    : [];
+  const awardedRows = await db.select({ referenceId: resourceLedger.referenceId, total: sql<number>`COALESCE(SUM(${resourceLedger.delta}), 0)::int` })
+    .from(resourceLedger)
+    .where(and(eq(resourceLedger.gameId, gameId), eq(resourceLedger.reason, JUDGED_AWARD_REASON)))
+    .groupBy(resourceLedger.referenceId);
+  const awardedClaimIds = awardedRows.map((row) => row.referenceId).filter((id): id is string => Boolean(id));
+  // Judged-challenge submissions, regular claims a judge decided judged bonuses on, and claims
+  // already awarded (so clearing a decision takes its points back).
+  const claims = await db.select().from(challengeClaims)
+    .where(and(
+      eq(challengeClaims.gameId, gameId),
+      or(
+        eq(challengeClaims.status, 'submitted'),
+        isNotNull(challengeClaims.judgedPoints),
+        ...(awardedClaimIds.length ? [inArray(challengeClaims.id, awardedClaimIds)] : []),
+      ),
+    ));
   const awardedByClaimId = new Map(awardedRows.map((row) => [row.referenceId, Number(row.total)]));
 
   const resourceEntries: ResourceLedgerEntry[] = [];
@@ -148,29 +176,52 @@ export async function publishJudging(db: DatabaseClient, gameId: string, now = n
 // wait for the judges when there is something to wait for.
 export async function publishJudgingIfDecided(db: DatabaseClient, gameId: string, now = new Date()): Promise<boolean> {
   const challengeRows = await db.select({ config: challenges.config }).from(challenges).where(eq(challenges.gameId, gameId));
-  if (!challengeRows.some((row) => isJudgedChallengeConfig(row.config))) return false;
-  const [undecided] = await db.select({ id: challengeClaims.id }).from(challengeClaims)
-    .where(and(eq(challengeClaims.gameId, gameId), eq(challengeClaims.status, 'submitted'), isNull(challengeClaims.judgedDecision)))
-    .limit(1);
-  if (undecided) return false;
+  if (!challengeRows.some((row) => getJudgingKind(row.config) !== null)) return false;
+  const judgeable = await listJudgeableClaims(db, gameId);
+  if (judgeable.some((entry) => !entry.decided)) return false;
   await publishJudging(db, gameId, now);
   return true;
 }
 
 export async function getJudgingSummary(db: DatabaseClient, gameId: string, settings: unknown): Promise<GameJudgingSummary> {
   const challengeRows = await db.select({ config: challenges.config }).from(challenges).where(eq(challenges.gameId, gameId));
-  if (!challengeRows.some((row) => isJudgedChallengeConfig(row.config))) {
+  if (!challengeRows.some((row) => getJudgingKind(row.config) !== null)) {
     return { status: 'none', submissionCount: 0, publishedAt: null };
   }
-  const [countRow] = await db.select({ count: sql<number>`COUNT(*)::int` }).from(challengeClaims)
-    .where(and(eq(challengeClaims.gameId, gameId), eq(challengeClaims.status, 'submitted')));
-  const submissionCount = Number(countRow?.count ?? 0);
+  const submissionCount = (await listJudgeableClaims(db, gameId)).length;
   const publishedAt = getPublishedAt(settings);
   // Nothing was submitted, so there is nothing to wait for.
   if (submissionCount === 0 && !publishedAt) {
     return { status: 'none', submissionCount: 0, publishedAt: null };
   }
   return { status: publishedAt ? 'published' : 'pending', submissionCount, publishedAt };
+}
+
+// 'challenge': the whole challenge is judged (claims are 'submitted'). 'bonus': a regular challenge
+// with judged bonuses (claims are 'completed'). Null: nothing to judge.
+type JudgingKind = 'challenge' | 'bonus';
+const JUDGEABLE_CLAIM_STATUS: Record<JudgingKind, string> = { challenge: 'submitted', bonus: 'completed' };
+
+function getJudgingKind(config: unknown): JudgingKind | null {
+  if (isJudgedChallengeConfig(config)) return 'challenge';
+  return getJudgedBonuses(config).length > 0 ? 'bonus' : null;
+}
+
+export function hasJudging(config: unknown): boolean {
+  return getJudgingKind(config) !== null;
+}
+
+// Every claim a judge has to look at, and whether it has a full decision yet.
+async function listJudgeableClaims(db: DatabaseClient, gameId: string): Promise<Array<{ claimId: string; decided: boolean }>> {
+  const rows = await db.select({ claim: challengeClaims, config: challenges.config })
+    .from(challengeClaims).innerJoin(challenges, eq(challenges.id, challengeClaims.challengeId))
+    .where(and(eq(challengeClaims.gameId, gameId), inArray(challengeClaims.status, ['submitted', 'completed'])));
+  return rows.flatMap(({ claim, config }) => {
+    const kind = getJudgingKind(config);
+    if (!kind || claim.status !== JUDGEABLE_CLAIM_STATUS[kind]) return [];
+    const decision = claim.judgedDecision as JudgingDecision | null;
+    return [{ claimId: claim.id, decided: kind === 'bonus' ? isJudgedBonusDecisionComplete(config, decision) : decision !== null }];
+  });
 }
 
 function getPublishedAt(settings: unknown): string | null {

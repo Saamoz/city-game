@@ -73,6 +73,7 @@ interface BonusFormRow {
   label: string;
   points: string;
   description: string;
+  judged: boolean; // decided by the judges after the game; teams can't tick it
 }
 
 // Within a point-linked set, each item is either pinned to the map or doable anywhere.
@@ -401,7 +402,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
     const isJudged = setForm.locationMode === 'point' && itemForm.scoringMode === 'judged';
     const basePoints = itemForm.pointValue.trim() === '' ? DEFAULT_CHALLENGE_POINTS : Math.max(0, Math.floor(Number(itemForm.pointValue) || 0));
     const bonuses = itemForm.bonuses
-      .map((bonus) => ({ id: bonus.id, label: bonus.label.trim(), points: Math.floor(Number(bonus.points) || 0), ...(bonus.description.trim() ? { description: bonus.description.trim() } : {}) }))
+      .map((bonus) => ({ id: bonus.id, label: bonus.label.trim(), points: Math.floor(Number(bonus.points) || 0), ...(bonus.description.trim() ? { description: bonus.description.trim() } : {}), ...(bonus.judged && !isJudged ? { judged: true } : {}) }))
       .filter((bonus) => bonus.label);
     const payload = {
       mapZoneId: setForm.locationMode === 'zone' ? itemForm.mapZoneId : null,
@@ -739,7 +740,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                             {longText && longText !== getShortDescription(item) ? <span className="mt-0.5 block text-xs leading-5 text-[#7a8589] line-clamp-2">More info: {longText}</span> : null}
                             {bonuses.length ? (
                               <span className="mt-1 flex flex-wrap gap-1">
-                                {bonuses.map((bonus) => <span key={bonus.id} className="rounded-md border border-[#d9c79e] bg-[#f6ecd4] px-1.5 py-0.5 text-[11px] leading-4 text-[#5d4d33]">+{bonus.points} {bonus.label}</span>)}
+                                {bonuses.map((bonus) => <span key={bonus.id} className={'rounded-md border px-1.5 py-0.5 text-[11px] leading-4 ' + (bonus.judged ? 'border-[#8f80b8]/60 bg-[#ece6f6] text-[#3f3360]' : 'border-[#d9c79e] bg-[#f6ecd4] text-[#5d4d33]')}>{bonus.judged ? '★ ' : ''}+{bonus.points} {bonus.label}</span>)}
                               </span>
                             ) : null}
                           </span>
@@ -940,7 +941,7 @@ function buildItemForm(item: ChallengeSetItem, setMapId: string | null): ItemFor
     mapPoint: item.mapPoint,
     pointRadiusMeters: String(typeof item.config?.point_radius_meters === 'number' ? item.config.point_radius_meters : 40),
     pointValue: String(getBasePoints(item.scoring)),
-    bonuses: getChallengeBonuses(item.config).map((bonus) => ({ id: bonus.id, label: bonus.label, points: String(bonus.points), description: bonus.description ?? '' })),
+    bonuses: getChallengeBonuses(item.config).map((bonus) => ({ id: bonus.id, label: bonus.label, points: String(bonus.points), description: bonus.description ?? '', judged: bonus.judged === true })),
     placement: item.mapPoint ? 'pinned' : getChallengeArea(item.config) ? 'area' : 'anywhere',
     area: getChallengeArea(item.config),
     locationHint: typeof item.config?.location_hint === 'string' ? item.config.location_hint : '',
@@ -963,10 +964,17 @@ function BonusEditor({ rows, isJudged, onChange }: { rows: BonusFormRow[]; isJud
               <button aria-label="Remove bonus" className="h-9 w-9 rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] text-sm text-[#7d2d26]" onClick={() => onChange(rows.filter((entry) => entry.id !== row.id))} type="button">×</button>
             </div>
             <textarea aria-label="Bonus details" className={inputClassName + ' h-14 w-full'} maxLength={400} onChange={(event) => update(row.id, { description: event.target.value })} placeholder="Details (optional): shown behind an info button" value={row.description} />
+            {/* A whole judged challenge already has every bonus judged. */}
+            {!isJudged ? (
+              <label className="flex cursor-pointer items-center gap-2 px-1 text-xs text-[#4f5f65]">
+                <input checked={row.judged} className="h-4 w-4 accent-[#3f3360]" onChange={(event) => update(row.id, { judged: event.target.checked })} type="checkbox" />
+                <span><span className="font-semibold text-[#3f3360]">★ Judged after the game.</span> Teams can't tick it; you mark it yes or no for the team that completed the challenge.</span>
+              </label>
+            ) : null}
           </div>
         ))}
       </div>
-      {rows.length < MAX_CHALLENGE_BONUSES ? <button className="mt-2 rounded-full border border-dashed border-[#a88c52] bg-[#fff8eb] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#5d4d33]" onClick={() => onChange([...rows, { id: 'bonus-' + crypto.randomUUID().slice(0, 8), label: '', points: '1', description: '' }])} type="button">+ Add bonus</button> : null}
+      {rows.length < MAX_CHALLENGE_BONUSES ? <button className="mt-2 rounded-full border border-dashed border-[#a88c52] bg-[#fff8eb] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#5d4d33]" onClick={() => onChange([...rows, { id: 'bonus-' + crypto.randomUUID().slice(0, 8), label: '', points: '1', description: '', judged: false }])} type="button">+ Add bonus</button> : null}
       <p className="mt-1.5 text-xs leading-5 text-[#6b777b]">{isJudged ? 'Up to ' + MAX_CHALLENGE_BONUSES + '. Teams tick the ones they did when completing; judges approve each one.' : 'Optional extras, up to ' + MAX_CHALLENGE_BONUSES + '. Teams tick the ones they did when completing, and each adds its points.'}</p>
     </div>
   );
@@ -986,7 +994,7 @@ const compactInputClassName = 'w-full rounded-xl border border-[#c8b48a]/55 bg-[
 
 function matchesItemFilter(item: ChallengeSetItem, filter: ItemFilter): boolean {
   if (filter === 'all') return true;
-  if (filter === 'judged') return item.config?.judged === true;
+  if (filter === 'judged') return item.config?.judged === true || getChallengeBonuses(item.config).some((bonus) => bonus.judged);
   if (filter === 'pinned') return Boolean(item.mapPoint || item.mapZoneId);
   if (filter === 'area') return Boolean(getChallengeArea(item.config));
   return !item.mapPoint && !item.mapZoneId && !getChallengeArea(item.config);

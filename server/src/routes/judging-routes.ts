@@ -10,13 +10,14 @@ const idParamsSchema = {
   properties: { id: { type: 'string', format: 'uuid' } },
 } as const;
 
-// Either a decision ({ verdict, bonusIds?, points? }), { decision: null } to clear, or the older { points }.
+// Either a decision ({ verdict, bonusIds?, rejectedBonusIds?, points? }), { decision: null } to clear, or the older { points }.
 const decisionBodySchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
     verdict: { type: 'string', enum: ['pass', 'fail', 'winner', 'points'] },
     bonusIds: { type: 'array', items: { type: 'string' }, maxItems: 10 },
+    rejectedBonusIds: { type: 'array', items: { type: 'string' }, maxItems: 10 },
     points: { anyOf: [{ type: 'integer', minimum: -100000, maximum: 100000 }, { type: 'null' }] },
     decision: { type: 'null' },
   },
@@ -31,9 +32,9 @@ export const judgingRoutes: FastifyPluginAsync = async (app) => {
   // Draft scores stay private until published, so this does not touch game state or broadcast.
   app.put('/judging/submissions/:id', { preHandler: [app.requireAdmin], schema: { params: idParamsSchema, body: decisionBodySchema } }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = request.body as { verdict?: JudgingVerdict; bonusIds?: string[]; points?: number | null; decision?: null };
+    const body = request.body as { verdict?: JudgingVerdict; bonusIds?: string[]; rejectedBonusIds?: string[]; points?: number | null; decision?: null };
     const decision = body.verdict
-      ? { verdict: body.verdict, bonusIds: body.bonusIds, ...(typeof body.points === 'number' ? { points: body.points } : {}) }
+      ? { verdict: body.verdict, bonusIds: body.bonusIds, ...(body.rejectedBonusIds ? { rejectedBonusIds: body.rejectedBonusIds } : {}), ...(typeof body.points === 'number' ? { points: body.points } : {}) }
       : typeof body.points === 'number' ? { verdict: 'points' as const, points: body.points } : null;
     const points = await setSubmissionDecision(app.db, id, decision);
     reply.send({ ok: true, points });

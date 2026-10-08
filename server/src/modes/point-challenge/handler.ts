@@ -1,7 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { isJudgedChallengeConfig, type ScoreboardEntry, type Team } from '@city-game/shared';
 import { challengeClaims, challenges, teams } from '../../db/schema.js';
-import { publishJudgingIfDecided } from '../../services/judging-service.js';
+import { hasJudging, publishJudgingIfDecided } from '../../services/judging-service.js';
 import { getAllBalances } from '../../services/resource-service.js';
 import type { ModeHandler } from '../types.js';
 import { createTerritoryModeHandler } from '../territory/handler.js';
@@ -48,8 +48,8 @@ export function createPointChallengeModeHandler(): ModeHandler {
       if (rows.length === 0 || (regularRows.length > 0 ? regularRows : rows).some(isOpen)) {
         return { hasWinner: false };
       }
-      // Judged points arrive after the game, so no winner can be named yet.
-      if (rows.some((row) => isJudgedChallengeConfig(row.config))) {
+      // Judged points (judged challenges or judged bonuses) arrive after the game, so no winner can be named yet.
+      if (rows.some((row) => hasJudging(row.config))) {
         return { hasWinner: true, winnerTeamId: null, reason: 'awaiting_judging' };
       }
       const scoreboard = await this.computeScoreboard({ db, game });

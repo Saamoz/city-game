@@ -14,6 +14,12 @@
           "id": "b1",
           "label": "Eat the whole chicken",
           "points": 1
+        },
+        {
+          "id": "b2",
+          "label": "Elevate it and offer it to Sagnik",
+          "points": 1,
+          "judged": true
         }
       ]
     },
@@ -91,7 +97,14 @@
         "placement": "anywhere",
         "hint": "Any Ethiopian restaurant"
       },
-      "bonuses": []
+      "bonuses": [
+        {
+          "id": "b1",
+          "label": "Offer it to Sagnik",
+          "points": 1,
+          "judged": true
+        }
+      ]
     },
     {
       "title": "Jeni's taste test",
@@ -277,7 +290,14 @@
         "placement": "anywhere",
         "hint": "On the Metra"
       },
-      "bonuses": []
+      "bonuses": [
+        {
+          "id": "b1",
+          "label": "It's a Happy Birthday balloon and you offer it to Sagnik",
+          "points": 1,
+          "judged": true
+        }
+      ]
     },
     {
       "title": "Strava art",
@@ -310,7 +330,14 @@
         "radiusMeters": 50,
         "hint": "La Fournette"
       },
-      "bonuses": []
+      "bonuses": [
+        {
+          "id": "b1",
+          "label": "Offer it to Sagnik",
+          "points": 1,
+          "judged": true
+        }
+      ]
     },
     {
       "title": "Boystown bar",
@@ -404,50 +431,6 @@
         ],
         "radiusMeters": 70,
         "hint": "Chinatown Library"
-      },
-      "bonuses": []
-    },
-    {
-      "title": "Chicken for Sagnik",
-      "shortDescription": "Elevate a Costco rotisserie chicken and offer it to Sagnik.",
-      "points": 1,
-      "judged": true,
-      "where": {
-        "placement": "anywhere",
-        "hint": "At the party"
-      },
-      "bonuses": []
-    },
-    {
-      "title": "Ethiopian for Sagnik",
-      "shortDescription": "Bring Sagnik something from an Ethiopian restaurant and offer it up.",
-      "points": 1,
-      "judged": true,
-      "where": {
-        "placement": "anywhere",
-        "hint": "At the party"
-      },
-      "bonuses": []
-    },
-    {
-      "title": "Birthday balloon for Sagnik",
-      "shortDescription": "Offer Sagnik the balloon you rode the Metra with. It has to be a Happy Birthday balloon.",
-      "points": 1,
-      "judged": true,
-      "where": {
-        "placement": "anywhere",
-        "hint": "At the party"
-      },
-      "bonuses": []
-    },
-    {
-      "title": "Pastry for Sagnik",
-      "shortDescription": "Offer Sagnik a baked good from La Fournette.",
-      "points": 1,
-      "judged": true,
-      "where": {
-        "placement": "anywhere",
-        "hint": "At the party"
       },
       "bonuses": []
     },

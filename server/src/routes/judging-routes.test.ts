@@ -183,13 +183,63 @@ describe('judged challenges', () => {
     expect(await pointsFor(TEAM_TWO_ID)).toBe(5);
   });
 
+  it('scores a regular challenge live and leaves its judged bonus to the judges', async () => {
+    await seedPointGame();
+    await testDatabase.db.update(challenges).set({
+      scoring: { points: 3 },
+      config: { portable: true, location_mode: 'portable', bonuses: [{ id: 'b1', label: 'Ate it all', points: 1 }, { id: 'j1', label: 'Offered it to Sagnik', points: 2, judged: true }] },
+    }).where(eq(challenges.id, REGULAR_ID));
+    app = await createTestApp({ db: testDatabase.db });
+
+    // A ticked judged bonus is ignored: only the base and the self-reported bonus score live.
+    expect((await submitTo(REGULAR_ID, 'team-one-session', 'regular-1', { bonusIds: ['b1', 'j1'] })).statusCode).toBe(200);
+    expect(await pointsFor(TEAM_ONE_ID)).toBe(4);
+    await waitFor(async () => (await getGameStatus()) === 'completed');
+
+    // The game waits for the judge even though no judged challenge was submitted.
+    const recap = await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/public-recap' });
+    expect(recap.json().recap.judging).toMatchObject({ status: 'pending', submissionCount: 1 });
+
+    const sheet = (await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/judging' })).json().judging;
+    const entry = sheet.challenges.find((candidate: { challenge: { id: string } }) => candidate.challenge.id === REGULAR_ID);
+    expect(entry).toMatchObject({ judgingType: 'bonus', basePoints: 3, bonuses: [{ id: 'j1', judged: true }] });
+    expect(entry.submissions).toEqual([expect.objectContaining({ teamId: TEAM_ONE_ID })]);
+    const claimId = entry.submissions[0].claimId as string;
+
+    expect((await decide(claimId, { verdict: 'pass', bonusIds: ['j1'] })).json().points).toBe(2);
+    expect((await app.inject({ method: 'POST', url: '/api/v1/game/' + GAME_ID + '/judging/publish', headers: { 'idempotency-key': 'publish-bonus' } })).statusCode).toBe(200);
+    expect(await pointsFor(TEAM_ONE_ID)).toBe(6);
+
+    // Clearing the decision and republishing takes the bonus back.
+    expect((await decide(claimId, { decision: null })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: '/api/v1/game/' + GAME_ID + '/judging/publish', headers: { 'idempotency-key': 'republish-bonus' } })).statusCode).toBe(200);
+    expect(await pointsFor(TEAM_ONE_ID)).toBe(4);
+  });
+
+  it('publishes on its own when every judged bonus was already marked yes or no', async () => {
+    await seedPointGame();
+    await testDatabase.db.update(challenges).set({
+      config: { portable: true, location_mode: 'portable', bonuses: [{ id: 'j1', label: 'Offered it to Sagnik', points: 1, judged: true }] },
+    }).where(eq(challenges.id, REGULAR_ID));
+    app = await createTestApp({ db: testDatabase.db });
+
+    expect((await submitTo(REGULAR_ID, 'team-one-session', 'regular-1')).statusCode).toBe(200);
+    const sheet = (await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/judging' })).json().judging;
+    const entry = sheet.challenges.find((candidate: { challenge: { id: string } }) => candidate.challenge.id === REGULAR_ID);
+    // A partial decision isn't enough; a no is.
+    expect((await decide(entry.submissions[0].claimId, { verdict: 'pass', bonusIds: [], rejectedBonusIds: ['j1'] })).json().points).toBe(0);
+    await waitFor(async () => (await getGameStatus()) === 'completed');
+    const recap = await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/public-recap' });
+    expect(recap.json().recap.judging.status).toBe('published');
+  });
+
   async function endGame() {
     const response = await app.inject({ method: 'POST', url: '/api/v1/game/' + GAME_ID + '/end', headers: { 'idempotency-key': 'end-game' } });
     expect(response.statusCode).toBe(200);
   }
 
-  function submitTo(challengeId: string, sessionToken: string, actionId: string) {
-    return app.inject({ method: 'POST', url: '/api/v1/challenges/' + challengeId + '/complete', cookies: { [SESSION_COOKIE_NAME]: sessionToken }, headers: { 'idempotency-key': actionId }, payload: { gps: null } });
+  function submitTo(challengeId: string, sessionToken: string, actionId: string, submission: Record<string, unknown> | null = null) {
+    return app.inject({ method: 'POST', url: '/api/v1/challenges/' + challengeId + '/complete', cookies: { [SESSION_COOKIE_NAME]: sessionToken }, headers: { 'idempotency-key': actionId }, payload: { gps: null, ...(submission ? { submission } : {}) } });
   }
 
   function decide(claimId: string, payload: Record<string, unknown>) {

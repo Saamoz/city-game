@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
+  isJudgedBonusDecisionComplete,
   JUDGING_TYPE_LABELS,
   type Game,
   type GameJudgingSheet,
@@ -19,7 +20,8 @@ type Section = 'todo' | 'done';
 const REFRESH_MS = 15_000;
 
 // Judging page: every judged challenge with the teams that completed it. Judged challenges are
-// yes/no: each team gets a verdict (plus approval of the bonuses it claimed). Older challenge sets
+// yes/no: each team gets a verdict (plus approval of the bonuses it claimed). Regular challenges with
+// judged bonuses show the team that completed them, with a yes/no for each judged bonus. Older challenge sets
 // may still have best-team or set-points challenges, so those keep their controls. Decisions can be
 // made any time; once the game is over, players wait on a holding screen until "Show results".
 export function AdminJudging({ initialGameId }: AdminJudgingProps) {
@@ -142,7 +144,7 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
         {error ? <Banner tone="error">{error}</Banner> : null}
         {notice ? <Banner tone="success">{notice}</Banner> : null}
         {!sheet && !error ? <Banner tone="info">Loading…</Banner> : null}
-        {sheet && sheet.challenges.length === 0 ? <Banner tone="info">This game has no judged challenges.</Banner> : null}
+        {sheet && sheet.challenges.length === 0 ? <Banner tone="info">This game has no judged challenges or bonuses.</Banner> : null}
         {sheet && sheet.challenges.length > 0 && shown.length === 0 ? (
           <Banner tone="info">{section === 'todo' ? (done.length ? 'Everything submitted so far is judged.' : 'No team has completed a judged challenge yet.') : 'Nothing judged yet.'}</Banner>
         ) : null}
@@ -197,14 +199,17 @@ interface ChallengeCardProps {
 
 function ChallengeCard({ entry, teams, teamById, savingClaimIds, onDecide }: ChallengeCardProps) {
   const { challenge, judgingType, basePoints, bonuses, submissions } = entry;
-  const missing = teams.filter((team) => !submissions.some((submission) => submission.teamId === team.id));
+  const isBonusOnly = judgingType === 'bonus';
+  // Only one team completes a regular challenge, so "didn't do it" only applies to judged challenges.
+  const missing = isBonusOnly ? [] : teams.filter((team) => !submissions.some((submission) => submission.teamId === team.id));
   const description = typeof challenge.config?.short_description === 'string' ? challenge.config.short_description : challenge.description;
   return (
     <article className="overflow-hidden rounded-[1.6rem] border border-[#c9ae6d]/50 bg-[#fbf6ea] shadow-[0_14px_40px_rgba(46,58,62,0.10)]">
       <div className="border-b border-[#e3d6b6] px-4 py-4 sm:px-5">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-[#3f3360] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-white">{JUDGING_TYPE_LABELS[judgingType]}</span>
-          {judgingType !== 'points' ? <span className="rounded-full bg-[#24343a] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#f4ead7]">{basePoints} {basePoints === 1 ? 'pt' : 'pts'}{judgingType === 'best_wins' ? ' to the best' : ''}</span> : null}
+          <span className="rounded-full bg-[#3f3360] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-white">{isBonusOnly ? 'Judged bonus' : JUDGING_TYPE_LABELS[judgingType]}</span>
+          {isBonusOnly ? <span className="rounded-full bg-[#24343a] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#f4ead7]">{basePoints} {basePoints === 1 ? 'pt' : 'pts'} already scored</span> : null}
+          {judgingType !== 'points' && !isBonusOnly ? <span className="rounded-full bg-[#24343a] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#f4ead7]">{basePoints} {basePoints === 1 ? 'pt' : 'pts'}{judgingType === 'best_wins' ? ' to the best' : ''}</span> : null}
           {entry.maxPoints && judgingType === 'points' ? <span className="rounded-full bg-[#24343a] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#f4ead7]">Up to {entry.maxPoints} pts</span> : null}
           {isChallengeJudged(entry) ? <span className="ml-auto rounded-full bg-[#e1ebdd] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#2e6f57]">✓ Judged</span> : null}
         </div>
@@ -223,7 +228,9 @@ function ChallengeCard({ entry, teams, teamById, savingClaimIds, onDecide }: Cha
         <div className="divide-y divide-[#e8dcc0]">
           {submissions.map((submission) => (
             <SubmissionRow key={submission.claimId} saving={savingClaimIds.has(submission.claimId)} submission={submission} team={teamById.get(submission.teamId)}>
-              {judgingType === 'pass_fail'
+              {isBonusOnly
+                ? <JudgedBonusChoices bonuses={bonuses} onDecide={(decision) => onDecide(submission, decision)} submission={submission} />
+                : judgingType === 'pass_fail'
                 ? <PassFail basePoints={basePoints} bonuses={bonuses} onDecide={(decision) => onDecide(submission, decision)} submission={submission} />
                 : <PointsInput maxPoints={entry.maxPoints} onDecide={(decision) => onDecide(submission, decision)} submission={submission} />}
             </SubmissionRow>
@@ -282,6 +289,35 @@ function PassFail({ submission, basePoints, bonuses, onDecide }: { submission: J
         </div>
       ) : null}
       <p className="text-right text-xs font-semibold text-[#55656c]">{verdict === 'pass' ? '+' + total + ' pts' : verdict === 'fail' ? '0 pts' : 'Not judged'}</p>
+    </div>
+  );
+}
+
+// One yes/no per judged bonus. Tapping the chosen answer again clears it.
+function JudgedBonusChoices({ submission, bonuses, onDecide }: { submission: JudgingSubmission; bonuses: JudgingChallenge['bonuses']; onDecide(decision: JudgingDecision | null): void }) {
+  const approved = new Set(submission.decision?.bonusIds ?? []);
+  const rejected = new Set(submission.decision?.rejectedBonusIds ?? []);
+  const choose = (bonusId: string, answer: 'yes' | 'no') => {
+    const nextApproved = new Set(approved);
+    const nextRejected = new Set(rejected);
+    const current = approved.has(bonusId) ? 'yes' : rejected.has(bonusId) ? 'no' : null;
+    nextApproved.delete(bonusId);
+    nextRejected.delete(bonusId);
+    if (current !== answer) (answer === 'yes' ? nextApproved : nextRejected).add(bonusId);
+    onDecide(nextApproved.size || nextRejected.size ? { verdict: 'pass', bonusIds: [...nextApproved], rejectedBonusIds: [...nextRejected] } : null);
+  };
+  const total = bonuses.filter((bonus) => approved.has(bonus.id)).reduce((sum, bonus) => sum + bonus.points, 0);
+  const choice = 'rounded-xl border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] transition';
+  return (
+    <div className="space-y-2 sm:min-w-[18rem]">
+      {bonuses.map((bonus) => (
+        <div key={bonus.id} className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 text-sm text-[#3f4d52]">{bonus.label} <span className="font-semibold text-[#7a5413]">+{bonus.points}</span></span>
+          <button className={[choice, approved.has(bonus.id) ? 'border-[#2e6f57] bg-[#2e6f57] text-white' : 'border-[#9fc1b2] bg-white text-[#2e6f57]'].join(' ')} onClick={() => choose(bonus.id, 'yes')} type="button">✓ Yes</button>
+          <button className={[choice, rejected.has(bonus.id) ? 'border-[#9f3f31] bg-[#9f3f31] text-white' : 'border-[#d8aaa1] bg-white text-[#9f3f31]'].join(' ')} onClick={() => choose(bonus.id, 'no')} type="button">✗ No</button>
+        </div>
+      ))}
+      <p className="text-right text-xs font-semibold text-[#55656c]">{submission.decision ? '+' + total + ' bonus pts' : 'Not judged'}</p>
     </div>
   );
 }
@@ -372,6 +408,7 @@ function Banner({ tone, children }: { tone: 'error' | 'success' | 'info'; childr
 export function isChallengeJudged(entry: JudgingChallenge): boolean {
   if (!entry.submissions.length) return false;
   if (entry.judgingType === 'best_wins') return entry.submissions.some((submission) => submission.decision?.verdict === 'winner');
+  if (entry.judgingType === 'bonus') return entry.submissions.every((submission) => isJudgedBonusDecisionComplete(entry.challenge.config, submission.decision));
   return entry.submissions.every((submission) => submission.decision !== null);
 }
 

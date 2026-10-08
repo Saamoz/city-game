@@ -514,8 +514,9 @@ async function finishChallengeCompletion(
   });
 
   const resourcesAwarded = normalizeResourceAwards(input.updatedChallenge.scoring as ResourceAwardMap);
-  // Base points (default 1 when unset) plus the self-reported bonus tasks.
-  const totalPoints = getBasePoints(input.updatedChallenge.scoring) + sumBonusPoints(getClaimedBonuses(input.updatedChallenge.config, input.updatedClaim.submission));
+  // Base points (default 1 when unset) plus the self-reported bonus tasks. Judged bonuses are
+  // awarded after the game, so a ticked one is ignored here.
+  const totalPoints = getBasePoints(input.updatedChallenge.scoring) + sumBonusPoints(getClaimedBonuses(input.updatedChallenge.config, input.updatedClaim.submission).filter((bonus) => !bonus.judged));
   if (totalPoints !== 0) resourcesAwarded.points = totalPoints;
   else delete resourcesAwarded.points;
   const resourceEntries: ResourceLedgerEntry[] = [];

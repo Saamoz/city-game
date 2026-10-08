@@ -1,15 +1,17 @@
 # The challenges score live like any other. Offering things to Sagnik happens later, at the party, so
-# each offering is its own judged challenge that the admin marks yes or no after the game.
+# those are judged bonuses: teams can't tick them, and the admin marks each yes or no after the game.
 # Builds sagnik-bday.json, the Sagnik birthday Challenge Hunt set. Load it with import.mjs.
 import json, os
-def bonus(i, label): return {"id": f"b{i}", "label": label, "points": 1}
+def bonus(i, label):
+    judged = label.startswith("JUDGED:")
+    return {"id": f"b{i}", "label": label.removeprefix("JUDGED:"), "points": 1, **({"judged": True} if judged else {})}
 def rect(w,s,e,n): return {"type":"Polygon","coordinates":[[[w,s],[e,s],[e,n],[w,n],[w,s]]]}
 def anywhere(hint=None): return {"placement":"anywhere", **({"hint":hint} if hint else {})}
 def pin(lng,lat,r,name): return {"placement":"pin","point":[lng,lat],"radiusMeters":r,"hint":name}
 def area(poly,name): return {"placement":"area","area":poly,"hint":name}
 items = [
  dict(title="Costco rotisserie chicken", short="Get a Costco rotisserie chicken.", where=anywhere("Any Costco"),
-      bonuses=["Eat the whole chicken"]),
+      bonuses=["Eat the whole chicken","JUDGED:Elevate it and offer it to Sagnik"]),
  dict(title="Trader Joe's snack review", short="Review one Trader Joe's snack per team member, with at least 30 seconds of commentary each.", where=anywhere("Any Trader Joe's")),
  dict(title="Bike test ride", short="Test ride a bike at any shop where you can buy a bike.", where=anywhere("Any bike shop")),
  dict(title="REI fashion show", short="3+ teammates each try on a base layer, a shell and hiking pants or shorts. Take runway shots.",
@@ -17,7 +19,7 @@ items = [
       where=pin(-87.6509,41.9087,90,"REI Lincoln Park"), bonuses=["Add a backpack and shoes"]),
  dict(title="Build a box", short="Build a box from scratch out of any material, big enough to hold a set of keys.", where=anywhere()),
  dict(title="Not in English", short="Complete a full transaction in a language that isn't English.", where=anywhere(), bonuses=["In Hindi or Bangla"]),
- dict(title="Ethiopian food", short="Order something from an Ethiopian restaurant and taste it.", where=anywhere("Any Ethiopian restaurant")),
+ dict(title="Ethiopian food", short="Order something from an Ethiopian restaurant and taste it.", where=anywhere("Any Ethiopian restaurant"), bonuses=["JUDGED:Offer it to Sagnik"]),
  dict(title="Jeni's taste test", short="Taste test at Jeni's and film a 1-minute review video.", where=anywhere("Any Jeni's"), bonuses=["Everyone finishes at least one scoop"]),
  dict(title="Hamilton monument", short="Perform 1 minute of a Hamilton song at the Alexander Hamilton statue.", where=pin(-87.63844,41.93171,60,"Hamilton statue, Lincoln Park"), bonuses=["The full song (3+ minutes)"]),
  dict(title="Broadway Playbill", short="Get a Broadway Playbill.", where=anywhere("Any theatre")),
@@ -29,20 +31,16 @@ items = [
  dict(title="Colour hunt", short="Make a 3×3 photo grid of purple, violet or lavender things.", where=anywhere(), bonuses=["One of the photos is a birthday cake"]),
  dict(title="Flag of India", short="Find a flag of India.", where=anywhere()),
  dict(title="Go Bears", short="Catch the Cal vs SMU game, say \"Go Bears\" and get someone else to say it back.", where=anywhere("Wherever the game's on")),
- dict(title="Metra balloon", short="Ride the Metra with a balloon for at least one stop.", where=anywhere("On the Metra")),
+ dict(title="Metra balloon", short="Ride the Metra with a balloon for at least one stop.", where=anywhere("On the Metra"), bonuses=["JUDGED:It's a Happy Birthday balloon and you offer it to Sagnik"]),
  dict(title="Strava art", short="Make Strava art spelling any word of at least 4 letters.", where=anywhere()),
  dict(title="Plane spotting", short="Photograph and correctly identify 3+ aircraft. No AI image search, but research is fine.", where=anywhere()),
- dict(title="La Fournette", short="Get a baked good at La Fournette.", where=pin(-87.6345,41.9096,50,"La Fournette")),
+ dict(title="La Fournette", short="Get a baked good at La Fournette.", where=pin(-87.6345,41.9096,50,"La Fournette"), bonuses=["JUDGED:Offer it to Sagnik"]),
  dict(title="Boystown bar", short="At a bar in Boystown, strike up a conversation with a stranger (not the bartender).", where=area(rect(-87.6532,41.9385,-87.6428,41.9508),"Boystown"), bonuses=["You get their number"]),
  dict(title="Silent disco", short="Put music in your earbuds and dance like nobody's watching in front of Soundbar.", where=pin(-87.6347,41.8932,60,"Soundbar")),
  dict(title="Bird spotting", short="Identify at least 3 birds at the Montrose Point Bird Sanctuary.", where=pin(-87.635177,41.962726,180,"Montrose Bird Sanctuary"), bonuses=["Identify 6 or more"]),
  dict(title="Library quote", short="At the Chinatown library, find a John Green book and a quote on the human condition.",
       long="Find one of John Green's books at the Chinatown branch of the Chicago Public Library, then find a quote in it that comments on the human condition.",
       where=pin(-87.6323,41.8543,70,"Chinatown Library")),
- dict(judged=True, title="Chicken for Sagnik", short="Elevate a Costco rotisserie chicken and offer it to Sagnik.", where=anywhere("At the party")),
- dict(judged=True, title="Ethiopian for Sagnik", short="Bring Sagnik something from an Ethiopian restaurant and offer it up.", where=anywhere("At the party")),
- dict(judged=True, title="Birthday balloon for Sagnik", short="Offer Sagnik the balloon you rode the Metra with. It has to be a Happy Birthday balloon.", where=anywhere("At the party")),
- dict(judged=True, title="Pastry for Sagnik", short="Offer Sagnik a baked good from La Fournette.", where=anywhere("At the party")),
  dict(title="Northerly Island landing", short="One person is the plane, another is air traffic control. Land on the old Meigs Field airstrip.", where=area(rect(-87.6115,41.8548,-87.6030,41.8656),"Northerly Island")),
 ]
 for i in items:

@@ -86,6 +86,15 @@ export function ChallengeCardFace({ gameName, challenge, suit, distanceMeters, i
                   const checked = selected.has(bonus.id);
                   return (
                     <li key={bonus.id} className="px-3 py-2">
+                      {bonus.judged ? (
+                        // Judged after the game, so there is nothing to tick now.
+                        <div className="flex items-center gap-2.5">
+                          <span aria-hidden="true" className="grid h-5 w-5 shrink-0 place-items-center text-[13px] text-[#6b5a86]">★</span>
+                          <span className="min-w-0 flex-1 text-sm leading-5 text-[#3d362a]">{bonus.label}<span className="block text-[11px] italic leading-4 text-[#6b5a86]">Judged after the game</span></span>
+                          <span className="shrink-0 font-[Georgia,Times_New_Roman,serif] text-sm font-semibold" style={{ color: RUST }}>+{bonus.points}</span>
+                          {bonus.description ? <InfoButton label={'About ' + bonus.label} open={openInfo.has(bonus.id)} onToggle={() => setOpenInfo((current) => toggle(current, bonus.id))} /> : null}
+                        </div>
+                      ) : (
                       <div className="flex items-center gap-2.5">
                         <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5">
                           <input checked={checked} className="peer sr-only" onChange={() => setSelected((current) => toggle(current, bonus.id))} type="checkbox" />
@@ -95,6 +104,7 @@ export function ChallengeCardFace({ gameName, challenge, suit, distanceMeters, i
                         <span className="shrink-0 font-[Georgia,Times_New_Roman,serif] text-sm font-semibold" style={{ color: RUST }}>+{bonus.points}</span>
                         {bonus.description ? <InfoButton label={'About ' + bonus.label} open={openInfo.has(bonus.id)} onToggle={() => setOpenInfo((current) => toggle(current, bonus.id))} /> : null}
                       </div>
+                      )}
                       {bonus.description && openInfo.has(bonus.id) ? <p className="mt-1.5 pl-[1.9rem] text-[13px] italic leading-5 text-[#5c5240]">{bonus.description}</p> : null}
                     </li>
                   );
