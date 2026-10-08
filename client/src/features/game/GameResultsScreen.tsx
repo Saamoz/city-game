@@ -117,7 +117,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
     : isTie ? `${winnerIds.size} teams tied for first with ${highestZoneCount} ${scoreNoun}.` : `${spectatorWinner ?? 'No team'} won with ${highestZoneCount} ${scoreNoun}.`;
 
   return (
-    <main className="relative h-[100dvh] overflow-hidden bg-[#d7dedb] text-[#24343a]">
+    <main data-safe-area className="relative h-[100dvh] overflow-hidden bg-[#d7dedb] text-[#24343a]">
       <ResultsMap progress={progress} recap={recap} teams={teams} zones={zones} />
 
       {view === 'map' ? (
@@ -243,7 +243,7 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
 // it on their own once the judges finish.
 function AwaitingJudgingScreen({ gameName, submissionCount, isLoading, onLeave }: { gameName: string; submissionCount: number; isLoading: boolean; onLeave?(): void }) {
   return (
-    <main className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-[#f5f0e8] px-6 pb-36 pt-[calc(env(safe-area-inset-top,0px)+2rem)] text-center text-[#223238]">
+    <main data-safe-area className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-[#f5f0e8] px-6 pb-36 pt-[calc(env(safe-area-inset-top,0px)+2rem)] text-center text-[#223238]">
       <SkylineBackdrop />
       <div className="relative flex max-w-md flex-col items-center">
         <BrandMark className="h-16 w-16" decorative />

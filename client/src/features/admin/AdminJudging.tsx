@@ -112,7 +112,7 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
   const canPublish = game?.status === 'completed';
 
   return (
-    <main className="min-h-screen bg-[#ece6d6] pb-28 text-[#24343a]">
+    <main data-safe-area className="min-h-screen bg-[#ece6d6] pb-28 text-[#24343a]">
       <header className="sticky top-0 z-20 border-b border-[#c9ae6d]/40 bg-[#f3ecd8]/95 px-4 pb-3 pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] backdrop-blur lg:px-8">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">

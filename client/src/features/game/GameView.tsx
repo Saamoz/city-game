@@ -962,9 +962,11 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   }
 
   return (
-    <main className="fixed inset-0 h-[100dvh] overflow-hidden overscroll-none bg-[#dfe6e8] text-[#1f2a2f]">
-      <div ref={mapContainerRef} className="absolute inset-0" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,234,215,0.16),transparent_28%),linear-gradient(180deg,rgba(223,230,232,0.04),rgba(223,230,232,0.16))]" />
+    <main data-safe-area className="fixed inset-0 h-[100dvh] overflow-hidden overscroll-none bg-[#dfe6e8] text-[#1f2a2f]">
+      {/* The map bleeds to the very edges of the phone, behind the status bar, Dynamic Island and
+          browser toolbar; the controls above stay inside the safe area. */}
+      <div ref={mapContainerRef} className="game-map fixed inset-x-0 top-0 h-[100lvh] min-h-full" />
+      <div className="pointer-events-none fixed inset-x-0 top-0 h-[100lvh] min-h-full bg-[radial-gradient(circle_at_top_left,rgba(244,234,215,0.16),transparent_28%),linear-gradient(180deg,rgba(223,230,232,0.04),rgba(223,230,232,0.16))]" />
 
       <ZoneLayer map={mapForLayer} zones={snapshot?.zones ?? null} teams={snapshot?.teams ?? null} />
       <ChallengeAreaLayer map={mapForLayer} challenges={teamChallenges} selectedId={selectedPointChallengeId} onSelect={openCardFromMap} />

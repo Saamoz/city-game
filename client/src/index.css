@@ -44,6 +44,29 @@ body.game-view-active #root {
   overscroll-behavior: none;
 }
 
+/* The page runs edge to edge (viewport-fit=cover). Screens that don't place their own content around
+   the notch, Dynamic Island and home indicator get spacers so nothing hides behind them. */
+#root main:not([data-safe-area]):not(main main)::before,
+#root main:not([data-safe-area]):not(main main)::after {
+  content: '';
+  display: block;
+  flex: none;
+}
+#root main:not([data-safe-area]):not(main main)::before { height: env(safe-area-inset-top, 0px); }
+#root main:not([data-safe-area]):not(main main)::after { height: env(safe-area-inset-bottom, 0px); }
+
+/* Matches the map, so any sliver the map doesn't reach blends in. */
+html.game-view-active,
+body.game-view-active {
+  background: #dfe6e8;
+}
+
+/* Keep the Mapbox logo and attribution clear of the browser toolbar and home indicator. */
+.game-map .mapboxgl-ctrl-bottom-left,
+.game-map .mapboxgl-ctrl-bottom-right {
+  bottom: calc(100lvh - 100dvh + env(safe-area-inset-bottom, 0px));
+}
+
 body.game-view-active {
   position: fixed;
   inset: 0;
