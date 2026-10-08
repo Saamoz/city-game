@@ -613,7 +613,8 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
       <input ref={importInputRef} className="hidden" type="file" accept="application/json" onChange={handleImportFile} />
 
       <div className="grid min-h-screen gap-4 p-4 lg:grid-cols-[14rem_minmax(0,1fr)_24rem] 2xl:grid-cols-[17rem_minmax(0,1fr)_27rem] lg:p-6">
-        <aside className="rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] p-4 shadow-[0_24px_60px_rgba(46,58,62,0.14)]">
+        {/* Both side columns stick to the viewport and scroll on their own; the page scrolls the challenge list. */}
+        <aside className="rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] p-4 shadow-[0_24px_60px_rgba(46,58,62,0.14)] lg:sticky lg:top-6 lg:flex lg:max-h-[calc(100vh-3rem)] lg:flex-col lg:self-start">
           <div>
             <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">Challenge Keeper</p>
             <h1 className="mt-2 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold text-[#24343a]">Sets</h1>
@@ -629,7 +630,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
             <button className="rounded-2xl border border-[#24343a] bg-[#24343a] px-4 py-3 text-sm font-semibold text-[#f4ead7]" disabled={isSavingSet} onClick={handleCreateSet} type="button">New</button>
           </div>
 
-          <div className="mt-4 space-y-2 overflow-y-auto lg:max-h-[calc(100vh-12rem)]">
+          <div className="mt-4 space-y-2 overflow-y-auto lg:min-h-0 lg:flex-1">
             {sortedSets.map((challengeSet) => {
               const isActive = challengeSet.id === currentSet?.id;
               return (
@@ -652,7 +653,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
           </div>
         </aside>
 
-        <main className="rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f7f0de] p-5 shadow-[0_24px_60px_rgba(46,58,62,0.12)]">
+        <main className="min-w-0 self-start rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f7f0de] p-5 shadow-[0_24px_60px_rgba(46,58,62,0.12)]">
           {notice ? <Notice tone={notice.tone} message={notice.message} /> : null}
           {currentSet ? (
             <>
@@ -712,7 +713,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                   ))}
                 </div>
 
-                <div className="mt-3 space-y-1.5 overflow-y-auto lg:max-h-[calc(100vh-22rem)]">
+                <div className="mt-3 space-y-1.5">
                   {visibleItems.map((item) => {
                     const index = items.indexOf(item);
                     const active = item.id === selectedItemId;
@@ -766,7 +767,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
           )}
         </main>
 
-        <aside className="rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] p-5 shadow-[0_24px_60px_rgba(46,58,62,0.12)]">
+        <aside className="rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] p-5 shadow-[0_24px_60px_rgba(46,58,62,0.12)] lg:sticky lg:top-6 lg:flex lg:max-h-[calc(100vh-3rem)] lg:flex-col lg:self-start">
           <div className="flex items-center justify-between gap-3 border-b border-[#d6c59d]/55 pb-4">
             <div>
               <p className="text-[11px] uppercase tracking-[0.24em] text-[#7a6a48]">Item Editor</p>
@@ -777,7 +778,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
             ) : null}
           </div>
 
-          <div className="mt-4 space-y-3 overflow-y-auto lg:max-h-[calc(100vh-10rem)]">
+          <div className="-mx-1 mt-4 space-y-3 overflow-y-auto px-1 pb-1 lg:min-h-0 lg:flex-1">
             <Field label="Title">
               <input className={compactInputClassName} maxLength={CHALLENGE_CARD_TITLE_MAX_LENGTH} value={itemForm.title} onChange={(event) => setItemForm((current) => ({ ...current, title: event.target.value }))} />
               <CharacterLimit value={itemForm.title} max={CHALLENGE_CARD_TITLE_MAX_LENGTH} />
