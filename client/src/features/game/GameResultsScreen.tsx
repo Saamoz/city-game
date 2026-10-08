@@ -360,7 +360,9 @@ function ResultsMap({ progress, recap, teams, zones }: { progress: number; recap
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!mapReady || !map?.isStyleLoaded()) return;
+    // Sources exist once the map has loaded; isStyleLoaded() stays false while tiles stream in,
+    // which used to skip the first draw and leave the final map without trails or stamps.
+    if (!mapReady || !map) return;
     (map.getSource('result-zones') as mapboxgl.GeoJSONSource | undefined)?.setData(zoneData);
     (map.getSource('result-paths') as mapboxgl.GeoJSONSource | undefined)?.setData(buildVisiblePaths(recap?.paths ?? [], progress, teamColorById));
     for (const [name, color] of stampImages) addStampImage(map, name, color);
