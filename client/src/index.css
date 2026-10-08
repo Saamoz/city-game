@@ -82,10 +82,11 @@ html.game-view-active {
   touch-action: pan-x pan-y;
 }
 
-/* Keep the Mapbox logo and attribution clear of the browser toolbar and home indicator. */
+/* Tuck the Mapbox logo and attribution (which Mapbox requires to stay visible) low in the corners,
+   just clear of the screen's rounded corners. */
 .game-map .mapboxgl-ctrl-bottom-left,
 .game-map .mapboxgl-ctrl-bottom-right {
-  bottom: calc(100lvh - 100dvh + env(safe-area-inset-bottom, 0px));
+  bottom: calc(env(safe-area-inset-bottom, 0px) * 0.35);
 }
 
 body.game-view-active {
