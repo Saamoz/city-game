@@ -5,7 +5,6 @@
       "title": "Costco rotisserie chicken",
       "shortDescription": "Get a Costco rotisserie chicken.",
       "points": 1,
-      "judged": true,
       "where": {
         "placement": "anywhere",
         "hint": "Any Costco"
@@ -14,11 +13,6 @@
         {
           "id": "b1",
           "label": "Eat the whole chicken",
-          "points": 1
-        },
-        {
-          "id": "b2",
-          "label": "Elevate it and offer it to Sagnik",
           "points": 1
         }
       ]
@@ -92,18 +86,11 @@
       "title": "Ethiopian food",
       "shortDescription": "Order something from an Ethiopian restaurant and taste it.",
       "points": 1,
-      "judged": true,
       "where": {
         "placement": "anywhere",
         "hint": "Any Ethiopian restaurant"
       },
-      "bonuses": [
-        {
-          "id": "b1",
-          "label": "Offer it to Sagnik",
-          "points": 1
-        }
-      ]
+      "bonuses": []
     },
     {
       "title": "Jeni's taste test",
@@ -283,18 +270,11 @@
       "title": "Metra balloon",
       "shortDescription": "Ride the Metra with a balloon for at least one stop.",
       "points": 1,
-      "judged": true,
       "where": {
         "placement": "anywhere",
         "hint": "On the Metra"
       },
-      "bonuses": [
-        {
-          "id": "b1",
-          "label": "It's a Happy Birthday balloon and you offer it to Sagnik",
-          "points": 1
-        }
-      ]
+      "bonuses": []
     },
     {
       "title": "Strava art",
@@ -318,7 +298,6 @@
       "title": "La Fournette",
       "shortDescription": "Get a baked good at La Fournette.",
       "points": 1,
-      "judged": true,
       "where": {
         "placement": "pin",
         "point": [
@@ -327,13 +306,7 @@
         ],
         "radiusMeters": 50
       },
-      "bonuses": [
-        {
-          "id": "b1",
-          "label": "Offer it to Sagnik",
-          "points": 1
-        }
-      ]
+      "bonuses": []
     },
     {
       "title": "Boystown bar",
@@ -423,6 +396,50 @@
           41.8543
         ],
         "radiusMeters": 70
+      },
+      "bonuses": []
+    },
+    {
+      "title": "Chicken for Sagnik",
+      "shortDescription": "Elevate a Costco rotisserie chicken and offer it to Sagnik.",
+      "points": 1,
+      "judged": true,
+      "where": {
+        "placement": "anywhere",
+        "hint": "At the party"
+      },
+      "bonuses": []
+    },
+    {
+      "title": "Ethiopian for Sagnik",
+      "shortDescription": "Bring Sagnik something from an Ethiopian restaurant and offer it up.",
+      "points": 1,
+      "judged": true,
+      "where": {
+        "placement": "anywhere",
+        "hint": "At the party"
+      },
+      "bonuses": []
+    },
+    {
+      "title": "Birthday balloon for Sagnik",
+      "shortDescription": "Offer Sagnik the balloon you rode the Metra with. It has to be a Happy Birthday balloon.",
+      "points": 1,
+      "judged": true,
+      "where": {
+        "placement": "anywhere",
+        "hint": "At the party"
+      },
+      "bonuses": []
+    },
+    {
+      "title": "Pastry for Sagnik",
+      "shortDescription": "Offer Sagnik a baked good from La Fournette.",
+      "points": 1,
+      "judged": true,
+      "where": {
+        "placement": "anywhere",
+        "hint": "At the party"
       },
       "bonuses": []
     },
