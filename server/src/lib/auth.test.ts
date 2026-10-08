@@ -128,6 +128,7 @@ describe('auth middleware', () => {
     );
     expect(cookieHeader).toEqual(expect.stringContaining('HttpOnly'));
     expect(cookieHeader).toEqual(expect.stringContaining('SameSite=Strict'));
+    expect(cookieHeader).toEqual(expect.stringContaining('Max-Age=2592000'));
   });
 
   it('accepts a valid admin bearer token', async () => {

@@ -163,7 +163,9 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
         });
       }
 
-      if (!suppressAutoEnter && currentPlayer && ((resolvedGame.status === 'active' || resolvedGame.status === 'paused') && currentPlayer.teamId || resolvedGame.status === 'completed')) {
+      // Only open games this player belongs to; the home page can feature another game's results.
+      const isOwnGame = currentPlayer?.gameId === resolvedGame.id;
+      if (!suppressAutoEnter && currentPlayer && isOwnGame && ((resolvedGame.status === 'active' || resolvedGame.status === 'paused') && currentPlayer.teamId || resolvedGame.status === 'completed')) {
         onEnterGame(resolvedGame.id);
         return;
       }
@@ -630,7 +632,7 @@ export function JoinFlow({ initialGameId, onEnterGame, suppressAutoEnter }: Join
     onEnterGame(game.id);
   }
 
-  const canReturnToGame = Boolean(game && player && (game.status === 'completed' || ((game.status === 'active' || game.status === 'paused') && player.teamId)));
+  const canReturnToGame = Boolean(game && player && player.gameId === game.id && (game.status === 'completed' || ((game.status === 'active' || game.status === 'paused') && player.teamId)));
   const canJoinCurrentGame = Boolean(game && game.status === 'setup');
   const canJoinMidGame = Boolean(game && (game.status === 'active' || game.status === 'paused') && !player?.teamId && isMidgameJoinAllowed(game.settings));
   const teamedPlayers = useMemo(() => players.filter((entry) => entry.teamId), [players]);

@@ -84,6 +84,8 @@ const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? import.meta.env
 
 export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const onLeaveMapRef = useRef(onLeaveMap);
+  onLeaveMapRef.current = onLeaveMap;
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const didFitBoundsRef = useRef(false);
   const fullSyncAbortRef = useRef<AbortController | null>(null);
@@ -173,6 +175,13 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       })
       .catch((error) => {
         if (isAbortError(error)) {
+          return;
+        }
+
+        // No session for this game (a new browser, a Home Screen install, or a player from another
+        // game): go back to the join screen instead of stranding them on an error.
+        if (error instanceof ApiError && error.statusCode === 401) {
+          onLeaveMapRef.current();
           return;
         }
 

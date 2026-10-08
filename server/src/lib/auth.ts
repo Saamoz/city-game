@@ -39,12 +39,17 @@ export async function getPlayerBySessionToken(db: DatabaseClient, sessionToken: 
   return player;
 }
 
+const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+
 export function getSessionCookieOptions(options: SessionCookieOptions = {}) {
   return {
     path: '/',
     httpOnly: true,
     secure: options.secure ?? env.nodeEnv === 'production',
     sameSite: 'strict' as const,
+    // Persistent, so a Home Screen app keeps the player signed in after iOS closes it; a session
+    // cookie is dropped whenever the app is killed.
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   };
 }
 
