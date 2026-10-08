@@ -446,3 +446,15 @@ input {
 @media (prefers-reduced-motion: reduce) {
   .scrap-paper-enter, .scrap-paper-exit, .scrap-paper::after { animation: none; }
 }
+
+/* Tapping a challenge stamp on the results map names the challenge. */
+.result-stamp-popup .mapboxgl-popup-content {
+  padding: 0.45rem 0.7rem;
+  border: 1px solid #a98c5a;
+  border-radius: 0.6rem;
+  background: #f8f1df;
+  color: #3d362a;
+  font: 600 0.78rem/1.3 Georgia, 'Times New Roman', serif;
+  box-shadow: 0 8px 20px rgba(40, 30, 15, 0.22);
+}
+.result-stamp-popup .mapboxgl-popup-tip { border-top-color: #a98c5a; border-bottom-color: #a98c5a; }

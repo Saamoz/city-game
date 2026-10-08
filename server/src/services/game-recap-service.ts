@@ -65,6 +65,7 @@ export async function buildGameRecap(
   const gameDurationMs = Math.max(1, endedAtMs - startedAtMs);
   const teamNameById = new Map(teamRows.map((team) => [team.id, team.name]));
   const events = [...eventRows].reverse();
+  const paths = buildTeamPaths(locationRows.flatMap((row) => row.teamId ? [{ ...row, teamId: row.teamId }] : []), startedAtMs, endedAtMs);
 
   return {
     gameId,
@@ -72,8 +73,8 @@ export async function buildGameRecap(
     endedAt: game.endedAt.toISOString(),
     playbackDurationSeconds: clamp(Math.round(gameDurationMs / 360_000), 30, 60),
     scoreboard,
-    paths: buildTeamPaths(locationRows.flatMap((row) => row.teamId ? [{ ...row, teamId: row.teamId }] : []), startedAtMs, endedAtMs),
-    moments: buildRecapMoments(events, teamNameById, startedAtMs, gameDurationMs),
+    paths,
+    moments: buildRecapMoments(events, teamNameById, startedAtMs, gameDurationMs, paths),
     events,
     judging,
   };
@@ -138,6 +139,7 @@ function buildRecapMoments(
   teamNameById: Map<string, string>,
   startedAtMs: number,
   gameDurationMs: number,
+  paths: TeamRecapPath[] = [],
 ): GameRecapMoment[] {
   return events.flatMap((event): GameRecapMoment[] => {
     const challenge = asNamedObject(event.meta.challenge);
@@ -152,7 +154,13 @@ function buildRecapMoments(
     };
 
     if (event.eventType === 'CHALLENGE_COMPLETED') {
-      return [{ ...base, type: 'challenge_completed', title: `${teamName ?? 'A team'} completed ${challenge?.name ?? 'a challenge'}`, detail: zone?.name ? `${zone.name} captured` : null }];
+      return [{
+        ...base,
+        type: 'challenge_completed',
+        title: `${teamName ?? 'A team'} completed ${challenge?.name ?? 'a challenge'}`,
+        detail: zone?.name ? `${zone.name} captured` : null,
+        location: findCompletionLocation(event, paths, base.progress),
+      }];
     }
     if (event.eventType === 'CHALLENGE_REROLL_STATE_CHANGED' && asObject(event.afterState)?.didReroll === true) {
       return [{ ...base, type: 'challenge_rerolled', title: `${challenge?.name ?? 'A challenge'} was rerolled`, detail: 'The teams unanimously chose a replacement.' }];
@@ -162,6 +170,67 @@ function buildRecapMoments(
     }
     return [];
   });
+}
+
+// Where a challenge was completed: the GPS fix stored on the claim, then the challenge's own pin or
+// area, then wherever the team's trail puts them at that moment.
+export function findCompletionLocation(event: GameEventRecord, paths: TeamRecapPath[], progress: number): { lng: number; lat: number } | null {
+  const claimPoint = asPoint(asObject(event.meta.claim)?.locationAtClaim);
+  if (claimPoint) return claimPoint;
+
+  const config = asObject(asObject(event.meta.challenge)?.config);
+  const pinPoint = asPoint(config?.map_point) ?? asPoint(config?.source_map_point);
+  if (pinPoint) return pinPoint;
+  const areaCenter = areaCentroid(config?.area);
+  if (areaCenter) return areaCenter;
+
+  const path = paths.find((entry) => entry.teamId === event.actorTeamId);
+  if (!path?.points.length) return null;
+  const nextIndex = path.points.findIndex((point) => point.progress > progress);
+  if (nextIndex === 0) return null;
+  if (nextIndex < 0) {
+    const last = path.points[path.points.length - 1]!;
+    return { lng: last.lng, lat: last.lat };
+  }
+  const previous = path.points[nextIndex - 1]!;
+  const next = path.points[nextIndex]!;
+  const amount = (progress - previous.progress) / Math.max(0.000001, next.progress - previous.progress);
+  return { lng: previous.lng + (next.lng - previous.lng) * amount, lat: previous.lat + (next.lat - previous.lat) * amount };
+}
+
+function asPoint(value: unknown): { lng: number; lat: number } | null {
+  if (typeof value === 'string') return parseEwkbPoint(value);
+  const object = asObject(value);
+  const coordinates = object?.type === 'Point' && Array.isArray(object.coordinates) ? object.coordinates : null;
+  const [lng, lat] = coordinates ?? [];
+  return typeof lng === 'number' && typeof lat === 'number' && Number.isFinite(lng) && Number.isFinite(lat) ? { lng, lat } : null;
+}
+
+// Claims store their GPS fix as PostGIS hex EWKB (e.g. 0101000020E6100000…), not GeoJSON.
+export function parseEwkbPoint(hex: string): { lng: number; lat: number } | null {
+  if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length < 42) return null;
+  const bytes = Buffer.from(hex, 'hex');
+  const littleEndian = bytes[0] === 1;
+  const type = littleEndian ? bytes.readUInt32LE(1) : bytes.readUInt32BE(1);
+  if ((type & 0xff) !== 1) return null;
+  const offset = type & 0x20000000 ? 9 : 5;
+  if (bytes.length < offset + 16) return null;
+  const lng = littleEndian ? bytes.readDoubleLE(offset) : bytes.readDoubleBE(offset);
+  const lat = littleEndian ? bytes.readDoubleLE(offset + 8) : bytes.readDoubleBE(offset + 8);
+  return Number.isFinite(lng) && Number.isFinite(lat) ? { lng, lat } : null;
+}
+
+function areaCentroid(value: unknown): { lng: number; lat: number } | null {
+  const object = asObject(value);
+  if (!object || !Array.isArray(object.coordinates)) return null;
+  const ring = (object.type === 'MultiPolygon' ? (object.coordinates[0] as unknown[] | undefined)?.[0] : object.coordinates[0]) as unknown;
+  if (!Array.isArray(ring) || ring.length === 0) return null;
+  const positions = ring.filter((position): position is [number, number] => Array.isArray(position) && typeof position[0] === 'number' && typeof position[1] === 'number');
+  if (!positions.length) return null;
+  return {
+    lng: positions.reduce((sum, position) => sum + position[0], 0) / positions.length,
+    lat: positions.reduce((sum, position) => sum + position[1], 0) / positions.length,
+  };
 }
 
 function speedBetween(left: RawLocationPoint, right: RawLocationPoint): number {

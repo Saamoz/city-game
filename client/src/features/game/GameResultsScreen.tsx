@@ -43,7 +43,11 @@ export function GameResultsScreen({ game, teams, zones, viewerTeam = null, publi
     const controller = new AbortController();
     void (publicAccess ? getPublicGameRecap : getGameRecap)(game.id, controller.signal)
       .then(setRecap)
-      .catch(() => setRecapError('The movement replay could not be loaded. Final scores and map are still available.'));
+      .catch((error) => {
+        // A request cancelled by a re-render is not a failure.
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setRecapError('The movement replay could not be loaded. Final scores and map are still available.');
+      });
     return () => controller.abort();
   }, [game.id, publicAccess]);
 
@@ -297,6 +301,12 @@ function ResultsMap({ progress, recap, teams, zones }: { progress: number; recap
   const zoneData = useMemo(() => buildZoneData(zones, recap, progress, teamColorById), [progress, recap, teamColorById, zones]);
   const zoneDataRef = useRef(zoneData);
   zoneDataRef.current = zoneData;
+  const stampPopupRef = useRef<mapboxgl.Popup | null>(null);
+  const didFitRef = useRef(false);
+  // One stamp image per team colour, plus a neutral one.
+  const stampImages = useMemo(() => new Map<string, string>([['stamp-default', '#8f5a3c'], ...teams.map((team): [string, string] => ['stamp-' + team.id, team.color])]), [teams]);
+  const stampImagesRef = useRef(stampImages);
+  stampImagesRef.current = stampImages;
 
   useEffect(() => {
     if (!containerRef.current || !mapboxToken || mapRef.current) return;
@@ -310,14 +320,37 @@ function ResultsMap({ progress, recap, teams, zones }: { progress: number; recap
       map.addSource('result-paths', { type: 'geojson', data: emptyFeatureCollection() });
       map.addLayer({ id: 'result-path-glow', type: 'line', source: 'result-paths', paint: { 'line-color': ['get', 'color'], 'line-width': 8, 'line-opacity': 0.18 } });
       map.addLayer({ id: 'result-path-line', type: 'line', source: 'result-paths', paint: { 'line-color': ['get', 'color'], 'line-width': 3.5, 'line-opacity': 0.95 } });
+      // Challenge completions are inked onto the map as stamps as the replay reaches them.
+      for (const [name, color] of stampImagesRef.current) addStampImage(map, name, color);
+      map.addSource('result-stamps', { type: 'geojson', data: emptyFeatureCollection() });
+      map.addLayer({
+        id: 'result-stamps',
+        type: 'symbol',
+        source: 'result-stamps',
+        layout: { 'icon-image': ['get', 'icon'], 'icon-size': ['get', 'size'], 'icon-rotate': ['get', 'rotate'], 'icon-allow-overlap': true, 'icon-ignore-placement': true, 'icon-rotation-alignment': 'viewport' },
+        paint: { 'icon-opacity': ['get', 'opacity'] },
+      });
+      map.on('click', 'result-stamps', (event) => {
+        const feature = event.features?.[0];
+        if (!feature || feature.geometry.type !== 'Point') return;
+        stampPopupRef.current?.remove();
+        stampPopupRef.current = new mapboxgl.Popup({ closeButton: false, offset: 18, className: 'result-stamp-popup' })
+          .setLngLat(feature.geometry.coordinates as [number, number])
+          .setText(String(feature.properties?.title ?? 'Challenge completed') + ' · ' + String(feature.properties?.time ?? ''))
+          .addTo(map);
+      });
+      map.on('mouseenter', 'result-stamps', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'result-stamps', () => { map.getCanvas().style.cursor = ''; });
       const positions = zones.flatMap((zone) => collectGeometryPositions(buildRenderedZoneGeometry(zone)));
       if (positions.length) {
         const bounds = positions.slice(1).reduce((value, point) => value.extend(point), new mapboxgl.LngLatBounds(positions[0], positions[0]));
         map.fitBounds(bounds, { padding: 42, duration: 0 });
+        didFitRef.current = true;
       }
       setMapReady(true);
     });
     return () => {
+      stampPopupRef.current?.remove();
       for (const marker of markerRefs.current.values()) marker.remove();
       markerRefs.current.clear();
       map.remove();
@@ -330,6 +363,20 @@ function ResultsMap({ progress, recap, teams, zones }: { progress: number; recap
     if (!mapReady || !map?.isStyleLoaded()) return;
     (map.getSource('result-zones') as mapboxgl.GeoJSONSource | undefined)?.setData(zoneData);
     (map.getSource('result-paths') as mapboxgl.GeoJSONSource | undefined)?.setData(buildVisiblePaths(recap?.paths ?? [], progress, teamColorById));
+    for (const [name, color] of stampImages) addStampImage(map, name, color);
+    (map.getSource('result-stamps') as mapboxgl.GeoJSONSource | undefined)?.setData(buildStamps(recap, progress, stampImages));
+    // Games without zones (Challenge Hunt) frame the map on where the teams went and what they did.
+    if (!didFitRef.current && recap) {
+      const points = [
+        ...recap.paths.flatMap((path) => path.points.map((point): [number, number] => [point.lng, point.lat])),
+        ...recap.moments.flatMap((moment): Array<[number, number]> => moment.location ? [[moment.location.lng, moment.location.lat]] : []),
+      ];
+      if (points.length) {
+        const bounds = points.slice(1).reduce((value, point) => value.extend(point), new mapboxgl.LngLatBounds(points[0], points[0]));
+        map.fitBounds(bounds, { padding: 56, duration: 0, maxZoom: 15 });
+        didFitRef.current = true;
+      }
+    }
     const visibleTeams = new Set<string>();
     for (const path of recap?.paths ?? []) {
       const point = interpolatePathPoint(path, progress);
@@ -347,7 +394,7 @@ function ResultsMap({ progress, recap, teams, zones }: { progress: number; recap
     for (const [teamId, marker] of markerRefs.current) {
       if (!visibleTeams.has(teamId)) { marker.remove(); markerRefs.current.delete(teamId); }
     }
-  }, [progress, recap, teamColorById, zoneData, mapReady]);
+  }, [progress, recap, teamColorById, zoneData, mapReady, stampImages]);
 
   return <div className="absolute inset-0" ref={containerRef} />;
 }
@@ -367,6 +414,85 @@ function buildZoneData(zones: Zone[], recap: GameRecap | null, progress: number,
       return { type: 'Feature', id: zone.id, properties: { color: ownerTeamId ? colors.get(ownerTeamId) ?? '#b9aa85' : '#8a928f', owned: Boolean(ownerTeamId) }, geometry: buildRenderedZoneGeometry(zone) } as GeoJSON.Feature;
     }),
   };
+}
+
+const STAMP_LAND_PROGRESS = 0.014;
+
+function buildStamps(recap: GameRecap | null, progress: number, images: Map<string, string>): GeoJSON.FeatureCollection {
+  if (!recap) return emptyFeatureCollection();
+  return {
+    type: 'FeatureCollection',
+    features: recap.moments.flatMap((moment): GeoJSON.Feature[] => {
+      if (moment.type !== 'challenge_completed' || !moment.location || moment.progress > progress) return [];
+      // Lands big and faint, then presses down onto the paper.
+      const landing = Math.min(1, (progress - moment.progress) / STAMP_LAND_PROGRESS);
+      const eased = 1 - (1 - landing) ** 3;
+      const icon = moment.teamId && images.has('stamp-' + moment.teamId) ? 'stamp-' + moment.teamId : 'stamp-default';
+      return [{
+        type: 'Feature',
+        properties: {
+          icon,
+          size: 0.62 + (1 - eased) * 0.5,
+          opacity: 0.35 + eased * 0.6,
+          rotate: (hashString(moment.id) % 37) - 18,
+          title: moment.title,
+          time: new Date(moment.occurredAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+        },
+        geometry: { type: 'Point', coordinates: [moment.location.lng, moment.location.lat] },
+      }];
+    }),
+  };
+}
+
+// A rubber-stamp impression: double ring, star in the middle, ink a little worn in places.
+function addStampImage(map: mapboxgl.Map, name: string, color: string) {
+  if (map.hasImage(name)) return;
+  const size = 96;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+  const center = size / 2;
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineWidth = 5;
+  context.beginPath();
+  context.arc(center, center, 42, 0, Math.PI * 2);
+  context.stroke();
+  context.lineWidth = 2;
+  context.beginPath();
+  context.arc(center, center, 34, 0, Math.PI * 2);
+  context.stroke();
+  context.beginPath();
+  for (let index = 0; index < 10; index += 1) {
+    const radius = index % 2 === 0 ? 26 : 11;
+    const angle = -Math.PI / 2 + (index * Math.PI) / 5;
+    const x = center + Math.cos(angle) * radius;
+    const y = center + Math.sin(angle) * radius;
+    if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
+  }
+  context.closePath();
+  context.fill();
+  // Worn ink: knock out small specks so it reads as stamped rather than drawn.
+  context.globalCompositeOperation = 'destination-out';
+  let seed = hashString(name);
+  const random = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+  for (let index = 0; index < 70; index += 1) {
+    context.globalAlpha = 0.35 + random() * 0.55;
+    context.beginPath();
+    context.arc(random() * size, random() * size, 0.6 + random() * 1.8, 0, Math.PI * 2);
+    context.fill();
+  }
+  context.globalAlpha = 1;
+  context.globalCompositeOperation = 'source-over';
+  map.addImage(name, context.getImageData(0, 0, size, size), { pixelRatio: 2 });
+}
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  return hash;
 }
 
 function buildVisiblePaths(paths: TeamRecapPath[], progress: number, colors: Map<string, string>): GeoJSON.FeatureCollection {

@@ -442,6 +442,9 @@ export interface GameRecapMoment {
   zoneId: Uuid | null;
   occurredAt: IsoTimestamp;
   progress: number;
+  // Where it happened, for challenge completions: the completion GPS fix, else the challenge's pin
+  // or area, else the team's position on its trail at that moment.
+  location?: { lng: number; lat: number } | null;
 }
 
 export interface GameRecap {
