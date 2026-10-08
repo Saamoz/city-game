@@ -9,6 +9,13 @@ def rect(w,s,e,n): return {"type":"Polygon","coordinates":[[[w,s],[e,s],[e,n],[w
 def anywhere(hint=None): return {"placement":"anywhere", **({"hint":hint} if hint else {})}
 def pin(lng,lat,r,name): return {"placement":"pin","point":[lng,lat],"radiusMeters":r,"hint":name}
 def area(poly,name): return {"placement":"area","area":poly,"hint":name}
+# Belmont (just south of it) to Irving Park, Sheffield to Lake Shore Drive, following the drive's
+# inner edge (OpenStreetMap). Sheffield takes in a bit of Wrigleyville on purpose.
+BOYSTOWN = {"type":"Polygon","coordinates":[[
+    [-87.6541,41.9385],[-87.6360,41.9385],[-87.6371,41.9394],[-87.6382,41.9404],[-87.6398,41.9425],
+    [-87.6405,41.9438],[-87.6412,41.9451],[-87.6418,41.9461],[-87.6423,41.9474],[-87.6431,41.9484],
+    [-87.6439,41.9501],[-87.6448,41.9514],[-87.6448,41.9530],[-87.6449,41.9545],[-87.6545,41.9545],
+    [-87.6541,41.9385]]]}
 items = [
  dict(title="Costco rotisserie chicken", short="Get a Costco rotisserie chicken.", where=anywhere("Any Costco"),
       bonuses=["Eat the whole chicken","JUDGED:Elevate it and offer it to Sagnik"]),
@@ -35,7 +42,7 @@ items = [
  dict(title="Strava art", short="Make Strava art spelling any word of at least 4 letters.", where=anywhere()),
  dict(title="Plane spotting", short="Photograph and correctly identify 3+ aircraft. No AI image search, but research is fine.", where=anywhere()),
  dict(title="La Fournette", short="Get a baked good at La Fournette.", where=pin(-87.6345,41.9096,50,"La Fournette"), bonuses=["JUDGED:Offer it to Sagnik"]),
- dict(title="Boystown bar", short="At a bar in Boystown, strike up a conversation with a stranger (not the bartender).", where=area(rect(-87.6532,41.9385,-87.6428,41.9508),"Boystown"), bonuses=["You get their number"]),
+ dict(title="Boystown bar", short="At a bar in Boystown, strike up a conversation with a stranger (not the bartender).", where=area(BOYSTOWN,"Boystown"), bonuses=["You get their number"]),
  dict(title="Silent disco", short="Put music in your earbuds and dance like nobody's watching in front of Soundbar.", where=pin(-87.6347,41.8932,60,"Soundbar")),
  dict(title="Bird spotting", short="Identify at least 3 birds at the Montrose Point Bird Sanctuary.", where=pin(-87.635177,41.962726,180,"Montrose Bird Sanctuary"), bonuses=["Identify 6 or more"]),
  dict(title="Library quote", short="At the Chinatown library, find a John Green book and a quote on the human condition.",
