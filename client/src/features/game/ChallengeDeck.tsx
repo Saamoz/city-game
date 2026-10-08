@@ -746,7 +746,7 @@ function CardTag({ challenge, kind, distance }: { challenge: Challenge; kind: Ca
     <div className="mb-1.5 flex items-center justify-between gap-2">
       <p className="flex min-w-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#b4602a]">
         <span aria-hidden="true">{kind === 'area' ? '▧' : '📍'}</span>
-        <span className="truncate">{kind === 'area' ? 'Area' : 'On map'}{distance === null ? '' : kind === 'area' && distance <= CHALLENGE_AREA_EDGE_TOLERANCE_METERS ? " · you're in it" : ' · ' + formatDistance(distance)}</span>
+        <span className="truncate">{getConfigString(challenge, 'location_hint') ?? (kind === 'area' ? 'Area' : 'On map')}{distance === null ? '' : kind === 'area' && distance <= CHALLENGE_AREA_EDGE_TOLERANCE_METERS ? " · you're in it" : ' · ' + formatDistance(distance)}</span>
       </p>
       {judged}
     </div>

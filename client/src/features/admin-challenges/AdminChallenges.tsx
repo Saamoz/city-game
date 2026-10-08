@@ -10,7 +10,7 @@ import type {
   MapDefinition,
   MapZone,
 } from '@city-game/shared';
-import { DEFAULT_CHALLENGE_POINTS, getChallengeArea, MAX_CHALLENGE_BONUSES, getBasePoints, getChallengeBonuses, getMaxBonusPoints } from '@city-game/shared';
+import { DEFAULT_CHALLENGE_POINTS, getChallengeArea, MAX_CHALLENGE_BONUSES, getBasePoints, getChallengeBonuses, sumBonusPoints } from '@city-game/shared';
 import {
   ApiError,
   createChallengeSetDefinition,
@@ -127,11 +127,18 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
   const [isSavingItem, setIsSavingItem] = useState(false);
   const [isDeletingSet, setIsDeletingSet] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [itemQuery, setItemQuery] = useState('');
+  const [itemFilter, setItemFilter] = useState<ItemFilter>('all');
 
   const selectedItem = useMemo(() => items.find((item) => item.id === selectedItemId) ?? null, [items, selectedItemId]);
   const sortedSets = useMemo(() => [...sets].sort((left, right) => left.name.localeCompare(right.name)), [sets]);
   const sortedMaps = useMemo(() => [...maps].sort((left, right) => left.name.localeCompare(right.name)), [maps]);
   const currentMapZones = useMemo(() => itemForm.mapId ? (zoneOptionsByMapId[itemForm.mapId] ?? []) : [], [itemForm.mapId, zoneOptionsByMapId]);
+  const isAnywherePlacement = setForm.locationMode === 'portable' || (setForm.locationMode === 'point' && itemForm.placement === 'anywhere');
+  const visibleItems = useMemo(() => {
+    const query = itemQuery.trim().toLowerCase();
+    return items.filter((item) => matchesItemFilter(item, itemFilter) && (!query || getItemSearchText(item).includes(query)));
+  }, [itemFilter, itemQuery, items]);
   const mapNameById = useMemo(() => new Map(maps.map((map) => [map.id, map.name])), [maps]);
   const setMapId = currentSet?.mapId ?? '';
   // Placement and map changes must be saved first, since items are validated against the saved set.
@@ -405,7 +412,8 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
         ...(shortDescription ? { short_description: shortDescription } : {}),
         ...(longDescription ? { long_description: longDescription } : {}),
         ...(isPinned ? { point_radius_meters: Math.max(1, Number(itemForm.pointRadiusMeters) || 40) } : {}),
-        ...(!isPinned && !isArea && setForm.locationMode !== 'zone' && locationHint ? { location_hint: locationHint } : {}),
+        // The place name shown on the card: "Chinatown Library" for a pin, "Any Costco" for anywhere.
+        ...(locationHint ? { location_hint: locationHint } : {}),
         ...(isArea && itemForm.area ? { area: itemForm.area as unknown as JsonObject } : {}),
         ...(bonuses.length ? { bonuses } : {}),
         // Judged challenges are yes/no: a yes earns the points (plus the bonuses the judge approves).
@@ -604,7 +612,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
     <Shell>
       <input ref={importInputRef} className="hidden" type="file" accept="application/json" onChange={handleImportFile} />
 
-      <div className="grid min-h-screen gap-4 p-4 lg:grid-cols-[18rem_minmax(0,1fr)_26rem] lg:p-6">
+      <div className="grid min-h-screen gap-4 p-4 lg:grid-cols-[14rem_minmax(0,1fr)_24rem] 2xl:grid-cols-[17rem_minmax(0,1fr)_27rem] lg:p-6">
         <aside className="rounded-[1.75rem] border border-[#c9ae6d]/55 bg-[#f3ecd8] p-4 shadow-[0_24px_60px_rgba(46,58,62,0.14)]">
           <div>
             <p className="text-[11px] uppercase tracking-[0.3em] text-[#936718]">Challenge Keeper</p>
@@ -661,72 +669,97 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,21rem)_minmax(0,1fr)]">
-                <section className="space-y-3">
-                  <Field label="Set Name">
-                    <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={setForm.name} onChange={(event) => setSetForm((current) => ({ ...current, name: event.target.value }))} />
-                  </Field>
-                  <Field label="Map">
-                    <select className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={setForm.mapId} onChange={(event) => setSetForm((current) => ({ ...current, mapId: event.target.value }))}>
-                      <option value="">Any city (generic)</option>
-                      {sortedMaps.map((map) => <option key={map.id} value={map.id}>{map.name}</option>)}
-                    </select>
-                    <p className="mt-2 text-xs leading-5 text-[#6b777b]">The city this set is written for. Games on other maps can't use it. Pins, areas and zones go on this map. Generic sets fit any map but can only have "anywhere" challenges.</p>
-                  </Field>
-                  <Field label="Set Placement">
-                    <select className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={setForm.locationMode} onChange={(event) => setSetForm((current) => ({ ...current, locationMode: event.target.value as ChallengeSetItemLocationMode }))}>
-                      <option value="portable">Portable</option><option value="zone">Zone Linked</option><option value="point">Point Linked (pins, areas, anywhere)</option>
-                    </select>
-                    <p className="mt-2 text-xs leading-5 text-[#6b777b]">{setForm.locationMode === 'point' ? 'Each challenge is pinned to a map point, tied to an area you draw, or doable anywhere. Pins and areas appear on the map.' : 'Every challenge in this set uses this placement type.'} Save the set before editing its items.</p>
-                    {hasUnsavedSetPlacement ? <p className="mt-2 rounded-xl border border-[#d59b45]/45 bg-[#fff0ce] px-3 py-2 text-xs leading-5 text-[#765018]">Save this placement or map change before creating or editing challenges.</p> : null}
-                  </Field>
-                  <Field label="Description">
-                    <textarea className="h-36 w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={setForm.description} onChange={(event) => setSetForm((current) => ({ ...current, description: event.target.value }))} />
-                  </Field>
-                </section>
+              <section className="mt-4 grid gap-3 rounded-[1.4rem] border border-[#d6c59d]/55 bg-[#fbf4e4] p-4 md:grid-cols-3">
+                <Field label="Set Name">
+                  <input className={compactInputClassName} value={setForm.name} onChange={(event) => setSetForm((current) => ({ ...current, name: event.target.value }))} />
+                </Field>
+                <Field label="Map">
+                  <select className={compactInputClassName} value={setForm.mapId} onChange={(event) => setSetForm((current) => ({ ...current, mapId: event.target.value }))}>
+                    <option value="">Any city (generic)</option>
+                    {sortedMaps.map((map) => <option key={map.id} value={map.id}>{map.name}</option>)}
+                  </select>
+                </Field>
+                <Field label="Set Placement">
+                  <select className={compactInputClassName} value={setForm.locationMode} onChange={(event) => setSetForm((current) => ({ ...current, locationMode: event.target.value as ChallengeSetItemLocationMode }))}>
+                    <option value="portable">Portable</option><option value="zone">Zone Linked</option><option value="point">Point Linked (pins, areas, anywhere)</option>
+                  </select>
+                </Field>
+                <label className="block md:col-span-3">
+                  <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a6a48]">Description</span>
+                  <textarea className={compactInputClassName + ' h-16 resize-y'} value={setForm.description} onChange={(event) => setSetForm((current) => ({ ...current, description: event.target.value }))} />
+                </label>
+                <p className="text-xs leading-5 text-[#6b777b] md:col-span-3">
+                  {setForm.mapId ? 'Only games on this map can use the set; pins, areas and zones go on it.' : 'A generic set fits any map, but its challenges can only be "anywhere".'}{' '}
+                  {setForm.locationMode === 'point' ? 'Each challenge is pinned to a spot, tied to a drawn area, or doable anywhere.' : 'Every challenge uses this placement type.'}
+                </p>
+                {hasUnsavedSetPlacement ? <p className="rounded-xl border border-[#d59b45]/45 bg-[#fff0ce] px-3 py-2 text-xs leading-5 text-[#765018] md:col-span-3">Save this placement or map change before creating or editing challenges.</p> : null}
+              </section>
 
-                <section className="min-h-[28rem] rounded-[1.4rem] border border-[#d6c59d]/55 bg-[#fbf4e4] p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[11px] uppercase tracking-[0.24em] text-[#7a6a48]">Items</p>
-                      <p className="mt-1 text-sm text-[#59696f]">{currentSet.locationMode === 'point' ? countPlacements(items) : 'All items use the set placement selected on the left.'}</p>
-                    </div>
-                    <button className="rounded-full border border-[#24343a] bg-[#24343a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#f4ead7]" onClick={handleCreateItem} type="button">New Item</button>
+              <section className="mt-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-[#7a6a48]">Challenges · {items.length}</p>
+                    <p className="mt-1 text-sm text-[#59696f]">{currentSet.locationMode === 'point' ? countPlacements(items) : 'All items use the set placement.'} · {describePointTotals(items)}</p>
                   </div>
+                  <button className="rounded-full border border-[#24343a] bg-[#24343a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#f4ead7]" onClick={handleCreateItem} type="button">New Item</button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <input className="min-w-[12rem] flex-1 rounded-full border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-2 text-sm text-[#24343a] outline-none focus:border-[#8f7446]" placeholder="Search challenges, places, bonuses" value={itemQuery} onChange={(event) => setItemQuery(event.target.value)} />
+                  {ITEM_FILTERS.map((filter) => (
+                    <button key={filter.key} className={['rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em]', itemFilter === filter.key ? 'border-[#24343a] bg-[#24343a] text-[#f4ead7]' : 'border-[#c8b48a]/55 bg-[#fff8eb] text-[#24343a]'].join(' ')} onClick={() => setItemFilter(filter.key)} type="button">
+                      {filter.label} {items.filter((item) => matchesItemFilter(item, filter.key)).length}
+                    </button>
+                  ))}
+                </div>
 
-                  <div className="mt-4 space-y-2 overflow-y-auto lg:max-h-[calc(100vh-18rem)]">
-                    {items.map((item, index) => {
-                      const active = item.id === selectedItemId;
-                      return (
-                        <article
-                          key={item.id}
-                          className={[
-                            'rounded-[1.2rem] border px-4 py-3 transition',
-                            active ? 'border-[#24343a] bg-[#fff8eb] shadow-[0_12px_30px_rgba(36,52,58,0.1)]' : 'border-[#d6c59d]/55 bg-white/60 hover:bg-[#fff8eb]',
-                          ].join(' ')}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <button className="min-w-0 flex-1 text-left" onClick={() => setSelectedItemId(item.id)} type="button">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <h3 className="font-semibold text-[#24343a]">{item.title}</h3>
-                                {item.difficulty ? <Badge>{item.difficulty}</Badge> : null}
-                                <PlacementBadge item={item} setMode={currentSet.locationMode} />
-                                <PointsBadge item={item} />
-                              </div>
-                              <p className="mt-2 text-sm leading-6 text-[#5a6a70] line-clamp-2">{getShortDescription(item)}</p>
-                            </button>
-                            <div className="flex gap-1">
-                              <IconButton disabled={index === 0} label="Move up" onClick={() => void handleMoveItem(-1, item)}>↑</IconButton>
-                              <IconButton disabled={index === items.length - 1} label="Move down" onClick={() => void handleMoveItem(1, item)}>↓</IconButton>
-                            </div>
-                          </div>
-                        </article>
-                      );
-                    })}
-                    {!items.length ? <EmptyState body="No items yet. Add the reusable cards for this set here." /> : null}
-                  </div>
-                </section>
-              </div>
+                <div className="mt-3 space-y-1.5 overflow-y-auto lg:max-h-[calc(100vh-22rem)]">
+                  {visibleItems.map((item) => {
+                    const index = items.indexOf(item);
+                    const active = item.id === selectedItemId;
+                    const bonuses = getChallengeBonuses(item.config);
+                    const longText = typeof item.config?.long_description === 'string' && item.config.long_description.trim() ? item.config.long_description : null;
+                    return (
+                      <article
+                        key={item.id}
+                        className={[
+                          'flex items-stretch gap-2 rounded-[1rem] border px-3 py-2.5 transition',
+                          active ? 'border-[#24343a] bg-[#fff8eb] shadow-[0_10px_24px_rgba(36,52,58,0.1)]' : 'border-[#d6c59d]/55 bg-white/60 hover:bg-[#fff8eb]',
+                        ].join(' ')}
+                      >
+                        <button className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 text-left 2xl:grid-cols-[1.75rem_minmax(0,1fr)_minmax(9rem,13rem)_4.5rem]" onClick={() => setSelectedItemId(item.id)} type="button">
+                          <span className="hidden pt-0.5 font-[Georgia,Times_New_Roman,serif] text-sm text-[#9a8a68] 2xl:block">{index + 1}</span>
+                          <span className="min-w-0">
+                            <span className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-semibold text-[#24343a]">{item.title}</span>
+                              {item.config?.judged === true ? <Badge tone="judged">★ Judged</Badge> : null}
+                              {item.difficulty ? <Badge>{item.difficulty}</Badge> : null}
+                            </span>
+                            <span className="mt-0.5 block text-sm leading-5 text-[#4f5f65]">{getShortDescription(item)}</span>
+                            {longText && longText !== getShortDescription(item) ? <span className="mt-0.5 block text-xs leading-5 text-[#7a8589] line-clamp-2">More info: {longText}</span> : null}
+                            {bonuses.length ? (
+                              <span className="mt-1 flex flex-wrap gap-1">
+                                {bonuses.map((bonus) => <span key={bonus.id} className="rounded-md border border-[#d9c79e] bg-[#f6ecd4] px-1.5 py-0.5 text-[11px] leading-4 text-[#5d4d33]">+{bonus.points} {bonus.label}</span>)}
+                              </span>
+                            ) : null}
+                          </span>
+                          <ItemWhere item={item} setMode={currentSet.locationMode} zoneName={item.mapZoneId ? currentMapZones.find((zone) => zone.id === item.mapZoneId)?.name ?? null : null} />
+                          <span className="col-start-2 row-start-1 text-right 2xl:col-start-4">
+                            <span className="font-[Georgia,Times_New_Roman,serif] text-lg font-semibold text-[#24343a]">{getBasePoints(item.scoring)}</span>
+                            <span className="ml-1 text-[11px] uppercase tracking-[0.12em] text-[#7a6a48]">pt</span>
+                            {bonuses.length ? <span className="block text-[11px] text-[#936718]">+{sumBonusPoints(bonuses)} bonus</span> : null}
+                          </span>
+                        </button>
+                        <div className="flex flex-col justify-center gap-1">
+                          <IconButton disabled={index === 0} label="Move up" onClick={() => void handleMoveItem(-1, item)}>↑</IconButton>
+                          <IconButton disabled={index === items.length - 1} label="Move down" onClick={() => void handleMoveItem(1, item)}>↓</IconButton>
+                        </div>
+                      </article>
+                    );
+                  })}
+                  {items.length && !visibleItems.length ? <EmptyState body="No challenges match." /> : null}
+                  {!items.length ? <EmptyState body="No items yet. Add the reusable cards for this set here." /> : null}
+                </div>
+              </section>
             </>
           ) : (
             <EmptyState body="Create or import a challenge set to begin." />
@@ -746,20 +779,15 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
 
           <div className="mt-4 space-y-3 overflow-y-auto lg:max-h-[calc(100vh-10rem)]">
             <Field label="Title">
-              <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" maxLength={CHALLENGE_CARD_TITLE_MAX_LENGTH} value={itemForm.title} onChange={(event) => setItemForm((current) => ({ ...current, title: event.target.value }))} />
+              <input className={compactInputClassName} maxLength={CHALLENGE_CARD_TITLE_MAX_LENGTH} value={itemForm.title} onChange={(event) => setItemForm((current) => ({ ...current, title: event.target.value }))} />
               <CharacterLimit value={itemForm.title} max={CHALLENGE_CARD_TITLE_MAX_LENGTH} />
             </Field>
             <Field label="Short Description">
-              <textarea className="h-24 w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" maxLength={CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH} value={itemForm.shortDescription} onChange={(event) => setItemForm((current) => ({ ...current, shortDescription: event.target.value }))} />
+              <textarea className={compactInputClassName + ' h-20'} maxLength={CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH} value={itemForm.shortDescription} onChange={(event) => setItemForm((current) => ({ ...current, shortDescription: event.target.value }))} />
               <CharacterLimit value={itemForm.shortDescription} max={CHALLENGE_CARD_SHORT_DESCRIPTION_MAX_LENGTH} />
             </Field>
             <Field label="Long Description">
-              <textarea className="h-36 w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={itemForm.longDescription} onChange={(event) => setItemForm((current) => ({ ...current, longDescription: event.target.value }))} />
-            </Field>
-            <Field label="Difficulty">
-              <select className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a]" value={itemForm.difficulty} onChange={(event) => setItemForm((current) => ({ ...current, difficulty: event.target.value as ItemFormState['difficulty'] }))}>
-                {DIFFICULTY_OPTIONS.map((option) => <option key={option.label} value={option.value}>{option.label}</option>)}
-              </select>
+              <textarea className={compactInputClassName + ' h-24'} value={itemForm.longDescription} onChange={(event) => setItemForm((current) => ({ ...current, longDescription: event.target.value }))} />
             </Field>
             {setForm.locationMode === 'point' ? (
               <div>
@@ -773,6 +801,11 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
               </div>
             ) : null}
 
+            <Field label="Place Name (optional)">
+              <input className={compactInputClassName} maxLength={40} placeholder={isAnywherePlacement ? 'e.g. Any Costco, Any park, A bridge' : itemForm.placement === 'area' || setForm.locationMode === 'zone' ? 'e.g. The 606, Northerly Island' : 'e.g. Chinatown Library'} value={itemForm.locationHint} onChange={(event) => setItemForm((current) => ({ ...current, locationHint: event.target.value }))} />
+              <p className="mt-1 text-xs leading-5 text-[#6b777b]">{isAnywherePlacement ? 'Shown on the card so players know what sort of place works. Leave blank for truly anywhere.' : 'Shown on the card next to the distance, e.g. "Chinatown Library · 1.2 mi away". Leave blank for "Pinned spot".'}</p>
+            </Field>
+
             {setForm.locationMode === 'point' ? (
               <div>
                 <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a6a48]">Scoring</span>
@@ -784,23 +817,23 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
               </div>
             ) : null}
 
-            <Field label="Challenge Points">
-              <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a] outline-none focus:border-[#8f7446]" min="0" onChange={(event) => setItemForm((current) => ({ ...current, pointValue: event.target.value }))} type="number" value={itemForm.pointValue} />
-              <p className="mt-1 text-xs leading-5 text-[#6b777b]">{itemForm.scoringMode === 'judged' && setForm.locationMode === 'point' ? 'Points a team gets when judged a yes. Approved bonuses add on top.' : 'Base points the team earns for completing it. Bonus tasks add on top.'}</p>
-            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Points">
+                <input className={compactInputClassName} min="0" onChange={(event) => setItemForm((current) => ({ ...current, pointValue: event.target.value }))} type="number" value={itemForm.pointValue} />
+              </Field>
+              <Field label="Difficulty">
+                <select className={compactInputClassName} value={itemForm.difficulty} onChange={(event) => setItemForm((current) => ({ ...current, difficulty: event.target.value as ItemFormState['difficulty'] }))}>
+                  {DIFFICULTY_OPTIONS.map((option) => <option key={option.label} value={option.value}>{option.label}</option>)}
+                </select>
+              </Field>
+            </div>
+            <p className="-mt-1 text-xs leading-5 text-[#6b777b]">{itemForm.scoringMode === 'judged' && setForm.locationMode === 'point' ? 'Points a team gets when judged a yes. Approved bonuses add on top.' : 'Base points for completing it. Bonus tasks add on top.'}</p>
 
             <BonusEditor
               isJudged={setForm.locationMode === 'point' && itemForm.scoringMode === 'judged'}
               rows={itemForm.bonuses}
               onChange={(bonuses) => setItemForm((current) => ({ ...current, bonuses }))}
             />
-
-            {setForm.locationMode === 'portable' || (setForm.locationMode === 'point' && itemForm.placement === 'anywhere') ? (
-              <Field label="Kind of Place (optional)">
-                <input className="w-full rounded-2xl border border-[#c8b48a]/55 bg-[#fff8eb] px-4 py-3 text-sm text-[#24343a] outline-none focus:border-[#8f7446]" maxLength={40} placeholder="e.g. Any café, Any park, A bridge" value={itemForm.locationHint} onChange={(event) => setItemForm((current) => ({ ...current, locationHint: event.target.value }))} />
-                <p className="mt-1 text-xs leading-5 text-[#6b777b]">Shown on the card so players know what sort of place works. Leave blank for truly anywhere.</p>
-              </Field>
-            ) : null}
 
             {setForm.locationMode === 'zone' || (setForm.locationMode === 'point' && itemForm.placement !== 'anywhere') ? (
               <Field label="Map">
@@ -914,14 +947,6 @@ function buildItemForm(item: ChallengeSetItem, setMapId: string | null): ItemFor
   };
 }
 
-function PointsBadge({ item }: { item: ChallengeSetItem }) {
-  const base = getBasePoints(item.scoring);
-  const bonusCount = getChallengeBonuses(item.config).length;
-  const maxBonus = getMaxBonusPoints(item.config);
-  if (!base && !bonusCount) return null;
-  return <Badge>{[base ? base + (base === 1 ? ' pt' : ' pts') : null, bonusCount ? '+' + maxBonus + ' bonus (' + bonusCount + ')' : null].filter(Boolean).join(' · ')}</Badge>;
-}
-
 function BonusEditor({ rows, isJudged, onChange }: { rows: BonusFormRow[]; isJudged: boolean; onChange(rows: BonusFormRow[]): void }) {
   const update = (id: string, patch: Partial<BonusFormRow>) => onChange(rows.map((row) => row.id === id ? { ...row, ...patch } : row));
   const inputClassName = 'rounded-xl border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-2 text-sm text-[#24343a] outline-none focus:border-[#8f7446]';
@@ -946,20 +971,62 @@ function BonusEditor({ rows, isJudged, onChange }: { rows: BonusFormRow[]; isJud
   );
 }
 
+type ItemFilter = 'all' | 'pinned' | 'area' | 'anywhere' | 'judged';
+
+const ITEM_FILTERS: Array<{ key: ItemFilter; label: string }> = [
+  { key: 'all', label: 'All' },
+  { key: 'pinned', label: 'Pinned' },
+  { key: 'area', label: 'Area' },
+  { key: 'anywhere', label: 'Anywhere' },
+  { key: 'judged', label: 'Judged' },
+];
+
+const compactInputClassName = 'w-full rounded-xl border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-2 text-sm text-[#24343a] outline-none focus:border-[#8f7446]';
+
+function matchesItemFilter(item: ChallengeSetItem, filter: ItemFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'judged') return item.config?.judged === true;
+  if (filter === 'pinned') return Boolean(item.mapPoint || item.mapZoneId);
+  if (filter === 'area') return Boolean(getChallengeArea(item.config));
+  return !item.mapPoint && !item.mapZoneId && !getChallengeArea(item.config);
+}
+
+function getItemSearchText(item: ChallengeSetItem): string {
+  const config = item.config ?? {};
+  return [item.title, item.description, config.short_description, config.long_description, config.location_hint, ...getChallengeBonuses(config).map((bonus) => bonus.label)]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ')
+    .toLowerCase();
+}
+
+// "27 pts + 14 bonus available", counting judged challenges separately.
+function describePointTotals(items: ChallengeSetItem[]): string {
+  const regular = items.filter((item) => item.config?.judged !== true);
+  const judged = items.length - regular.length;
+  const base = regular.reduce((total, item) => total + getBasePoints(item.scoring), 0);
+  const bonus = regular.reduce((total, item) => total + sumBonusPoints(getChallengeBonuses(item.config)), 0);
+  return base + ' pts' + (bonus ? ' + ' + bonus + ' bonus' : '') + (judged ? ', plus judged' : '');
+}
+
+function ItemWhere({ item, setMode, zoneName }: { item: ChallengeSetItem; setMode: ChallengeSetItemLocationMode; zoneName: string | null }) {
+  const name = typeof item.config?.location_hint === 'string' && item.config.location_hint.trim() ? item.config.location_hint.trim() : null;
+  const radius = typeof item.config?.point_radius_meters === 'number' ? item.config.point_radius_meters : null;
+  const kind = item.mapZoneId ? 'Zone' : item.mapPoint ? 'Pinned' : getChallengeArea(item.config) ? 'Area' : setMode === 'portable' ? 'Portable' : 'Anywhere';
+  const detail = item.mapZoneId ? zoneName : item.mapPoint ? (radius ? radius + ' m radius' : null) : null;
+  const tone = kind === 'Anywhere' || kind === 'Portable' ? 'text-[#4b5d63]' : 'text-[#2f5a3a]';
+  return (
+    <span className="min-w-0 text-sm leading-5 2xl:col-start-3 2xl:row-start-1">
+      <span className={'block text-[11px] font-semibold uppercase tracking-[0.14em] ' + tone}>{kind === 'Pinned' ? '📍 ' : kind === 'Area' ? '▧ ' : ''}{kind}{detail ? ' · ' + detail : ''}</span>
+      <span className={name ? 'block truncate text-[#24343a]' : 'block text-[#9aa3a5] italic'}>{name ?? (kind === 'Anywhere' || kind === 'Portable' ? 'Anywhere' : 'No place name')}</span>
+    </span>
+  );
+}
+
 function countPlacements(items: ChallengeSetItem[]): string {
   const pinned = items.filter((item) => item.mapPoint).length;
   const areas = items.filter((item) => getChallengeArea(item.config)).length;
   const judged = items.filter((item) => item.config?.judged === true).length;
   return pinned + ' pinned · ' + areas + ' areas · ' + (items.length - pinned - areas) + ' anywhere' + (judged ? ' · ' + judged + ' judged' : '');
-}
-
-function PlacementBadge({ item, setMode }: { item: ChallengeSetItem; setMode: ChallengeSetItemLocationMode }) {
-  const hint = typeof item.config?.location_hint === 'string' ? item.config.location_hint : '';
-  const judged = item.config?.judged === true ? <Badge tone="judged">★ Judged</Badge> : null;
-  if (setMode === 'zone') return <Badge tone="linked">Zone linked</Badge>;
-  if (setMode === 'point' && item.mapPoint) return <>{judged}<Badge tone="linked">Pinned</Badge></>;
-  if (setMode === 'point' && getChallengeArea(item.config)) return <>{judged}<Badge tone="linked">▧ Area</Badge></>;
-  return <>{judged}<Badge tone="portable">{hint || (setMode === 'point' ? 'Anywhere' : 'Portable')}</Badge></>;
 }
 
 function getSourceMapId(item: Pick<ChallengeSetItem, 'metadata'>): string {

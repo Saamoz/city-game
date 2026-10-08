@@ -126,7 +126,8 @@ function MiniCard({ challenge, gameName, suit, distance, inRange, tilt, onOpen }
   const maxBonus = getMaxBonusPoints(challenge.config);
   const hint = typeof challenge.config?.location_hint === 'string' && challenge.config.location_hint.trim() ? challenge.config.location_hint : null;
   const short = typeof challenge.config?.short_description === 'string' && challenge.config.short_description.trim() ? challenge.config.short_description : challenge.description;
-  const where = suit === 'anywhere' ? (hint ?? 'Anywhere') : distance === null ? (suit === 'area' ? 'Area' : 'On map') : inRange ? (suit === 'area' ? 'In the area' : 'You are here') : formatDistance(distance);
+  const distanceLabel = suit === 'anywhere' || distance === null ? null : inRange ? (suit === 'area' ? 'In the area' : 'You are here') : formatDistance(distance);
+  const where = [hint ?? (suit === 'anywhere' ? 'Anywhere' : distanceLabel ? null : suit === 'area' ? 'Area' : 'On map'), distanceLabel].filter(Boolean).join(' · ');
   return (
     <button
       className="relative flex h-[12.25rem] w-[8.75rem] shrink-0 flex-col rounded-[0.9rem] border border-[#a98c5a] bg-[radial-gradient(circle_at_30%_18%,#fbf6e8,#f1e6cc_70%,#eadcbc)] px-2.5 pb-2.5 pt-2 text-left shadow-[0_8px_20px_rgba(40,30,15,0.16)] transition active:scale-[0.98]"

@@ -5,8 +5,8 @@ import json, os
 def bonus(i, label): return {"id": f"b{i}", "label": label, "points": 1}
 def rect(w,s,e,n): return {"type":"Polygon","coordinates":[[[w,s],[e,s],[e,n],[w,n],[w,s]]]}
 def anywhere(hint=None): return {"placement":"anywhere", **({"hint":hint} if hint else {})}
-def pin(lng,lat,r): return {"placement":"pin","point":[lng,lat],"radiusMeters":r}
-def area(poly): return {"placement":"area","area":poly}
+def pin(lng,lat,r,name): return {"placement":"pin","point":[lng,lat],"radiusMeters":r,"hint":name}
+def area(poly,name): return {"placement":"area","area":poly,"hint":name}
 items = [
  dict(title="Costco rotisserie chicken", short="Get a Costco rotisserie chicken.", where=anywhere("Any Costco"),
       bonuses=["Eat the whole chicken"]),
@@ -14,14 +14,14 @@ items = [
  dict(title="Bike test ride", short="Test ride a bike at any shop where you can buy a bike.", where=anywhere("Any bike shop")),
  dict(title="REI fashion show", short="3+ teammates each try on a base layer, a shell and hiking pants or shorts. Take runway shots.",
       long="At least 3 team members must each put on (1) a base layer, (2) a shell or outer layer and (3) hiking pants or shorts, then strut it for runway shots.",
-      where=pin(-87.6509,41.9087,90), bonuses=["Add a backpack and shoes"]),
+      where=pin(-87.6509,41.9087,90,"REI Lincoln Park"), bonuses=["Add a backpack and shoes"]),
  dict(title="Build a box", short="Build a box from scratch out of any material, big enough to hold a set of keys.", where=anywhere()),
  dict(title="Not in English", short="Complete a full transaction in a language that isn't English.", where=anywhere(), bonuses=["In Hindi or Bangla"]),
  dict(title="Ethiopian food", short="Order something from an Ethiopian restaurant and taste it.", where=anywhere("Any Ethiopian restaurant")),
  dict(title="Jeni's taste test", short="Taste test at Jeni's and film a 1-minute review video.", where=anywhere("Any Jeni's"), bonuses=["Everyone finishes at least one scoop"]),
- dict(title="Hamilton monument", short="Perform 1 minute of a Hamilton song at the Alexander Hamilton statue.", where=pin(-87.63844,41.93171,60), bonuses=["The full song (3+ minutes)"]),
+ dict(title="Hamilton monument", short="Perform 1 minute of a Hamilton song at the Alexander Hamilton statue.", where=pin(-87.63844,41.93171,60,"Hamilton statue, Lincoln Park"), bonuses=["The full song (3+ minutes)"]),
  dict(title="Broadway Playbill", short="Get a Broadway Playbill.", where=anywhere("Any theatre")),
- dict(title="The 606", short="Cover at least 1 mile on the 606 and log it on Strava.", where=area(rect(-87.7232,41.9130,-87.6650,41.9157)), bonuses=["Do the whole trail"]),
+ dict(title="The 606", short="Cover at least 1 mile on the 606 and log it on Strava.", where=area(rect(-87.7232,41.9130,-87.6650,41.9157),"The 606"), bonuses=["Do the whole trail"]),
  dict(title="Lakefront statue", short="Find a sculpture or monument along the Lakefront Trail and imitate it.", where=anywhere("Along the Lakefront Trail")),
  dict(title="Knee-deep", short="The full team stands knee-deep in any lake, beach or pool.", where=anywhere("Any water"), bonuses=["At least 2 people fully submerged"]),
  dict(title="How long is your wood?", short="At any Home Depot, estimate a plank's length to within 2 inches, on video. Use the terminology.", where=anywhere("Any Home Depot")),
@@ -32,18 +32,18 @@ items = [
  dict(title="Metra balloon", short="Ride the Metra with a balloon for at least one stop.", where=anywhere("On the Metra")),
  dict(title="Strava art", short="Make Strava art spelling any word of at least 4 letters.", where=anywhere()),
  dict(title="Plane spotting", short="Photograph and correctly identify 3+ aircraft. No AI image search, but research is fine.", where=anywhere()),
- dict(title="La Fournette", short="Get a baked good at La Fournette.", where=pin(-87.6345,41.9096,50)),
- dict(title="Boystown bar", short="At a bar in Boystown, strike up a conversation with a stranger (not the bartender).", where=area(rect(-87.6532,41.9385,-87.6428,41.9508)), bonuses=["You get their number"]),
- dict(title="Silent disco", short="Put music in your earbuds and dance like nobody's watching in front of Soundbar.", where=pin(-87.6347,41.8932,60)),
- dict(title="Bird spotting", short="Identify at least 3 birds at the Montrose Point Bird Sanctuary.", where=pin(-87.635177,41.962726,180), bonuses=["Identify 6 or more"]),
+ dict(title="La Fournette", short="Get a baked good at La Fournette.", where=pin(-87.6345,41.9096,50,"La Fournette")),
+ dict(title="Boystown bar", short="At a bar in Boystown, strike up a conversation with a stranger (not the bartender).", where=area(rect(-87.6532,41.9385,-87.6428,41.9508),"Boystown"), bonuses=["You get their number"]),
+ dict(title="Silent disco", short="Put music in your earbuds and dance like nobody's watching in front of Soundbar.", where=pin(-87.6347,41.8932,60,"Soundbar")),
+ dict(title="Bird spotting", short="Identify at least 3 birds at the Montrose Point Bird Sanctuary.", where=pin(-87.635177,41.962726,180,"Montrose Bird Sanctuary"), bonuses=["Identify 6 or more"]),
  dict(title="Library quote", short="At the Chinatown library, find a John Green book and a quote on the human condition.",
       long="Find one of John Green's books at the Chinatown branch of the Chicago Public Library, then find a quote in it that comments on the human condition.",
-      where=pin(-87.6323,41.8543,70)),
+      where=pin(-87.6323,41.8543,70,"Chinatown Library")),
  dict(judged=True, title="Chicken for Sagnik", short="Elevate a Costco rotisserie chicken and offer it to Sagnik.", where=anywhere("At the party")),
  dict(judged=True, title="Ethiopian for Sagnik", short="Bring Sagnik something from an Ethiopian restaurant and offer it up.", where=anywhere("At the party")),
  dict(judged=True, title="Birthday balloon for Sagnik", short="Offer Sagnik the balloon you rode the Metra with. It has to be a Happy Birthday balloon.", where=anywhere("At the party")),
  dict(judged=True, title="Pastry for Sagnik", short="Offer Sagnik a baked good from La Fournette.", where=anywhere("At the party")),
- dict(title="Northerly Island landing", short="One person is the plane, another is air traffic control. Land on the old Meigs Field airstrip.", where=area(rect(-87.6115,41.8548,-87.6030,41.8656))),
+ dict(title="Northerly Island landing", short="One person is the plane, another is air traffic control. Land on the old Meigs Field airstrip.", where=area(rect(-87.6115,41.8548,-87.6030,41.8656),"Northerly Island")),
 ]
 for i in items:
     assert len(i["title"])<=38, i["title"]

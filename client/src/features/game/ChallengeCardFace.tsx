@@ -47,7 +47,8 @@ export function ChallengeCardFace({ gameName, challenge, suit, distanceMeters, i
   }, [confirming]);
 
   const toggle = (set: Set<string>, id: string) => { const next = new Set(set); if (next.has(id)) next.delete(id); else next.add(id); return next; };
-  const kindLine = suit === 'pin' ? 'Pinned spot' : suit === 'area' ? 'Area' : (hint ?? 'Anywhere');
+  // The place name the author gave it ("Chinatown Library", "Any Costco"), else the kind of spot.
+  const kindLine = hint ?? (suit === 'pin' ? 'Pinned spot' : suit === 'area' ? 'Area' : 'Anywhere');
   const where = suit === 'anywhere' || distanceMeters === null ? null : inRange ? (suit === 'area' ? "you're in it" : "you're here") : formatDistance(distanceMeters) + ' away';
 
   return (

@@ -81,7 +81,8 @@ function buildPayload(item, index, sourceMapId) {
     short_description: item.shortDescription,
     ...(item.longDescription ? { long_description: item.longDescription } : {}),
     ...(where.placement === 'pin' ? { point_radius_meters: where.radiusMeters ?? 40 } : {}),
-    ...(where.placement === 'anywhere' && where.hint ? { location_hint: where.hint } : {}),
+    // The place name on the card: "Chinatown Library" for a pin, "Any Costco" for anywhere.
+    ...(where.hint ? { location_hint: where.hint } : {}),
     ...(where.placement === 'area' ? { area: where.area } : {}),
     ...(item.bonuses?.length ? { bonuses: item.bonuses } : {}),
     ...(item.judged ? { judged: true, judging_type: 'pass_fail' } : {}),
