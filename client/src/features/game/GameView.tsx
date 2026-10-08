@@ -141,8 +141,15 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     html.classList.add('game-view-active');
     body.classList.add('game-view-active');
     window.scrollTo(0, 0);
+    // Safari ignores touch-action for pinches that start outside the map; its gesture events
+    // still let us stop the whole page from zooming. Map pinches use touch events, unaffected.
+    const preventPageZoom = (event: Event) => event.preventDefault();
+    document.addEventListener('gesturestart', preventPageZoom);
+    document.addEventListener('gesturechange', preventPageZoom);
 
     return () => {
+      document.removeEventListener('gesturestart', preventPageZoom);
+      document.removeEventListener('gesturechange', preventPageZoom);
       html.classList.remove('game-view-active');
       body.classList.remove('game-view-active');
       window.scrollTo(0, previousScrollY);

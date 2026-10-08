@@ -55,10 +55,17 @@ body.game-view-active #root {
 #root main:not([data-safe-area]):not(main main)::before { height: env(safe-area-inset-top, 0px); }
 #root main:not([data-safe-area]):not(main main)::after { height: env(safe-area-inset-bottom, 0px); }
 
-/* Matches the map, so any sliver the map doesn't reach blends in. */
+/* In a Safari tab iOS won't let the page draw behind the status bar; it fills that strip with the
+   page background instead. This beige continues the fade at the top of the game screen. */
 html.game-view-active,
 body.game-view-active {
-  background: #dfe6e8;
+  background: #f1eadb;
+}
+
+/* The game screen is an app, not a page: no pinch or double-tap zoom of the whole screen. The map
+   still pinch-zooms itself (Mapbox sets touch-action: none on its canvas and handles it). */
+html.game-view-active {
+  touch-action: pan-x pan-y;
 }
 
 /* Keep the Mapbox logo and attribution clear of the browser toolbar and home indicator. */
