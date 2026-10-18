@@ -333,7 +333,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     setSelectedZoneOwnerTeamId('');
     setSelectedPlayerId('');
     setSelectedPlayerTeamId('');
-    setNotice({ tone: 'info', message: 'Drafting a new game.' });
+    setNotice({ tone: 'info', message: 'New game draft: fill in the name, map and challenge set below, then tap Create Game.' });
   };
 
   const handleSaveGame = async () => {
