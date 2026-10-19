@@ -39,6 +39,7 @@ import {
   updateGameDefinition,
   updateTeamDefinition,
 } from '../../lib/api';
+import { AdminClue } from './AdminClue';
 
 interface AdminPanelProps {
   initialGameId: string | null;
@@ -1084,6 +1085,16 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
               </div>
               <span className="shrink-0 rounded-full bg-[#3f3360] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white">Open</span>
             </a>
+          ) : null}
+
+          {currentGame ? (
+            <AdminClue
+              game={currentGame}
+              onGameChange={(game) => {
+                setCurrentGame(game);
+                setGames((current) => upsertById(current, game));
+              }}
+            />
           ) : null}
 
           <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

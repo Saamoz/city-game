@@ -26,6 +26,7 @@ import type { DatabaseClient } from '../../db/connection.js';
 import { env } from '../../db/env.js';
 import { challengeClaims, challenges, zones } from '../../db/schema.js';
 import { AppError } from '../../lib/errors.js';
+import { assignClueFragment } from '../../services/clue-service.js';
 import { appendEvents, type AppendEventInput } from '../../services/event-service.js';
 import { lockGameById } from '../../services/game-service.js';
 import { transactInTransaction } from '../../services/resource-service.js';
@@ -309,6 +310,7 @@ async function submitJudgedChallenge(db: DatabaseClient, input: { challenge: typ
   const locationAtClaim = input.gpsPayload ? sql`ST_SetSRID(ST_MakePoint(${input.gpsPayload.lng}, ${input.gpsPayload.lat}), 4326)` : null;
   const [insertedClaim] = await db.insert(challengeClaims).values({ challengeId: input.challenge.id, gameId: input.gameId, teamId: input.teamId, playerId: input.playerId, status: 'submitted', expiresAt: input.now, completedAt: input.now, submission: input.submission, locationAtClaim }).returning();
   if (!insertedClaim) throw new AppError(errorCodes.validationError, { message: 'Challenge submission failed.' });
+  await assignClueFragment(db, input.gameId, input.challenge.id);
 
   // The note is for judges only; everything broadcast to players omits it.
   const claim = { ...serializeClaim(insertedClaim), submission: null };
@@ -506,6 +508,8 @@ async function finishChallengeCompletion(
       activatedZone = await getZoneByIdOrThrow(db, activatedChallengeRow.zoneId);
     }
   }
+
+  await assignClueFragment(db, input.gameId, input.updatedChallenge.id);
 
   const rerollState = await advanceChallengeRerollCharge(db, {
     gameId: input.gameId,

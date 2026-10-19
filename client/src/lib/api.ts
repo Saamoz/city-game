@@ -1,6 +1,10 @@
 import {
   API_PREFIX,
   IDEMPOTENCY_KEY_HEADER,
+  type AdminClueStatus,
+  type ClueImageSummary,
+  type ClueImageUpload,
+  type TeamClue,
   type Challenge,
   type ChallengeClaim,
   type ChallengeRerollState,
@@ -193,6 +197,30 @@ export async function setJudgingDecision(claimId: string, decision: JudgingDecis
 export async function publishJudgedScores(gameId: string): Promise<GameJudgingSheet> {
   const response = await apiRequest<{ judging: GameJudgingSheet }>('/game/' + gameId + '/judging/publish', { method: 'POST', body: {} });
   return response.judging;
+}
+
+export async function getTeamClue(gameId: string, signal?: AbortSignal): Promise<TeamClue | null> {
+  const response = await apiRequest<{ clue: TeamClue | null }>('/game/' + gameId + '/clue', { signal });
+  return response.clue;
+}
+
+export async function getAdminClueStatus(gameId: string, signal?: AbortSignal): Promise<AdminClueStatus> {
+  const response = await apiRequest<{ clue: AdminClueStatus }>('/game/' + gameId + '/clue/admin', { signal });
+  return response.clue;
+}
+
+export async function uploadClueImage(gameId: string, upload: ClueImageUpload): Promise<ClueImageSummary> {
+  const response = await apiRequest<{ image: ClueImageSummary }>('/game/' + gameId + '/clue/images', { method: 'POST', body: upload });
+  return response.image;
+}
+
+export async function deleteClueImage(imageId: string): Promise<void> {
+  await apiRequest('/clue/images/' + imageId, { method: 'DELETE' });
+}
+
+export async function setClueRevealed(gameId: string, revealed: boolean): Promise<Game> {
+  const response = await apiRequest<GameResponse>('/game/' + gameId + '/clue/reveal', { method: 'POST', body: { revealed } });
+  return response.game;
 }
 
 export async function getPublicGameRecap(gameId: string, signal?: AbortSignal): Promise<GameRecap> {

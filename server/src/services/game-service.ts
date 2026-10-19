@@ -26,6 +26,7 @@ import {
 import { AppError } from '../lib/errors.js';
 import type { ModeRegistry } from '../modes/index.js';
 import { cloneChallengeSetToGame } from './challenge-set-service.js';
+import { chooseClueImage } from './clue-service.js';
 import { assertMapPlayable, cloneMapZonesToGame } from './map-service.js';
 
 export type GameRecord = typeof games.$inferSelect;
@@ -177,6 +178,7 @@ export function serializeGameRecord(game: GameRecord): Game {
     settings: game.settings as Game['settings'],
     startedAt: game.startedAt?.toISOString() ?? null,
     endedAt: game.endedAt?.toISOString() ?? null,
+    clueRevealedAt: game.clueRevealedAt?.toISOString() ?? null,
     createdAt: game.createdAt.toISOString(),
     updatedAt: game.updatedAt.toISOString(),
   };
@@ -240,6 +242,7 @@ async function applyLifecycleTransition(
     }
 
     await modeHandler.onGameStart({ db, game: runtimeGame });
+    await chooseClueImage(db, runtimeGame.id);
   }
 
   if (transition === 'end') {

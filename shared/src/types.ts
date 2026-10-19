@@ -212,6 +212,7 @@ export interface Game {
   settings: GameSettings;
   startedAt: IsoTimestamp | null;
   endedAt: IsoTimestamp | null;
+  clueRevealedAt: IsoTimestamp | null; // set when the admin shows every team's clue fragments to everyone
   createdAt: IsoTimestamp;
   updatedAt: IsoTimestamp;
 }

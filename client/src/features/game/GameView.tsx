@@ -40,6 +40,7 @@ import { PointChallengeLayer, getPointLocation, getPointRadius, isPointChallenge
 import { CardViewer, type CardContext } from './CardViewer';
 import { PointDeck } from './PointDeck';
 import { ChallengeAreaLayer, getAreaBounds, getAreaDistance, isAreaChallenge, isInsideArea } from './ChallengeAreas';
+import { ClueButton, ClueOverlay, useTeamClue } from './ClueBoard';
 import { GameResultsScreen } from './GameResultsScreen';
 import { formatPoints, type CompletionExtras } from './ChallengeScoring';
 import { isJudgedChallenge } from './JudgedChallenges';
@@ -129,6 +130,9 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const initializeSnapshot = useGameStore((state) => state.initializeSnapshot);
   const applyRealtimeSync = useGameStore((state) => state.applyRealtimeSync);
   const applyRealtimeDelta = useGameStore((state) => state.applyRealtimeDelta);
+  const { clue, news: clueNews } = useTeamClue(gameId, snapshot);
+  const [isClueOpen, setIsClueOpen] = useState(false);
+  const [hasUnseenClueFragment, setHasUnseenClueFragment] = useState(false);
   const applyRealtimePayload = useGameStore((state) => state.applyRealtimePayload);
   const setError = useGameStore((state) => state.setError);
   const setConnectionState = useGameStore((state) => state.setConnectionState);
@@ -200,6 +204,23 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       reset();
     };
   }, [gameId, initializeSnapshot, reset, setError, setLoading]);
+
+  useEffect(() => {
+    if (clueNews?.kind === 'found') {
+      // The completion toast is already up, so the clue button glows instead.
+      setHasUnseenClueFragment(true);
+    } else if (clueNews?.kind === 'revealed') {
+      setToast({ tone: 'info', title: 'The big clue is revealed', body: "Every team's fragments are on the board." });
+      setIsClueOpen(true);
+    }
+  }, [clueNews]);
+
+  const openClue = useCallback(() => {
+    setIsClueOpen(true);
+    setHasUnseenClueFragment(false);
+  }, []);
+
+  const clueOverlay = clue && isClueOpen ? <ClueOverlay clue={clue} snapshot={snapshot} onClose={() => setIsClueOpen(false)} /> : null;
 
   useEffect(() => {
     if (!toast) {
@@ -996,7 +1017,20 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   }, [focusZoneById]);
 
   if (snapshot?.game.status === 'completed') {
-    return <GameResultsScreen game={snapshot.game} onLeave={onLeaveMap} teams={snapshot.teams} viewerTeam={snapshot.team} zones={snapshot.zones} />;
+    return (
+      <>
+        <GameResultsScreen game={snapshot.game} onLeave={onLeaveMap} teams={snapshot.teams} viewerTeam={snapshot.team} zones={snapshot.zones} />
+        {clue ? (
+          <ClueButton
+            clue={clue}
+            onOpen={openClue}
+            className={'fixed bottom-[calc(env(safe-area-inset-bottom,0px)+1rem)] right-4 z-[60] shadow-[0_10px_30px_rgba(24,32,36,0.25)]' + (clue.revealedAt ? ' [animation:clue-button-glow_1.6s_ease-in-out_infinite]' : '')}
+          />
+        ) : null}
+        {clueOverlay}
+        {toast ? <Toast tone={toast.tone} title={toast.title} body={toast.body} accentColor={toast.accentColor} /> : null}
+      </>
+    );
   }
 
   return (
@@ -1054,6 +1088,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                 </span>
               ) : null}
             </div>
+            <div className="flex shrink-0 items-center gap-2">
+            {clue ? <ClueButton clue={clue} onOpen={openClue} className={'h-9' + (hasUnseenClueFragment ? ' [animation:clue-button-glow_1.6s_ease-in-out_infinite]' : '')} /> : null}
             <button
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#c9ae6d]/55 bg-[#f3ecd8] text-sm text-[#24343a]"
               onClick={openMenu}
@@ -1064,6 +1100,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
             >
               ☰
             </button>
+            </div>
           </div>
 
           {/* Desktop HUD */}
@@ -1091,6 +1128,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               />
             </div>
             <div className="grid gap-3 lg:min-w-[23rem]">
+              {clue ? <ClueButton clue={clue} onOpen={openClue} className={'justify-self-end' + (hasUnseenClueFragment ? ' [animation:clue-button-glow_1.6s_ease-in-out_infinite]' : '')} /> : null}
               <StatusCard label={isPointMode ? 'Points' : 'Controlled'} value={String(isPointMode ? teamPoints : controlledZoneCount)} />
               {isPointMode ? (
                 <>
@@ -1402,6 +1440,8 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
           onFocusZone={handleFocusFeedZone}
         />
       ) : null}
+
+      {clueOverlay}
 
       {toast ? <Toast tone={toast.tone} title={toast.title} body={toast.body} accentColor={toast.accentColor} /> : null}
     </main>

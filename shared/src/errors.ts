@@ -60,6 +60,10 @@ export const errorDefinitions = {
     statusCode: 404,
     defaultMessage: 'Annotation not found.',
   },
+  CLUE_FRAGMENT_NOT_FOUND: {
+    statusCode: 404,
+    defaultMessage: 'Clue fragment not found.',
+  },
   ANNOTATION_FORBIDDEN: {
     statusCode: 403,
     defaultMessage: 'Annotation action is not allowed.',
@@ -128,6 +132,7 @@ export const errorCodes = {
   challengeSetNotFound: 'CHALLENGE_SET_NOT_FOUND',
   annotationNotFound: 'ANNOTATION_NOT_FOUND',
   annotationForbidden: 'ANNOTATION_FORBIDDEN',
+  clueFragmentNotFound: 'CLUE_FRAGMENT_NOT_FOUND',
   notOnTeam: 'NOT_ON_TEAM',
   teamNotFound: 'TEAM_NOT_FOUND',
   zoneDisabled: 'ZONE_DISABLED',
