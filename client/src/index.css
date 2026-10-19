@@ -185,6 +185,17 @@ input {
   }
 }
 
+@keyframes clue-button-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(201, 151, 46, 0);
+  }
+
+  50% {
+    box-shadow: 0 0 0 6px rgba(201, 151, 46, 0.45);
+  }
+}
+
 @keyframes menu-popover-in {
   from {
     opacity: 0;

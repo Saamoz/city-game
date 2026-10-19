@@ -8,6 +8,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   real,
   text,
   timestamp,
@@ -118,6 +119,7 @@ export const games = pgTable(
     rerollCompletionProgress: integer('reroll_completion_progress').notNull().default(0),
     startedAt: timestamp('started_at', { withTimezone: true }),
     endedAt: timestamp('ended_at', { withTimezone: true }),
+    clueRevealedAt: timestamp('clue_revealed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -203,6 +205,8 @@ export const challenges = pgTable(
     difficulty: varchar('difficulty', { length: 10 }),
     sortOrder: integer('sort_order').notNull().default(0),
     isDeckActive: boolean('is_deck_active').notNull().default(false),
+    // The clue fragment this challenge hands out, picked when it is first completed.
+    clueFragmentIndex: integer('clue_fragment_index'),
     status: varchar('status', { length: 20 }).notNull().default('available'),
     currentClaimId: uuid('current_claim_id').references((): AnyPgColumn => challengeClaims.id),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
@@ -387,6 +391,41 @@ export const playerLocationSamples = pgTable(
   }),
 );
 
+// Candidate pictures for a game's final clue, stored already cut into fragments. One is chosen
+// (is_selected) at game start; nothing the admin panel reads says which.
+export const clueImages = pgTable(
+  'clue_images',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    gameId: uuid('game_id').notNull().references(() => games.id, { onDelete: 'cascade' }),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    fragmentCount: integer('fragment_count').notNull(),
+    thumbnail: text('thumbnail').notNull(),
+    isSelected: boolean('is_selected').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    clueImagesGameIdx: index('idx_clue_images_game').on(table.gameId),
+    oneSelectedClueImagePerGame: uniqueIndex('idx_one_selected_clue_image_per_game')
+      .on(table.gameId)
+      .where(sql`${table.isSelected}`),
+  }),
+);
+
+export const clueImageTiles = pgTable(
+  'clue_image_tiles',
+  {
+    imageId: uuid('image_id').notNull().references(() => clueImages.id, { onDelete: 'cascade' }),
+    tileIndex: integer('tile_index').notNull(),
+    contentType: varchar('content_type', { length: 50 }).notNull(),
+    data: text('data').notNull(), // base64
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.imageId, table.tileIndex] }),
+  }),
+);
+
 export const schema = {
   maps,
   mapZones,
@@ -404,4 +443,6 @@ export const schema = {
   actionReceipts,
   annotations,
   playerLocationSamples,
+  clueImages,
+  clueImageTiles,
 };

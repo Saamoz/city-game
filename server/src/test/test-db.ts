@@ -4,6 +4,8 @@ import { createDb, type DatabaseClient, type DatabasePool } from '../db/connecti
 import { env } from '../db/env.js';
 
 const TRUNCATE_TABLES = [
+  'clue_image_tiles',
+  'clue_images',
   'player_location_samples',
   'annotations',
   'action_receipts',
