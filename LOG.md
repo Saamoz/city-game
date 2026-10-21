@@ -374,3 +374,7 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - The first time a challenge is completed (or a judged one submitted) it gets a random unused fragment (`challenges.clue_fragment_index`, assigned under the game row lock in `complete-service`). Fragments are assigned lazily, so rerolled-away challenges don't strand one. A team owns a fragment while it has a completed/submitted claim on that challenge; both teams that submit the same judged challenge get its fragment. Bonuses play no part.
 - Players: `GET /game/:id/clue` lists the team's fragments; `GET /game/:id/clue/fragments/:index` serves a tile only to a team that found it (404 otherwise). The 🧩 n/N pill (top bar, and floating on the results/waiting screens) opens the board; it glows after a new fragment and refetches when the team's claim count or `game.clueRevealedAt` changes.
 - "Reveal to everyone" (`POST /game/:id/clue/reveal`, `{ revealed }`) sets `games.clue_revealed_at`, logs an ADMIN_OVERRIDE and pushes a full state sync; every team then sees every found fragment with dots for the teams that found it, and the board pops open. "Hide again" undoes it.
+
+## Card Shows the Long Description (2026-10-21)
+
+- Card face: the long description is shown under the short one by default instead of behind a "More info" toggle (the card had plenty of empty space). It scrolls with the rest of the card body if it's long.

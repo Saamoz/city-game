@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { getBasePoints, getChallengeBonuses, isJudgedChallengeConfig, type Challenge } from '@city-game/shared';
 import { formatDistance } from '../../lib/units';
 import { EdgeLabel, Flourish, INK, RUST, SuitGlyph, type CardSuit } from './CardGlyphs';
@@ -26,7 +26,7 @@ interface ChallengeCardFaceProps {
 }
 
 // A challenge drawn as a playing card on old parchment: corner indices with the points and the suit,
-// the short description up front, longer explanations behind (i) toggles, and bonus tasks to tick.
+// the short description up front, then the longer explanation, and bonus tasks to tick.
 export function ChallengeCardFace({ gameName, challenge, suit, distanceMeters, inRange, pending, onComplete, onShowOnMap, reroll }: ChallengeCardFaceProps) {
   const base = getBasePoints(challenge.scoring);
   const bonuses = getChallengeBonuses(challenge.config);
@@ -76,7 +76,7 @@ export function ChallengeCardFace({ gameName, challenge, suit, distanceMeters, i
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]">
           <p className="text-[15px] leading-6 text-[#3d362a]">{shortText}</p>
-          {longText ? <InfoToggle open={openInfo.has('__long')} onToggle={() => setOpenInfo((current) => toggle(current, '__long'))} label="More info">{longText}</InfoToggle> : null}
+          {longText ? <p className="whitespace-pre-line border-l-2 border-[#c4a874] pl-3 text-[14px] italic leading-6 text-[#4d4435]">{longText}</p> : null}
 
           {bonuses.length ? (
             <section>
@@ -156,18 +156,6 @@ function CornerIndex({ points, suit, flipped = false }: { points: number; suit: 
 function InfoButton({ open, onToggle, label }: { open: boolean; onToggle(): void; label: string }) {
   return (
     <button aria-expanded={open} aria-label={label} className={['grid h-6 w-6 shrink-0 place-items-center rounded-full border font-[Georgia,Times_New_Roman,serif] text-[13px] italic', open ? 'border-[#4f3f2a] bg-[#4f3f2a] text-[#f5ecd6]' : 'border-[#a98c5a] text-[#6d5a3c]'].join(' ')} onClick={onToggle} type="button">i</button>
-  );
-}
-
-function InfoToggle({ open, onToggle, label, children }: { open: boolean; onToggle(): void; label: string; children: ReactNode }) {
-  return (
-    <div>
-      <button aria-expanded={open} className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-[#6d5a3c]" onClick={onToggle} type="button">
-        <span className={['grid h-5 w-5 place-items-center rounded-full border font-[Georgia,Times_New_Roman,serif] text-[12px] normal-case italic', open ? 'border-[#4f3f2a] bg-[#4f3f2a] text-[#f5ecd6]' : 'border-[#a98c5a]'].join(' ')}>i</span>
-        {open ? 'Less' : label}
-      </button>
-      {open ? <p className="mt-2 whitespace-pre-line border-l-2 border-[#c4a874] pl-3 text-[14px] italic leading-6 text-[#4d4435]">{children}</p> : null}
-    </div>
   );
 }
 
