@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Game, MapDefinition, MapZone, Player, Team } from '@city-game/shared';
 import { collectGeometryPositions } from '../game/mapGeometry';
+import { HowToPlay } from '../game/HowToPlay';
 import { PushInstallHint } from './PushInstallHint';
 
 interface LobbyScreenProps {
@@ -61,6 +62,7 @@ export function LobbyScreen({
   onStartGame,
 }: LobbyScreenProps) {
   const readyPlayersRequired = Math.floor(totalReadyEligiblePlayers / 2) + 1;
+  const [isHowToPlayOpen, setIsHowToPlayOpen] = useState(false);
   const playersByTeamId = useMemo(() => {
     const roster = new Map<string, Player[]>();
     for (const team of teams) {
@@ -105,6 +107,18 @@ export function LobbyScreen({
               <span className="h-2.5 w-2.5 rounded-full bg-[#c8a86b] animate-pulse" />
               <span className="font-[Georgia,Times_New_Roman,serif]">Waiting for the game to start…</span>
             </div>
+            {game.modeKey === 'point_challenge' ? (
+              <div className="mt-3">
+                <button
+                  className="inline-flex items-center gap-2 rounded-full border border-[#a98c5a] bg-[#3a3022] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#f5ecd6] shadow-[0_8px_20px_rgba(31,42,47,0.18)] transition hover:bg-[#2f271b]"
+                  onClick={() => setIsHowToPlayOpen(true)}
+                  type="button"
+                >
+                  <span aria-hidden="true" className="font-[Georgia,Times_New_Roman,serif] text-sm normal-case italic">?</span>
+                  How to play
+                </button>
+              </div>
+            ) : null}
             <div className="mt-4 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <div className="inline-flex items-center gap-3 rounded-full border border-[#d8c6a0]/70 bg-[#fbf6ea] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#6f6045]">
                 <span>{readyCount}/{totalReadyEligiblePlayers} Ready · {readyPlayersRequired} needed</span>
@@ -232,6 +246,7 @@ export function LobbyScreen({
           </div>
         </section>
       </div>
+      {isHowToPlayOpen ? <HowToPlay onClose={() => setIsHowToPlayOpen(false)} /> : null}
     </main>
   );
 }

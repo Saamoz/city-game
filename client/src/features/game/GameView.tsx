@@ -41,6 +41,7 @@ import { CardViewer, type CardContext } from './CardViewer';
 import { PointDeck } from './PointDeck';
 import { ChallengeAreaLayer, getAreaBounds, getAreaDistance, isAreaChallenge, isInsideArea } from './ChallengeAreas';
 import { ClueButton, ClueOverlay, useTeamClue } from './ClueBoard';
+import { HowToPlay } from './HowToPlay';
 import { GameResultsScreen } from './GameResultsScreen';
 import { formatPoints, type CompletionExtras } from './ChallengeScoring';
 import { isJudgedChallenge } from './JudgedChallenges';
@@ -107,6 +108,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
   const [cardViewer, setCardViewer] = useState<{ startId: string; orderedIds: string[] } | null>(null);
   const [isDeckOpen, setIsDeckOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isHowToPlayOpen, setIsHowToPlayOpen] = useState(false);
   const [showMobileCompleted, setShowMobileCompleted] = useState(false);
   // While a finger drags the deck: how far it has moved, and whether the deck was open when it started.
   const [deckDrag, setDeckDrag] = useState<{ fromOpen: boolean; dy: number } | null>(null);
@@ -1408,6 +1410,18 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               >
                 Feed
               </button>
+              {isPointMode ? (
+                <button
+                  className="w-full rounded-xl border border-[#c8b48a]/55 bg-[#fff8eb] px-3 py-2.5 text-left text-sm font-semibold text-[#24343a] transition hover:bg-white"
+                  onClick={() => {
+                    setIsHowToPlayOpen(true);
+                    requestMenuClose();
+                  }}
+                  type="button"
+                >
+                  How to play
+                </button>
+              ) : null}
               {snapshot?.player?.teamId ? (
                 <NotificationMenuItem isSubscribed={Boolean(snapshot.player.pushSubscription)} />
               ) : null}
@@ -1442,6 +1456,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
       ) : null}
 
       {clueOverlay}
+      {isHowToPlayOpen ? <HowToPlay onClose={() => setIsHowToPlayOpen(false)} /> : null}
 
       {toast ? <Toast tone={toast.tone} title={toast.title} body={toast.body} accentColor={toast.accentColor} /> : null}
     </main>
