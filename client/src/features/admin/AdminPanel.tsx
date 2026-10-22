@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { GAME_MODE_KEYS, GAME_MODE_LABELS, PLATFORM_NAME } from '@city-game/shared';
+import { GAME_MODE_KEYS, GAME_MODE_LABELS, PLATFORM_NAME, isJudgedChallengeConfig } from '@city-game/shared';
 import { BrandMark } from '../../components/BrandMark';
 import type {
   Challenge,
@@ -132,6 +132,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
   const [selectedZoneOwnerTeamId, setSelectedZoneOwnerTeamId] = useState('');
   const [selectedPlayerId, setSelectedPlayerId] = useState('');
   const [selectedPlayerTeamId, setSelectedPlayerTeamId] = useState('');
+  const [forceCompleteTeamId, setForceCompleteTeamId] = useState('');
   const [tab, setTab] = useState<AdminTab>('setup');
   // The game players land on at the site's main address, so the list can flag it.
   const [homepageGameId, setHomepageGameId] = useState<string | null>(null);
@@ -657,12 +658,19 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
       return;
     }
 
-    if (!window.confirm('Force-complete the selected challenge?')) {
+    const isHunt = currentGame?.modeKey === 'point_challenge';
+    const team = teams.find((entry) => entry.id === forceCompleteTeamId);
+    if (isHunt && !team) {
+      setNotice({ tone: 'error', message: 'Choose the team that completed it.' });
+      return;
+    }
+    const title = challenges.find((entry) => entry.id === selectedChallengeId)?.title ?? 'this challenge';
+    if (!window.confirm(isHunt ? 'Complete "' + title + '" for ' + team!.name + '? They get its points and clue fragment, with no location check.' : 'Force-complete the selected challenge?')) {
       return;
     }
 
     try {
-      await adminForceCompleteChallenge(selectedChallengeId);
+      await adminForceCompleteChallenge(selectedChallengeId, { teamId: isHunt ? forceCompleteTeamId : null });
       await refreshCurrentGame();
       setNotice({ tone: 'success', message: 'Challenge force-completed.' });
     } catch (error) {
@@ -676,7 +684,11 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
       return;
     }
 
-    if (!window.confirm('Reset the selected challenge?')) {
+    const challenge = challenges.find((entry) => entry.id === selectedChallengeId);
+    const isHunt = currentGame?.modeKey === 'point_challenge';
+    if (!window.confirm(isHunt && challenge?.status !== 'available'
+      ? 'Reopen "' + (challenge?.title ?? 'this challenge') + '"? The team that did it loses its points for it and its clue fragment, and any team can complete it again.'
+      : 'Reset the selected challenge?')) {
       return;
     }
 
@@ -1097,10 +1109,30 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                 <option key={challenge.id} value={challenge.id}>{challenge.title} — {challenge.status}</option>
               ))}
             </select>
-            {selectedChallenge ? <p className="text-sm text-[#5f6d74]">{selectedChallenge.description}</p> : null}
+            {selectedChallenge ? <p className="line-clamp-3 text-sm text-[#5f6d74]">{selectedChallenge.description}</p> : null}
+            {currentGame.modeKey === 'point_challenge' ? (
+              <>
+                <select value={forceCompleteTeamId} onChange={(event) => { setForceCompleteTeamId(event.target.value); }} className={inputClassName} aria-label="Team to credit">
+                  <option value="">Team that completed it</option>
+                  {teams.map((team) => (
+                    <option key={team.id} value={team.id}>{team.name}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-[#5f6d74]">Complete gives that team the points and clue fragment without checking their location. Reopen undoes a completion and takes the points back.</p>
+              </>
+            ) : null}
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => { void handleForceComplete(); }} disabled={!selectedChallengeId} className={secondaryButtonClassName}>Force complete</button>
-              <button type="button" onClick={() => { void handleResetChallenge(); }} disabled={!selectedChallengeId} className={secondaryButtonClassName}>Reset</button>
+              <button
+                type="button"
+                onClick={() => { void handleForceComplete(); }}
+                disabled={!selectedChallengeId || (currentGame.modeKey === 'point_challenge' && (!forceCompleteTeamId || selectedChallenge?.status !== 'available'))}
+                className={secondaryButtonClassName}
+              >
+                {currentGame.modeKey === 'point_challenge' ? 'Complete for team' : 'Force complete'}
+              </button>
+              <button type="button" onClick={() => { void handleResetChallenge(); }} disabled={!selectedChallengeId || (currentGame.modeKey === 'point_challenge' && selectedChallenge?.status === 'available' && !isJudgedChallengeConfig(selectedChallenge.config))} className={secondaryButtonClassName}>
+                {currentGame.modeKey === 'point_challenge' ? 'Reopen' : 'Reset'}
+              </button>
             </div>
           </div>
         </div>

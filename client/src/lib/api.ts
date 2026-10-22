@@ -739,10 +739,10 @@ export async function importAdminZones(
   return response.zones;
 }
 
-export async function adminForceCompleteChallenge(challengeId: string, input?: { submission?: JsonValue | null; notes?: string }): Promise<CompleteChallengeResponse> {
+export async function adminForceCompleteChallenge(challengeId: string, input?: { submission?: JsonValue | null; teamId?: string | null; notes?: string }): Promise<CompleteChallengeResponse> {
   return apiRequest<CompleteChallengeResponse>('/admin/challenges/' + challengeId + '/force-complete', {
     method: 'POST',
-    body: { submission: input?.submission ?? null, notes: input?.notes },
+    body: { submission: input?.submission ?? null, ...(input?.teamId ? { teamId: input.teamId } : {}), notes: input?.notes },
   });
 }
 

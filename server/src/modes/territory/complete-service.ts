@@ -50,6 +50,8 @@ export interface CompleteChallengeInput {
   submission?: JsonValue | null;
   gpsPayload?: GpsPayload | null;
   targetZoneId?: string | null;
+  // Admin force-complete in Challenge Hunt: the admin vouches for the team, so no location check.
+  skipLocationCheck?: boolean;
 }
 
 export interface CompleteChallengeSuccessResult {
@@ -107,6 +109,24 @@ export async function completeChallenge(
       teamId: input.teamId,
       submission: input.submission ?? null,
       gpsPayload: input.gpsPayload ?? null,
+      now,
+      settings: game.settings as GameSettings,
+      skipLocationCheck: input.skipLocationCheck === true,
+    });
+  }
+
+  if (input.skipLocationCheck && lockedChallenge.status !== 'available') {
+    throw new AppError(errorCodes.challengeNotAvailable, { message: 'This challenge is already completed. Reset it first to give it to another team.' });
+  }
+
+  if (input.skipLocationCheck && lockedChallenge.status === 'available' && game.modeKey === 'point_challenge') {
+    return completeAnywhereChallengeDirectly(db, {
+      challenge: lockedChallenge,
+      gameId: input.gameId,
+      playerId: input.playerId,
+      teamId: input.teamId,
+      submission: input.submission ?? null,
+      gpsPayload: null,
       now,
       settings: game.settings as GameSettings,
     });
@@ -291,14 +311,14 @@ async function assertInsideChallengeArea(db: DatabaseClient, challenge: typeof c
 
 // Judged challenges never complete: each team files one 'submitted' claim, the challenge stays open for
 // everyone else, and no points move until judges publish scores (judging-service).
-async function submitJudgedChallenge(db: DatabaseClient, input: { challenge: typeof challenges.$inferSelect; gameId: string; playerId: string; teamId: string; submission: JsonValue | null; gpsPayload: GpsPayload | null; now: Date; settings: GameSettings }): Promise<CompleteChallengeSuccessResult> {
+async function submitJudgedChallenge(db: DatabaseClient, input: { challenge: typeof challenges.$inferSelect; gameId: string; playerId: string; teamId: string; submission: JsonValue | null; gpsPayload: GpsPayload | null; now: Date; settings: GameSettings; skipLocationCheck: boolean }): Promise<CompleteChallengeSuccessResult> {
   if (input.challenge.status !== 'available') throw new AppError(errorCodes.challengeNotAvailable);
   const [existing] = await db.select({ id: challengeClaims.id }).from(challengeClaims)
     .where(and(eq(challengeClaims.challengeId, input.challenge.id), eq(challengeClaims.teamId, input.teamId), eq(challengeClaims.status, 'submitted'))).limit(1);
   if (existing) throw new AppError(errorCodes.challengeNotAvailable, { message: 'Your team already completed this challenge.', details: { challengeId: input.challenge.id } });
 
-  if (getChallengeArea(input.challenge.config)) await assertInsideChallengeArea(db, input.challenge, input.gpsPayload, input.settings);
-  const point = getPointLocation(input.challenge.config);
+  if (!input.skipLocationCheck && getChallengeArea(input.challenge.config)) await assertInsideChallengeArea(db, input.challenge, input.gpsPayload, input.settings);
+  const point = input.skipLocationCheck ? null : getPointLocation(input.challenge.config);
   if (point) {
     if (!input.gpsPayload) throw new AppError(errorCodes.validationError, { message: 'GPS location is required for this challenge.' });
     if (input.settings.require_gps_accuracy) assertGpsAccuracy(null, input.gpsPayload.gpsErrorMeters);

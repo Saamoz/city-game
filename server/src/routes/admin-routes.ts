@@ -24,6 +24,7 @@ const forceCompleteBodySchema = {
   additionalProperties: false,
   properties: {
     submission: {},
+    teamId: { type: 'string', format: 'uuid' },
     notes: { type: 'string', minLength: 1, maxLength: 500 },
   },
 } as const;
@@ -90,10 +91,11 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const body = (request.body ?? {}) as { submission?: unknown; notes?: string };
+      const body = (request.body ?? {}) as { submission?: unknown; teamId?: string; notes?: string };
       await executeAdminOverride(app, request, reply, async (db) => {
         const result = await adminForceCompleteChallenge(db, {
           challengeId: (request.params as { id: string }).id,
+          teamId: body.teamId ?? null,
           submission: (body.submission ?? null) as never,
           notes: body.notes,
         });

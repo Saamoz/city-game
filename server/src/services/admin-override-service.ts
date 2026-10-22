@@ -1,10 +1,10 @@
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { errorCodes, eventTypes, type JsonObject, type JsonValue, type ResourceType } from '@city-game/shared';
 import type { DatabaseClient } from '../db/connection.js';
-import { challengeClaims, challenges, players, teams, zones } from '../db/schema.js';
+import { challengeClaims, challenges, players, resourceLedger, teams, zones } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import { appendEvents, type AppendEventInput } from './event-service.js';
-import { getGameById } from './game-service.js';
+import { getGameById, lockGameById } from './game-service.js';
 import { transactInTransaction, type ResourceTransactionInput } from './resource-service.js';
 import { getZoneByIdOrThrow } from './spatial-service.js';
 import { lockChallenge, serializeChallenge, serializeClaim } from '../modes/territory/claim-service.js';
@@ -13,6 +13,8 @@ import { releaseChallenge } from '../modes/territory/release-service.js';
 
 export interface ForceCompleteOverrideInput {
   challengeId: string;
+  // Challenge Hunt: the team to credit (there is no claim to finish).
+  teamId?: string | null;
   submission?: JsonValue | null;
   notes?: string;
 }
@@ -60,6 +62,12 @@ export async function adminForceCompleteChallenge(
   db: DatabaseClient,
   input: ForceCompleteOverrideInput,
 ): Promise<AdminOverrideMutationResult> {
+  const [challengeRow] = await db.select({ gameId: challenges.gameId }).from(challenges).where(eq(challenges.id, input.challengeId)).limit(1);
+  if (!challengeRow) throw new AppError(errorCodes.validationError, { message: 'Challenge not found.' });
+  if ((await getGameById(db, challengeRow.gameId)).modeKey === 'point_challenge') {
+    return forceCompleteForTeam(db, { ...input, gameId: challengeRow.gameId });
+  }
+
   const lockedChallenge = await lockChallenge(db, input.challengeId);
   const activeClaim = await getActiveClaimForChallenge(db, lockedChallenge);
 
@@ -103,13 +111,90 @@ export async function adminForceCompleteChallenge(
   };
 }
 
+// Challenge Hunt has no claims: completing is one step. The admin names the team, and the challenge is
+// completed for it as if one of its players had done it there (points, bonuses, clue fragment), with
+// no location check. Used when GPS won't cooperate at the spot.
+async function forceCompleteForTeam(db: DatabaseClient, input: ForceCompleteOverrideInput & { gameId: string }): Promise<AdminOverrideMutationResult> {
+  if (!input.teamId) throw new AppError(errorCodes.validationError, { message: 'Choose the team that completed this challenge.' });
+  const [team] = await db.select({ id: teams.id }).from(teams).where(and(eq(teams.id, input.teamId), eq(teams.gameId, input.gameId))).limit(1);
+  if (!team) throw new AppError(errorCodes.teamNotFound);
+  // A claim records a player; credit the team member seen most recently.
+  const [player] = await db.select({ id: players.id }).from(players)
+    .where(and(eq(players.gameId, input.gameId), eq(players.teamId, team.id)))
+    .orderBy(sql`${players.lastSeenAt} DESC NULLS LAST`, desc(players.createdAt))
+    .limit(1);
+  if (!player) throw new AppError(errorCodes.validationError, { message: 'That team has no players yet.' });
+
+  const result = await completeChallenge(db, {
+    challengeId: input.challengeId,
+    gameId: input.gameId,
+    playerId: player.id,
+    teamId: team.id,
+    submission: input.submission ?? null,
+    skipLocationCheck: true,
+  });
+  if (result.kind !== 'completed') throw new AppError(errorCodes.challengeNotAvailable);
+
+  const { stateVersion } = await appendAdminOverride(db, {
+    gameId: result.gameId,
+    entityType: 'challenge',
+    entityId: result.challenge.id,
+    action: 'force_complete',
+    notes: input.notes,
+    beforeState: null,
+    afterState: { challenge: result.challenge, claim: result.claim, teamId: team.id, resourcesAwarded: result.resourcesAwarded } as unknown as JsonValue,
+  });
+
+  return {
+    gameId: result.gameId,
+    stateVersion,
+    body: { challenge: result.challenge, claim: result.claim, zone: null, resourcesAwarded: result.resourcesAwarded, stateVersion },
+  };
+}
+
+// Takes back what a challenge's completions earned: the net of its completion awards and earlier
+// reset reversals, per team and resource. Judged points (published after the game) are left alone.
+async function revokeChallengeAwards(db: DatabaseClient, gameId: string, challengeId: string): Promise<Array<{ teamId: string; resourceType: string; delta: number }>> {
+  const rows = await db
+    .select({ teamId: resourceLedger.teamId, resourceType: resourceLedger.resourceType, total: sql<string>`SUM(${resourceLedger.delta})` })
+    .from(resourceLedger)
+    .where(and(eq(resourceLedger.gameId, gameId), eq(resourceLedger.referenceId, challengeId), inArray(resourceLedger.reason, ['challenge_completed', 'challenge_reset'])))
+    .groupBy(resourceLedger.teamId, resourceLedger.resourceType);
+  const revoked: Array<{ teamId: string; resourceType: string; delta: number }> = [];
+  for (const row of rows) {
+    const total = Number(row.total);
+    if (!row.teamId || !Number.isFinite(total) || total === 0) continue;
+    await transactInTransaction(db, { gameId, teamId: row.teamId, resourceType: row.resourceType, delta: -total, reason: 'challenge_reset', referenceId: challengeId, referenceType: 'challenge', allowNegative: true });
+    revoked.push({ teamId: row.teamId, resourceType: row.resourceType, delta: -total });
+  }
+  return revoked;
+}
+
 export async function adminResetChallenge(
   db: DatabaseClient,
   input: ResetChallengeOverrideInput,
 ): Promise<AdminOverrideMutationResult> {
   const now = new Date();
+  const [challengeRow] = await db.select({ gameId: challenges.gameId }).from(challenges).where(eq(challenges.id, input.challengeId)).limit(1);
+  if (!challengeRow) throw new AppError(errorCodes.validationError, { message: 'Challenge not found.' });
+  // Same lock order as a completion (game, then challenge), so a reset can't cross one mid-flight.
+  const game = await lockGameById(db, challengeRow.gameId);
   const lockedChallenge = await lockChallenge(db, input.challengeId);
   const activeClaim = lockedChallenge.currentClaimId ? await getActiveClaimIfPresent(db, lockedChallenge) : null;
+
+  // Challenge Hunt: undo the completion itself. The completing team (or, for a judged challenge, every
+  // team that submitted) loses the claim, its points and sight of the clue fragment; the fragment stays
+  // with the challenge for whoever completes it next.
+  let undoneClaims: Array<typeof challengeClaims.$inferSelect> = [];
+  let revokedAwards: Array<{ teamId: string; resourceType: string; delta: number }> = [];
+  if (game.modeKey === 'point_challenge') {
+    undoneClaims = await db
+      .update(challengeClaims)
+      .set({ status: 'released', releasedAt: now })
+      .where(and(eq(challengeClaims.challengeId, lockedChallenge.id), inArray(challengeClaims.status, ['completed', 'submitted'])))
+      .returning();
+    revokedAwards = await revokeChallengeAwards(db, lockedChallenge.gameId, lockedChallenge.id);
+  }
 
   let releasedClaim = null;
   if (activeClaim) {
@@ -129,6 +214,8 @@ export async function adminResetChallenge(
       status: 'available',
       currentClaimId: null,
       expiresAt: null,
+      // A completed card left the deck; reopening it puts it back.
+      ...(game.modeKey === 'point_challenge' && lockedChallenge.status === 'completed' ? { isDeckActive: true } : {}),
       updatedAt: now,
     })
     .where(eq(challenges.id, lockedChallenge.id))
@@ -158,6 +245,8 @@ export async function adminResetChallenge(
         reason: 'admin_reset',
         challenge,
         claim,
+        undoneClaimIds: undoneClaims.map((entry) => entry.id),
+        revokedAwards,
       } as unknown as JsonObject,
     },
   ];

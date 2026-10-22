@@ -157,6 +157,53 @@ describe('admin override routes', () => {
     expect(overrideEvents[0]).toMatchObject({ actorType: 'admin', entityType: 'challenge' });
   });
 
+  it('in Challenge Hunt completes a pinned challenge for a chosen team, then reopening takes the points back', async () => {
+    await seedGame({ modeKey: 'point_challenge' });
+    await seedTeam();
+    await seedTeam({ id: TEAM_TWO_ID, name: 'Blue Team', color: '#2563eb', joinCode: 'BLUE1234' });
+    await seedPlayer();
+    await testDatabase.db.insert(players).values(createTestPlayer({ id: PLAYER_TWO_ID, teamId: TEAM_TWO_ID, sessionToken: 'player-two-session', displayName: 'Two' }));
+    await seedChallenge({
+      zoneId: null,
+      scoring: { points: 2 },
+      config: { source_map_point: { type: 'Point', coordinates: [-87.6263, 41.8786] }, point_radius_meters: 40, bonuses: [{ id: 'b1', label: 'Old camera', points: 1 }] },
+    });
+    app = await createAdminTestApp();
+
+    const missingTeam = await app.inject({ method: 'POST', url: `/api/v1/admin/challenges/${CHALLENGE_ID}/force-complete`, headers: adminHeaders('hunt-no-team'), payload: {} });
+    expect(missingTeam.statusCode).toBe(400);
+
+    const completed = await app.inject({
+      method: 'POST',
+      url: `/api/v1/admin/challenges/${CHALLENGE_ID}/force-complete`,
+      headers: adminHeaders('hunt-complete'),
+      payload: { teamId: TEAM_ONE_ID, submission: { bonusIds: ['b1'] } },
+    });
+    expect(completed.statusCode).toBe(200);
+    expect(completed.json()).toMatchObject({ challenge: { id: CHALLENGE_ID, status: 'completed' }, claim: { teamId: TEAM_ONE_ID, status: 'completed' }, resourcesAwarded: { points: 3 } });
+
+    const again = await app.inject({ method: 'POST', url: `/api/v1/admin/challenges/${CHALLENGE_ID}/force-complete`, headers: adminHeaders('hunt-again'), payload: { teamId: TEAM_TWO_ID } });
+    expect(again.statusCode).toBe(409);
+
+    const reset = await app.inject({ method: 'POST', url: `/api/v1/admin/challenges/${CHALLENGE_ID}/reset`, headers: adminHeaders('hunt-reset'), payload: {} });
+    expect(reset.statusCode).toBe(200);
+    const [reopened] = await testDatabase.db.select().from(challenges).where(eq(challenges.id, CHALLENGE_ID));
+    expect(reopened).toMatchObject({ status: 'available', isDeckActive: true });
+    const claims = await testDatabase.db.select({ status: challengeClaims.status }).from(challengeClaims).where(eq(challengeClaims.challengeId, CHALLENGE_ID));
+    expect(claims.map((claim) => claim.status)).toEqual(['released']);
+    expect(await teamPoints(TEAM_ONE_ID)).toBe(0);
+
+    const second = await app.inject({ method: 'POST', url: `/api/v1/admin/challenges/${CHALLENGE_ID}/force-complete`, headers: adminHeaders('hunt-second'), payload: { teamId: TEAM_TWO_ID } });
+    expect(second.statusCode).toBe(200);
+    expect(await teamPoints(TEAM_TWO_ID)).toBe(2);
+    expect(await teamPoints(TEAM_ONE_ID)).toBe(0);
+
+    // A second reset only takes back what is still outstanding.
+    await app.inject({ method: 'POST', url: `/api/v1/admin/challenges/${CHALLENGE_ID}/reset`, headers: adminHeaders('hunt-reset-2'), payload: {} });
+    expect(await teamPoints(TEAM_TWO_ID)).toBe(0);
+    expect(await teamPoints(TEAM_ONE_ID)).toBe(0);
+  });
+
   it('assigns a zone owner and logs admin control changes', async () => {
     await seedGame();
     await seedTeam();
@@ -286,6 +333,11 @@ describe('admin override routes', () => {
     const overrideEvents = await adminOverrideEvents();
     expect(overrideEvents[0]).toMatchObject({ actorType: 'admin', entityType: 'resource_ledger' });
   });
+
+  async function teamPoints(teamId: string) {
+    const rows = await testDatabase.db.select({ delta: resourceLedger.delta }).from(resourceLedger).where(eq(resourceLedger.teamId, teamId));
+    return rows.reduce((sum, row) => sum + row.delta, 0);
+  }
 
   async function adminOverrideEvents() {
     return testDatabase.db
