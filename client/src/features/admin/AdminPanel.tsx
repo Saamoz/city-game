@@ -962,7 +962,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
       <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-2xl border border-[#dde4e8] bg-[#f8fafb] px-4 py-3">
         <Toggle checked={gameForm.hideFromHome} onChange={(hideFromHome) => { setGameForm((current) => ({ ...current, hideFromHome })); }} label="Test game (hide from homepage)" />
         <Toggle checked={gameForm.allowMidgameJoin} onChange={(allowMidgameJoin) => { setGameForm((current) => ({ ...current, allowMidgameJoin })); }} label="Allow mid-game joins" />
-        <Toggle checked={gameForm.broadcastTeamLocations} onChange={(broadcastTeamLocations) => { setGameForm((current) => ({ ...current, broadcastTeamLocations })); }} label="Show teammates on the map" />
+        <Toggle checked={gameForm.broadcastTeamLocations} onChange={(broadcastTeamLocations) => { setGameForm((current) => ({ ...current, broadcastTeamLocations })); }} label="Show other teams on the map" />
         <Toggle checked={gameForm.requireGpsAccuracy} onChange={(requireGpsAccuracy) => { setGameForm((current) => ({ ...current, requireGpsAccuracy })); }} label="Block completions on poor GPS" />
         {!isPointMode ? <Toggle checked={gameForm.allowReclaimZones} onChange={(allowReclaimZones) => { setGameForm((current) => ({ ...current, allowReclaimZones })); }} label="Allow reclaiming zones" /> : null}
       </div>
