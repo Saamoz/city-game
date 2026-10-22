@@ -2,9 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { eventTypes, socketServerEventTypes, type GeoJsonPolygon } from '@city-game/shared';
-import { games, gameEvents, teams } from '../db/schema.js';
+import { challenges, games, gameEvents, teams } from '../db/schema.js';
 import { createTestApp } from '../test/create-test-app.js';
-import { createTestGame, createTestTeam } from '../test/factories.js';
+import { createTestChallenge, createTestGame, createTestTeam } from '../test/factories.js';
 import { closeTestDatabase, getTestDatabase, resetTestDatabase } from '../test/test-db.js';
 import { createZone } from '../services/spatial-service.js';
 import { transact } from '../services/resource-service.js';
@@ -93,6 +93,32 @@ describe('win condition job', () => {
         winCondition: { type: 'time_limit', duration_minutes: 60 },
       }),
     });
+  });
+
+  it('ends a point-challenge game when its time limit runs out, even with challenges left', async () => {
+    await testDatabase.db.insert(games).values(
+      createTestGame({
+        modeKey: 'point_challenge',
+        status: 'active',
+        startedAt: new Date('2026-03-31T15:00:00.000Z'),
+        winCondition: [{ type: 'time_limit', duration_minutes: 180 }],
+      }),
+    );
+    await seedTeams();
+    await testDatabase.db.insert(challenges).values(createTestChallenge({ status: 'available', zoneId: null }));
+    await awardPoints(TEAM_TWO_ID, 3);
+    app = await createTestApp({ db: testDatabase.db });
+    vi.spyOn(app.broadcaster, 'send').mockResolvedValue(1);
+
+    expect(await runWinConditionSweep(app, new Date('2026-03-31T17:59:00.000Z'))).toEqual({ endedGames: 0 });
+    expect(await runWinConditionSweep(app, new Date('2026-03-31T18:00:00.000Z'))).toEqual({ endedGames: 1 });
+
+    const [endedEvent] = await testDatabase.db
+      .select({ meta: gameEvents.meta })
+      .from(gameEvents)
+      .where(eq(gameEvents.eventType, eventTypes.gameEnded))
+      .limit(1);
+    expect(endedEvent?.meta).toMatchObject({ reason: 'time_limit', winnerTeamId: TEAM_TWO_ID });
   });
 
   async function seedGame() {

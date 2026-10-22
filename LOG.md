@@ -378,3 +378,5 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 ## Card Shows the Long Description (2026-10-21)
 
 - Card face: the long description is shown under the short one by default instead of behind a "More info" toggle (the card had plenty of empty space). It scrolls with the rest of the card body if it's long.
+- Point-challenge games now honour the admin panel's **Time limit** win condition. The win-condition job only ever evaluated it for territory games, so a point game set to 180 minutes would never end on its own. `point-challenge/handler.ts` ends the game once `startedAt + duration` passes, ranking by points (or `awaiting_judging` if anything is judged), with reason `time_limit`. Found by a 16-player local simulation (4 teams racing the same challenges, retries, pause, mid-game join, fragments, reveal, judging), which otherwise passed.
+- Sagnik set (production): Loop/River North pins widened to 100 m (Old Ahh Camera Co 40, La Fournette 50, Soundbar 60, Hamilton 60, Library 70) since point radii have no GPS slack.

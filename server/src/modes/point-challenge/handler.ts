@@ -1,5 +1,5 @@
 import { and, asc, eq } from 'drizzle-orm';
-import { isJudgedChallengeConfig, type ScoreboardEntry, type Team } from '@city-game/shared';
+import { isJudgedChallengeConfig, type ScoreboardEntry, type Team, type WinCondition } from '@city-game/shared';
 import { challengeClaims, challenges, teams } from '../../db/schema.js';
 import { hasJudging, publishJudgingIfDecided } from '../../services/judging-service.js';
 import { getAllBalances } from '../../services/resource-service.js';
@@ -30,7 +30,7 @@ export function createPointChallengeModeHandler(): ModeHandler {
         rank: 0,
       })));
     },
-    async checkWinCondition({ db, game }) {
+    async checkWinCondition({ db, game, now = new Date() }) {
       const [rows, teamRows, submissions] = await Promise.all([
         db.select({ id: challenges.id, status: challenges.status, config: challenges.config }).from(challenges).where(eq(challenges.gameId, game.id)),
         db.select({ id: teams.id }).from(teams).where(eq(teams.gameId, game.id)),
@@ -45,7 +45,10 @@ export function createPointChallengeModeHandler(): ModeHandler {
       const isOpen = (row: (typeof rows)[number]) => isJudgedChallengeConfig(row.config)
         ? row.status === 'available' && (submissionCounts.get(row.id) ?? 0) < teamRows.length
         : row.status === 'available' || row.status === 'claimed';
-      if (rows.length === 0 || (regularRows.length > 0 ? regularRows : rows).some(isOpen)) {
+      // A time limit (the admin panel's "Time limit" win condition) ends the game with challenges left.
+      const timeLimit = ((game.winCondition as WinCondition[] | null) ?? []).find((condition) => condition?.type === 'time_limit');
+      const isOutOfTime = Boolean(timeLimit && game.startedAt && game.startedAt.getTime() + timeLimit.duration_minutes * 60_000 <= now.getTime());
+      if (!isOutOfTime && (rows.length === 0 || (regularRows.length > 0 ? regularRows : rows).some(isOpen))) {
         return { hasWinner: false };
       }
       // Judged points (judged challenges or judged bonuses) arrive after the game, so no winner can be named yet.
@@ -55,7 +58,7 @@ export function createPointChallengeModeHandler(): ModeHandler {
       const scoreboard = await this.computeScoreboard({ db, game });
       const winningPoints = scoreboard[0]?.resources.points ?? 0;
       const winners = scoreboard.filter((entry) => (entry.resources.points ?? 0) === winningPoints);
-      return { hasWinner: true, winnerTeamId: winners.length === 1 ? winners[0]!.team.id : null, reason: 'all_point_challenges_completed' };
+      return { hasWinner: true, winnerTeamId: winners.length === 1 ? winners[0]!.team.id : null, reason: isOutOfTime ? 'time_limit' : 'all_point_challenges_completed', ...(isOutOfTime && timeLimit ? { winCondition: timeLimit } : {}) };
     },
   };
 }
