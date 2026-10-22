@@ -237,6 +237,18 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
     }
   }, [loadZoneOptions, selectedItem, setMapId]);
 
+  // The editor holds one challenge at a time, so switching away drops unsaved edits unless the author agrees.
+  const savedItemForm = useMemo(() => selectedItem ? buildItemForm(selectedItem, setMapId || null) : { ...INITIAL_ITEM_FORM, mapId: setMapId }, [selectedItem, setMapId]);
+  const isItemDirty = JSON.stringify(itemForm) !== JSON.stringify(savedItemForm);
+  const confirmDiscardItem = () => !isItemDirty || window.confirm('Discard your unsaved changes to ' + (selectedItem ? '"' + selectedItem.title + '"' : 'the new challenge') + '?');
+
+  useEffect(() => {
+    if (!isItemDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [isItemDirty]);
+
   const handleSelectSet = async (challengeSet: ChallengeSet) => {
     setCurrentSet(challengeSet);
     setSetForm(buildSetForm(challengeSet));
@@ -336,6 +348,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
   };
 
   const handleCreateItem = () => {
+    if (!confirmDiscardItem()) return;
     if (!currentSet) {
       setNotice({ tone: 'info', message: 'Create a challenge set first.' });
       return;
@@ -641,7 +654,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                     'w-full rounded-[1.25rem] border px-4 py-3 text-left transition',
                     isActive ? 'border-[#24343a] bg-[#fff8eb] shadow-[0_10px_28px_rgba(36,52,58,0.12)]' : 'border-[#d6c59d]/55 bg-[#f7efdc] hover:bg-[#fbf3e2]',
                   ].join(' ')}
-                  onClick={() => void handleSelectSet(challengeSet)}
+                  onClick={() => { if (challengeSet.id !== currentSet?.id && confirmDiscardItem()) void handleSelectSet(challengeSet); }}
                   type="button"
                 >
                   <p className="font-semibold text-[#24343a]">{challengeSet.name}</p>
@@ -728,7 +741,7 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
                           active ? 'border-[#24343a] bg-[#fff8eb] shadow-[0_10px_24px_rgba(36,52,58,0.1)]' : 'border-[#d6c59d]/55 bg-white/60 hover:bg-[#fff8eb]',
                         ].join(' ')}
                       >
-                        <button className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 text-left 2xl:grid-cols-[1.75rem_minmax(0,1fr)_minmax(9rem,13rem)_4.5rem]" onClick={() => setSelectedItemId(item.id)} type="button">
+                        <button className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 text-left 2xl:grid-cols-[1.75rem_minmax(0,1fr)_minmax(9rem,13rem)_4.5rem]" onClick={() => { if (item.id !== selectedItemId && confirmDiscardItem()) setSelectedItemId(item.id); }} type="button">
                           <span className="hidden pt-0.5 font-[Georgia,Times_New_Roman,serif] text-sm text-[#9a8a68] 2xl:block">{index + 1}</span>
                           <span className="min-w-0">
                             <span className="flex flex-wrap items-center gap-1.5">
@@ -889,6 +902,11 @@ export function AdminChallenges({ initialChallengeSetId }: AdminChallengesProps)
             ) : null}
 
             <button className="mt-2 w-full rounded-2xl border border-[#24343a] bg-[#24343a] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-[#f4ead7] disabled:cursor-not-allowed disabled:opacity-50" disabled={isSavingItem || !currentSet || hasUnsavedSetPlacement} onClick={() => void handleSaveItem()} type="button">{selectedItem ? 'Save Item' : 'Create Item'}</button>
+            {isItemDirty && selectedItem ? (
+              <p className="text-center text-xs font-semibold text-[#9a5b1c]">
+                Unsaved changes · <button className="underline underline-offset-2" onClick={() => setItemForm(savedItemForm)} type="button">discard</button>
+              </p>
+            ) : null}
           </div>
         </aside>
       </div>

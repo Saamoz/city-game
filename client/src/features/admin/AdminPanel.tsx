@@ -25,6 +25,7 @@ import {
   createGameDefinition,
   createTeamDefinition,
   deleteGameDefinition,
+  getActiveGame,
   getGame,
   getScoreboard,
   getTeams,
@@ -49,6 +50,7 @@ type NoticeTone = 'info' | 'success' | 'error';
 type PanelStatus = 'loading' | 'ready' | 'error';
 type LifecycleTransition = 'start' | 'pause' | 'resume' | 'end';
 type WinConditionKind = 'all_zones' | 'zone_majority' | 'time_limit';
+type AdminTab = 'setup' | 'live' | 'results';
 
 interface NoticeState {
   tone: NoticeTone;
@@ -79,14 +81,14 @@ interface TeamDraftState {
 
 const INITIAL_GAME_FORM: GameFormState = {
   name: '',
-  modeKey: 'territory',
+  modeKey: 'point_challenge',
   mapId: '',
   challengeSetId: '',
   winConditionType: 'all_zones',
   zoneMajorityThreshold: '60',
   timeLimitMinutes: '60',
   activeChallengeCount: '3',
-  dealAllChallenges: false,
+  dealAllChallenges: true,
   hideFromHome: false,
   requireGpsAccuracy: false,
   broadcastTeamLocations: true,
@@ -130,6 +132,14 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
   const [selectedZoneOwnerTeamId, setSelectedZoneOwnerTeamId] = useState('');
   const [selectedPlayerId, setSelectedPlayerId] = useState('');
   const [selectedPlayerTeamId, setSelectedPlayerTeamId] = useState('');
+  const [tab, setTab] = useState<AdminTab>('setup');
+  // The game players land on at the site's main address, so the list can flag it.
+  const [homepageGameId, setHomepageGameId] = useState<string | null>(null);
+  const [isFinishedListOpen, setIsFinishedListOpen] = useState(false);
+  const [isSelectingForDelete, setIsSelectingForDelete] = useState(false);
+  const [gamesToDelete, setGamesToDelete] = useState<Set<string>>(() => new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isDuplicating, setIsDuplicating] = useState(false);
 
   const playerCountByTeamId = useMemo(() => {
     const counts = new Map<string, number>();
@@ -162,6 +172,15 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     [challengeSets, gameForm.challengeSetId],
   );
   const canEditSetupBindings = !currentGame || currentGame.status === 'setup';
+  const isPointMode = gameForm.modeKey === 'point_challenge';
+  const isGameFormDirty = currentGame ? !isSameForm(gameForm, buildGameForm(currentGame)) : gameForm.name.trim() !== '';
+  const dirtyTeamIds = teams.filter((team) => { const draft = teamEdits[team.id]; return draft && (draft.name !== team.name || draft.color !== team.color); }).map((team) => team.id);
+  const hasUnsavedChanges = isGameFormDirty || dirtyTeamIds.length > 0 || teamDraft.name.trim() !== '';
+  const currentGames = games.filter((game) => game.status !== 'completed');
+  const finishedGames = games.filter((game) => game.status === 'completed');
+
+  // Unsaved game settings or team edits are lost when another game is opened, so ask first.
+  const confirmDiscard = () => !hasUnsavedChanges || window.confirm('You have unsaved changes' + (currentGame ? ' to ' + currentGame.name : '') + '. Discard them?');
 
   const syncRoute = useCallback((gameId: string | null) => {
     if (typeof window === 'undefined') {
@@ -176,7 +195,8 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     setTeamEdits(Object.fromEntries(nextTeams.map((team) => [team.id, { name: team.name, color: team.color }])));
   }, []);
 
-  const loadGameBundle = useCallback(async (gameId: string) => {
+  // keepDrafts: a background refresh keeps unsaved game settings and team edits instead of overwriting them.
+  const loadGameBundle = useCallback(async (gameId: string, { keepDrafts = false }: { keepDrafts?: boolean } = {}) => {
     const [game, nextTeams, nextPlayers, nextZones, nextChallenges, nextScoreboard] = await Promise.all([
       getGame(gameId),
       getTeams(gameId),
@@ -187,17 +207,33 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     ]);
 
     setCurrentGame(game);
-    setGameForm(buildGameForm(game));
+    if (!keepDrafts) {
+      setGameForm(buildGameForm(game));
+      setTeamDraft({ name: '', color: nextTeamColor(nextTeams, INITIAL_TEAM_DRAFT.color) });
+    }
     setTeams(nextTeams);
     setPlayers(nextPlayers);
     setZones(nextZones);
     setChallenges(nextChallenges);
     setScoreboard(nextScoreboard);
-    hydrateTeamEdits(nextTeams);
+    if (keepDrafts) {
+      setTeamEdits((current) => Object.fromEntries(nextTeams.map((team) => [team.id, current[team.id] ?? { name: team.name, color: team.color }])));
+    } else {
+      hydrateTeamEdits(nextTeams);
+    }
     setSelectedChallengeId((current) => nextChallenges.some((entry) => entry.id === current) ? current : (nextChallenges[0]?.id ?? ''));
     setSelectedZoneId((current) => nextZones.some((entry) => entry.id === current) ? current : (nextZones[0]?.id ?? ''));
     setSelectedPlayerId((current) => nextPlayers.some((entry) => entry.id === current) ? current : (nextPlayers[0]?.id ?? ''));
+    return game;
   }, [hydrateTeamEdits]);
+
+  const loadHomepageGame = useCallback(async () => {
+    try {
+      setHomepageGameId((await getActiveGame()).id);
+    } catch {
+      setHomepageGameId(null);
+    }
+  }, []);
 
   const loadPanel = useCallback(async (preferredGameId?: string | null) => {
     setStatus('loading');
@@ -211,6 +247,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
       const knownGameId = preferredGameId?.trim() || null;
       const earlyBundle = knownGameId ? loadGameBundle(knownGameId) : null;
       earlyBundle?.catch(() => undefined);
+      void loadHomepageGame();
 
       const [nextGames, nextMaps, nextChallengeSets] = await Promise.all([
         listGames(),
@@ -245,17 +282,19 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
         setSelectedZoneOwnerTeamId('');
         setSelectedPlayerId('');
         setSelectedPlayerTeamId('');
+        setTab('setup');
         setStatus('ready');
         return;
       }
 
-      await (earlyBundle ?? loadGameBundle(resolvedGameId));
+      const loadedGame = await (earlyBundle ?? loadGameBundle(resolvedGameId));
+      setTab(tabForStatus(loadedGame.status));
       setStatus('ready');
     } catch (error) {
       setStatus('error');
       setErrorMessage(getApiErrorMessage(error));
     }
-  }, [loadGameBundle, syncRoute]);
+  }, [loadGameBundle, loadHomepageGame, syncRoute]);
 
   const refreshCurrentGame = useCallback(async () => {
     if (!selectedGameId) {
@@ -266,13 +305,14 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     try {
       const nextGames = await listGames();
       setGames(nextGames);
-      await loadGameBundle(selectedGameId);
+      void loadHomepageGame();
+      await loadGameBundle(selectedGameId, { keepDrafts: true });
     } catch (error) {
       setNotice({ tone: 'error', message: getApiErrorMessage(error) });
     } finally {
       setIsRefreshing(false);
     }
-  }, [loadGameBundle, selectedGameId]);
+  }, [loadGameBundle, loadHomepageGame, selectedGameId]);
 
   useEffect(() => {
     void loadPanel(initialGameId);
@@ -281,6 +321,13 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
   useEffect(() => {
     syncRoute(selectedGameId);
   }, [selectedGameId, syncRoute]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [hasUnsavedChanges]);
 
   useEffect(() => {
     if (!zones.length) {
@@ -301,12 +348,13 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
   }, [players, selectedPlayerId]);
 
   const handleSelectGame = async (gameId: string) => {
+    if (gameId === selectedGameId || !confirmDiscard()) return;
     setSelectedGameId(gameId);
     setIsDeleteGameArmed(false);
     setNotice(null);
     setIsRefreshing(true);
     try {
-      await loadGameBundle(gameId);
+      setTab(tabForStatus((await loadGameBundle(gameId)).status));
     } catch (error) {
       setNotice({ tone: 'error', message: getApiErrorMessage(error) });
     } finally {
@@ -315,6 +363,8 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
   };
 
   const handleCreateDraft = () => {
+    if (!confirmDiscard()) return;
+    setTab('setup');
     setIsDeleteGameArmed(false);
     setSelectedGameId(null);
     setCurrentGame(null);
@@ -334,7 +384,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     setSelectedZoneOwnerTeamId('');
     setSelectedPlayerId('');
     setSelectedPlayerTeamId('');
-    setNotice({ tone: 'info', message: 'New game draft: fill in the name, map and challenge set below, then tap Create Game.' });
+    setNotice({ tone: 'info', message: 'New game: fill in the details below, then tap Create game.' });
   };
 
   const handleSaveGame = async () => {
@@ -347,7 +397,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
       setNotice({ tone: 'error', message: 'Choose an authored map.' });
       return;
     }
-    if (playabilityByMapId.get(gameForm.mapId)?.isPlayable === false) {
+    if (!isPointMode && playabilityByMapId.get(gameForm.mapId)?.isPlayable === false) {
       setNotice({ tone: 'error', message: 'Choose a playable map before saving the game.' });
       return;
     }
@@ -403,6 +453,8 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
       setCurrentGame(updatedGame);
       setGames((current) => upsertById(current, updatedGame));
       await loadGameBundle(updatedGame.id);
+      setTab(tabForStatus(updatedGame.status));
+      void loadHomepageGame();
       const lifecycleMessage = transition === 'end'
         ? 'Game finished. Results and recap are now available.'
         : `Game ${{ start: 'started', pause: 'paused', resume: 'resumed' }[transition as 'start' | 'pause' | 'resume']}.`;
@@ -460,6 +512,66 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     }
   };
 
+  // A new game in setup with this one's settings and teams. Players, progress and clue pictures stay behind.
+  const handleDuplicateGame = async () => {
+    if (!currentGame || !confirmDiscard()) return;
+    setIsDuplicating(true);
+    try {
+      const { feature_results_on_home: _featured, challenge_total_count: _total, ...settings } = currentGame.settings as JsonObject;
+      const copy = await createGameDefinition({
+        name: currentGame.name + ' (copy)',
+        modeKey: currentGame.modeKey,
+        mapId: currentGame.mapId,
+        challengeSetId: currentGame.challengeSetId,
+        winCondition: currentGame.winCondition,
+        settings,
+      });
+      for (const team of teams) {
+        await createTeamDefinition(copy.id, { name: team.name, color: team.color });
+      }
+      setGames(await listGames());
+      setSelectedGameId(copy.id);
+      setIsDeleteGameArmed(false);
+      await loadGameBundle(copy.id);
+      setTab('setup');
+      setNotice({ tone: 'success', message: 'Created ' + copy.name + (teams.length ? ' with ' + teams.length + ' teams.' : '.') + ' Rename it and add clue pictures before starting.' });
+    } catch (error) {
+      setNotice({ tone: 'error', message: getApiErrorMessage(error) });
+    } finally {
+      setIsDuplicating(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = finishedGames.filter((game) => gamesToDelete.has(game.id)).map((game) => game.id);
+    if (!ids.length || !window.confirm('Permanently delete ' + ids.length + ' finished ' + (ids.length === 1 ? 'game' : 'games') + '? Results, players and history are removed. Maps and challenge sets are kept.')) return;
+    setIsBulkDeleting(true);
+    try {
+      for (const id of ids) await deleteGameDefinition(id);
+      setGamesToDelete(new Set());
+      setIsSelectingForDelete(false);
+      const keepSelected = selectedGameId && !ids.includes(selectedGameId) ? selectedGameId : null;
+      await loadPanel(keepSelected);
+      setNotice({ tone: 'success', message: 'Deleted ' + ids.length + (ids.length === 1 ? ' game.' : ' games.') });
+    } catch (error) {
+      setNotice({ tone: 'error', message: getApiErrorMessage(error) });
+      setGames(await listGames().catch(() => games));
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
+  const handleCopyGameLink = async () => {
+    if (!currentGame) return;
+    const link = window.location.origin + '/game/' + currentGame.id;
+    try {
+      await navigator.clipboard.writeText(link);
+      setNotice({ tone: 'success', message: 'Game link copied: ' + link });
+    } catch {
+      window.prompt('Copy the game link', link);
+    }
+  };
+
   const handleCreateTeam = async () => {
     if (!currentGame) {
       setNotice({ tone: 'error', message: 'Create or select a game first.' });
@@ -478,10 +590,9 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
         name,
         color: teamDraft.color,
       });
-      const nextTeams = [...teams, team];
-      setTeams(nextTeams);
-      hydrateTeamEdits(nextTeams);
-      setTeamDraft(INITIAL_TEAM_DRAFT);
+      setTeams((current) => [...current, team]);
+      setTeamEdits((current) => ({ ...current, [team.id]: { name: team.name, color: team.color } }));
+      setTeamDraft((current) => ({ name: '', color: nextTeamColor([...teams, team], current.color) }));
       setNotice({ tone: 'success', message: 'Team created.' });
       await refreshCurrentGame();
     } catch (error) {
@@ -502,9 +613,8 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
         name: draft.name.trim(),
         color: draft.color,
       });
-      const nextTeams = teams.map((team) => team.id === teamId ? updated : team);
-      setTeams(nextTeams);
-      hydrateTeamEdits(nextTeams);
+      setTeams((current) => current.map((team) => team.id === teamId ? updated : team));
+      setTeamEdits((current) => ({ ...current, [teamId]: { name: updated.name, color: updated.color } }));
       setNotice({ tone: 'success', message: 'Team updated.' });
     } catch (error) {
       setNotice({ tone: 'error', message: getApiErrorMessage(error) });
@@ -595,6 +705,9 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
   const selectedChallenge = challenges.find((challenge) => challenge.id === selectedChallengeId) ?? null;
   const selectedZone = zones.find((zone) => zone.id === selectedZoneId) ?? null;
   const selectedPlayer = players.find((player) => player.id === selectedPlayerId) ?? null;
+  const completedChallengeCount = challenges.filter((challenge) => challenge.status === 'completed').length;
+  const isLive = currentGame?.status === 'active' || currentGame?.status === 'paused';
+  const isTerritoryGame = currentGame ? currentGame.modeKey === 'territory' : !isPointMode;
 
   if (status === 'loading') {
     return <AdminLoading />;
@@ -619,6 +732,459 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     );
   }
 
+  const renderGameButton = (game: Game, selectable: boolean) => {
+    const isSelected = selectedGameId === game.id;
+    const isMarked = gamesToDelete.has(game.id);
+    return (
+      <button
+        key={game.id}
+        type="button"
+        onClick={() => {
+          if (selectable) {
+            setGamesToDelete((current) => { const next = new Set(current); if (next.has(game.id)) next.delete(game.id); else next.add(game.id); return next; });
+            return;
+          }
+          void handleSelectGame(game.id);
+        }}
+        className={[
+          'w-full rounded-2xl border px-3 py-3 text-left transition',
+          selectable
+            ? (isMarked ? 'border-[#b94b3f] bg-[#fff2ef] text-[#1d2830]' : 'border-[#d8e0e5] bg-[#f8fafb] text-[#1d2830]')
+            : isSelected
+              ? 'border-[#1f2f36] bg-[#1f2f36] text-white'
+              : 'border-[#d8e0e5] bg-[#f8fafb] text-[#1d2830] hover:border-[#aab8c0] hover:bg-white',
+        ].join(' ')}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-2">
+            {selectable ? <span aria-hidden="true" className={['mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded border text-[10px]', isMarked ? 'border-[#9b352c] bg-[#9b352c] text-white' : 'border-[#9aabb5] bg-white'].join(' ')}>{isMarked ? '✓' : ''}</span> : null}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{game.name}</p>
+              <p className={isSelected && !selectable ? 'mt-1 text-xs text-white/76' : 'mt-1 text-xs text-[#60707a]'}>
+                {GAME_MODE_LABELS[game.modeKey]}{game.settings.hide_from_home === true ? ' · test' : ''}
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <StatusBadge status={game.status} />
+            {homepageGameId === game.id ? <span className="rounded-full bg-[#2f6d57] px-2 py-0.5 text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-white">On homepage</span> : null}
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  const standingsCard = (
+    <PanelCard title={currentGame?.status === 'completed' ? 'Final standings' : 'Standings'}>
+      <div className="space-y-2">
+        {scoreboard.map((entry) => (
+          <div key={entry.team.id} className="flex items-center justify-between rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] px-4 py-3">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-semibold text-[#596870]">#{entry.rank}</span>
+              <span className="h-3.5 w-3.5 rounded-full border border-black/10" style={{ backgroundColor: entry.team.color }} />
+              <div>
+                <p className="text-sm font-semibold text-[#182126]">{entry.team.name}</p>
+                <p className="text-xs text-[#64727a]">{playerCountByTeamId.get(entry.team.id) ?? 0} players</p>
+              </div>
+            </div>
+            <p className="text-sm font-semibold text-[#182126]">{currentGame?.modeKey === 'point_challenge' ? (entry.resources.points ?? 0) + ' pts' : entry.zoneCount + ' zones'}</p>
+          </div>
+        ))}
+        {scoreboard.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[#cad3d9] bg-[#f8fafb] px-4 py-8 text-sm text-[#5d6a72]">
+            Standings appear once the game has teams.
+          </div>
+        ) : null}
+      </div>
+    </PanelCard>
+  );
+
+  const clueCard = currentGame ? (
+    <AdminClue
+      game={currentGame}
+      onGameChange={(game) => {
+        setCurrentGame(game);
+        setGames((current) => upsertById(current, game));
+      }}
+    />
+  ) : null;
+
+  const deleteCard = (
+    <PanelCard title="Delete game">
+      <p className="text-sm text-[#5f6d74]">Permanently removes results, location history, players, teams and events. Maps and challenge sets are kept.</p>
+      <button
+        type="button"
+        onClick={() => { void handleDeleteGame(); }}
+        disabled={!currentGame || isLive || isDeletingGame}
+        className="mt-3 rounded-full border border-[#b94b3f] px-4 py-2 text-sm font-semibold text-[#9b352c] transition hover:bg-[#fff2ef] disabled:cursor-not-allowed disabled:border-[#cbd3d8] disabled:text-[#8b969c]"
+      >
+        {isDeletingGame ? 'Deleting…' : isDeleteGameArmed ? 'Confirm permanent delete' : 'Permanently delete'}
+      </button>
+      {isLive ? <p className="mt-2 text-xs text-[#7a858b]">Finish the game before deleting it.</p> : null}
+    </PanelCard>
+  );
+
+  const settingsCard = (
+    <PanelCard
+      title={currentGame ? 'Game settings' : 'New game'}
+      subtitle={currentGame ? undefined : 'Pick the challenge set and how the game ends, then create it. Teams and clue pictures come next.'}
+      action={isGameFormDirty && currentGame ? <span className="rounded-full bg-[#faf4e6] px-3 py-1 text-xs font-semibold text-[#9f6f0a]">Unsaved changes</span> : null}
+    >
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Field label="Game name">
+          <input
+            value={gameForm.name}
+            onChange={(event) => { setGameForm((current) => ({ ...current, name: event.target.value })); }}
+            className={inputClassName}
+            placeholder="Sagnik's Birthday Hunt"
+          />
+        </Field>
+        <Field label="Mode">
+          {canEditSetupBindings ? (
+            <select
+              value={gameForm.modeKey}
+              onChange={(event) => {
+                const modeKey = event.target.value as Game['modeKey'];
+                // Zone majority only exists in Turf War.
+                setGameForm((current) => ({ ...current, modeKey, winConditionType: modeKey === 'point_challenge' && current.winConditionType === 'zone_majority' ? 'all_zones' : current.winConditionType }));
+              }}
+              className={inputClassName}
+            >
+              {GAME_MODE_KEYS.map((modeKey) => (
+                <option key={modeKey} value={modeKey}>{GAME_MODE_LABELS[modeKey]}</option>
+              ))}
+            </select>
+          ) : <LockedValue value={GAME_MODE_LABELS[gameForm.modeKey]} />}
+        </Field>
+        <Field label="Map">
+          {canEditSetupBindings ? (
+            <select
+              value={gameForm.mapId}
+              onChange={(event) => {
+                const mapId = event.target.value;
+                // A set written for another city doesn't carry over to the new map.
+                setGameForm((current) => {
+                  const currentSet = challengeSets.find((entry) => entry.id === current.challengeSetId);
+                  return { ...current, mapId, challengeSetId: currentSet && !challengeSetFitsMap(currentSet, mapId) ? '' : current.challengeSetId };
+                });
+              }}
+              className={inputClassName}
+            >
+              <option value="">Select a map</option>
+              {maps.map((map) => {
+                // Only Turf War plays on the zones, so only it cares whether they form a valid board.
+                const unplayable = !isPointMode && playabilityByMapId.get(map.id)?.isPlayable === false;
+                return (
+                  <option disabled={unplayable} key={map.id} value={map.id}>
+                    {map.name}{unplayable ? ' — ' + mapPlayabilityLabel(playabilityByMapId.get(map.id)?.reason ?? null) : ''}
+                  </option>
+                );
+              })}
+            </select>
+          ) : <LockedValue value={selectedMap?.name ?? 'No map'} />}
+        </Field>
+        <Field label="Challenge set">
+          {canEditSetupBindings ? (
+            <select
+              value={gameForm.challengeSetId}
+              onChange={(event) => {
+                const challengeSetId = event.target.value;
+                // A set written for a city brings its map along.
+                setGameForm((current) => ({ ...current, challengeSetId, mapId: challengeSets.find((entry) => entry.id === challengeSetId)?.mapId ?? current.mapId }));
+              }}
+              className={inputClassName}
+            >
+              <option value="">Select a set</option>
+              {challengeSetOptions.map((challengeSet) => (
+                <option key={challengeSet.id} value={challengeSet.id}>{challengeSet.name}{challengeSet.mapId ? '' : ' (any city)'}</option>
+              ))}
+            </select>
+          ) : <LockedValue value={selectedChallengeSet?.name ?? 'No set'} />}
+        </Field>
+        <Field label="Challenges in play">
+          <label className="flex items-center gap-2 py-2.5 text-sm font-medium text-[#21313a]">
+            <input
+              type="checkbox"
+              checked={gameForm.dealAllChallenges}
+              onChange={(event) => { setGameForm((current) => ({ ...current, dealAllChallenges: event.target.checked })); }}
+              className="h-4 w-4 rounded border-[#9aabb5]"
+            />
+            Show every challenge from the start
+          </label>
+          {!gameForm.dealAllChallenges ? (
+            <div className="flex items-center gap-2 text-sm text-[#21313a]">
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={gameForm.activeChallengeCount}
+                onChange={(event) => { setGameForm((current) => ({ ...current, activeChallengeCount: event.target.value })); }}
+                className={inputClassName + ' w-24'}
+              />
+              {isPointMode ? 'anywhere challenges at a time (pinned ones always show)' : 'at a time'}
+            </div>
+          ) : null}
+        </Field>
+        <Field label="Game ends">
+          <select
+            value={gameForm.winConditionType}
+            onChange={(event) => { setGameForm((current) => ({ ...current, winConditionType: event.target.value as WinConditionKind })); }}
+            className={inputClassName}
+          >
+            {isPointMode ? (
+              <>
+                <option value="all_zones">When every challenge is done, or when you tap Finish</option>
+                <option value="time_limit">After a time limit (or when every challenge is done)</option>
+              </>
+            ) : (
+              <>
+                <option value="all_zones">When one team holds every zone</option>
+                <option value="zone_majority">When one team holds a share of the zones</option>
+                <option value="time_limit">After a time limit</option>
+              </>
+            )}
+          </select>
+          {gameForm.winConditionType === 'zone_majority' && !isPointMode ? (
+            <div className="mt-2 flex items-center gap-2 text-sm text-[#21313a]">
+              <input type="number" min={1} max={100} step={1} value={gameForm.zoneMajorityThreshold} onChange={(event) => { setGameForm((current) => ({ ...current, zoneMajorityThreshold: event.target.value })); }} className={inputClassName + ' w-24'} />
+              % of zones
+            </div>
+          ) : null}
+          {gameForm.winConditionType === 'time_limit' ? (
+            <div className="mt-2 flex items-center gap-2 text-sm text-[#21313a]">
+              <input type="number" min={1} step={1} value={gameForm.timeLimitMinutes} onChange={(event) => { setGameForm((current) => ({ ...current, timeLimitMinutes: event.target.value })); }} className={inputClassName + ' w-24'} />
+              minutes from the start (players don't see a countdown)
+            </div>
+          ) : null}
+        </Field>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-2xl border border-[#dde4e8] bg-[#f8fafb] px-4 py-3">
+        <Toggle checked={gameForm.hideFromHome} onChange={(hideFromHome) => { setGameForm((current) => ({ ...current, hideFromHome })); }} label="Test game (hide from homepage)" />
+        <Toggle checked={gameForm.allowMidgameJoin} onChange={(allowMidgameJoin) => { setGameForm((current) => ({ ...current, allowMidgameJoin })); }} label="Allow mid-game joins" />
+        <Toggle checked={gameForm.broadcastTeamLocations} onChange={(broadcastTeamLocations) => { setGameForm((current) => ({ ...current, broadcastTeamLocations })); }} label="Show teammates on the map" />
+        <Toggle checked={gameForm.requireGpsAccuracy} onChange={(requireGpsAccuracy) => { setGameForm((current) => ({ ...current, requireGpsAccuracy })); }} label="Block completions on poor GPS" />
+        {!isPointMode ? <Toggle checked={gameForm.allowReclaimZones} onChange={(allowReclaimZones) => { setGameForm((current) => ({ ...current, allowReclaimZones })); }} label="Allow reclaiming zones" /> : null}
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => { void handleSaveGame(); }}
+          disabled={isSavingGame || (Boolean(currentGame) && !isGameFormDirty)}
+          className="rounded-full bg-[#1f2f36] px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#7b8a92]"
+        >
+          {isSavingGame ? 'Saving…' : currentGame ? (isGameFormDirty ? 'Save changes' : 'Saved') : 'Create game'}
+        </button>
+        {isGameFormDirty && currentGame ? (
+          <button type="button" onClick={() => { setGameForm(buildGameForm(currentGame)); }} className="text-sm font-semibold text-[#5f6d74] underline-offset-2 hover:underline">Discard</button>
+        ) : null}
+      </div>
+    </PanelCard>
+  );
+
+  const teamsCard = currentGame ? (
+    <PanelCard title="Teams" subtitle="Players pick a team when they open the game link.">
+      <div className="space-y-2">
+        {teams.map((team) => {
+          const draft = teamEdits[team.id] ?? { name: team.name, color: team.color };
+          const isDirty = dirtyTeamIds.includes(team.id);
+          return (
+            <div key={team.id} className="flex flex-wrap items-center gap-3 rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] px-3 py-2">
+              <input
+                type="color"
+                value={draft.color}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setTeamEdits((current) => ({ ...current, [team.id]: { ...draft, color: value } }));
+                }}
+                className="h-8 w-10 shrink-0 rounded-lg border border-[#d0d8dd] bg-white p-1"
+                aria-label={'Color for ' + team.name}
+              />
+              <input
+                value={draft.name}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setTeamEdits((current) => ({ ...current, [team.id]: { ...draft, name: value } }));
+                }}
+                className="min-w-0 flex-1 rounded-xl border border-[#cfd9de] bg-white px-3 py-1.5 text-sm font-semibold text-[#182126]"
+              />
+              <span className="text-xs font-semibold text-[#5f6d74]">{playerCountByTeamId.get(team.id) ?? 0} players</span>
+              {isDirty ? (
+                <button type="button" onClick={() => { void handleSaveTeam(team.id); }} className="rounded-full bg-[#1f2f36] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-white">Save</button>
+              ) : null}
+            </div>
+          );
+        })}
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-dashed border-[#cad3d9] bg-[#f8fafb] px-3 py-2">
+          <div className="flex gap-1.5">
+            {TEAM_COLOR_SWATCHES.map((color) => (
+              <button
+                key={color}
+                type="button"
+                onClick={() => { setTeamDraft((current) => ({ ...current, color })); }}
+                className={['h-7 w-7 rounded-full border-2 transition', teamDraft.color === color ? 'border-[#182126]' : 'border-transparent'].join(' ')}
+                style={{ backgroundColor: color }}
+                aria-label={'Use color ' + color}
+              />
+            ))}
+          </div>
+          <input
+            value={teamDraft.name}
+            onChange={(event) => { setTeamDraft((current) => ({ ...current, name: event.target.value })); }}
+            onKeyDown={(event) => { if (event.key === 'Enter') void handleCreateTeam(); }}
+            className="min-w-0 flex-1 rounded-xl border border-[#cfd9de] bg-white px-3 py-1.5 text-sm text-[#182126]"
+            placeholder={'Team ' + (teams.length + 1)}
+          />
+          <button
+            type="button"
+            onClick={() => { void handleCreateTeam(); }}
+            disabled={isCreatingTeam || !teamDraft.name.trim()}
+            className="rounded-full bg-[#1f2f36] px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-white disabled:cursor-not-allowed disabled:bg-[#7b8a92]"
+          >
+            {isCreatingTeam ? 'Adding…' : 'Add team'}
+          </button>
+        </div>
+      </div>
+    </PanelCard>
+  ) : null;
+
+  const lifecycleBar = currentGame ? (
+    <section className="flex flex-wrap items-center justify-between gap-3 rounded-[1.75rem] border border-[#cbd3d8] bg-white px-5 py-4 shadow-[0_20px_50px_rgba(21,31,37,0.08)]">
+      <div>
+        <p className="text-sm font-semibold text-[#182126]">
+          {currentGame.status === 'setup' ? 'Not started' : currentGame.status === 'active' ? 'Live' : currentGame.status === 'paused' ? 'Paused' : 'Finished'}
+          {challenges.length ? <span className="font-normal text-[#5f6d74]"> · {completedChallengeCount} of {challenges.length} challenges done · {players.length} players</span> : null}
+        </p>
+        <p className="mt-0.5 text-xs text-[#5f6d74]">
+          {currentGame.status === 'setup'
+            ? 'Starting copies the challenge set into the game. Teams can still be added afterwards.'
+            : currentGame.status === 'completed'
+              ? 'Scores are frozen. Judging, the clue reveal and the homepage are under Results.'
+              : 'Finish freezes the scores and sends everyone to the results screen.'}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {currentGame.status === 'setup' ? (
+          <button
+            type="button"
+            onClick={() => { void handleLifecycle('start'); }}
+            disabled={isRefreshing || isGameFormDirty || (currentGame.modeKey === 'territory' && playabilityByMapId.get(currentGame.mapId ?? '')?.isPlayable === false)}
+            title={isGameFormDirty ? 'Save or discard your settings changes first' : undefined}
+            className="rounded-full bg-[#2f6d57] px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#9fb5ab]"
+          >
+            Start game
+          </button>
+        ) : null}
+        {currentGame.status === 'active' ? <button type="button" onClick={() => { void handleLifecycle('pause'); }} disabled={isRefreshing} className={secondaryButtonClassName}>Pause</button> : null}
+        {currentGame.status === 'paused' ? <button type="button" onClick={() => { void handleLifecycle('resume'); }} disabled={isRefreshing} className={secondaryButtonClassName}>Resume</button> : null}
+        {isLive ? (
+          <button type="button" onClick={() => { void handleLifecycle('end'); }} disabled={isRefreshing} className="rounded-full bg-[#9b352c] px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">Finish game</button>
+        ) : null}
+      </div>
+    </section>
+  ) : null;
+
+  const fixesCard = currentGame ? (
+    <PanelCard title="Fixes" subtitle="These change the live game straight away and update every phone.">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">Challenge</p>
+          <div className="mt-3 space-y-3">
+            <select value={selectedChallengeId} onChange={(event) => { setSelectedChallengeId(event.target.value); }} className={inputClassName}>
+              <option value="">Select challenge</option>
+              {challenges.map((challenge) => (
+                <option key={challenge.id} value={challenge.id}>{challenge.title} — {challenge.status}</option>
+              ))}
+            </select>
+            {selectedChallenge ? <p className="text-sm text-[#5f6d74]">{selectedChallenge.description}</p> : null}
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => { void handleForceComplete(); }} disabled={!selectedChallengeId} className={secondaryButtonClassName}>Force complete</button>
+              <button type="button" onClick={() => { void handleResetChallenge(); }} disabled={!selectedChallengeId} className={secondaryButtonClassName}>Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">Player's team</p>
+          <div className="mt-3 space-y-3">
+            <select value={selectedPlayerId} onChange={(event) => { setSelectedPlayerId(event.target.value); }} className={inputClassName}>
+              <option value="">Select player</option>
+              {players.map((player) => (
+                <option key={player.id} value={player.id}>{player.displayName}</option>
+              ))}
+            </select>
+            <select value={selectedPlayerTeamId} onChange={(event) => { setSelectedPlayerTeamId(event.target.value); }} className={inputClassName}>
+              <option value="">No team</option>
+              {teams.map((team) => (
+                <option key={team.id} value={team.id}>{team.name}</option>
+              ))}
+            </select>
+            {selectedPlayer ? <p className="text-sm text-[#5f6d74]">Now on: {teams.find((team) => team.id === selectedPlayer.teamId)?.name ?? 'no team'}</p> : null}
+            <button type="button" onClick={() => { void handleMovePlayer(); }} disabled={!selectedPlayerId} className={secondaryButtonClassName}>Move player</button>
+          </div>
+        </div>
+
+        {isTerritoryGame ? (
+          <div className="rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">Zone owner</p>
+            <div className="mt-3 space-y-3">
+              <select value={selectedZoneId} onChange={(event) => { setSelectedZoneId(event.target.value); }} className={inputClassName}>
+                <option value="">Select zone</option>
+                {zones.map((zone) => (
+                  <option key={zone.id} value={zone.id}>{zone.name}</option>
+                ))}
+              </select>
+              <select value={selectedZoneOwnerTeamId} onChange={(event) => { setSelectedZoneOwnerTeamId(event.target.value); }} className={inputClassName}>
+                <option value="">Unclaimed</option>
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>{team.name}</option>
+                ))}
+              </select>
+              {selectedZone ? <p className="text-sm text-[#5f6d74]">Current owner: {teams.find((team) => team.id === selectedZone.ownerTeamId)?.name ?? 'Unclaimed'}</p> : null}
+              <button type="button" onClick={() => { void handleAssignZoneOwner(); }} disabled={!selectedZoneId} className={secondaryButtonClassName}>Apply owner</button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">Phones out of sync</p>
+          <div className="mt-3 space-y-3">
+            <p className="text-sm text-[#5f6d74]">Pushes the full game state to every connected phone.</p>
+            <button type="button" onClick={() => { void handleRebroadcast(); }} className={secondaryButtonClassName}>Resend state</button>
+          </div>
+        </div>
+      </div>
+    </PanelCard>
+  ) : null;
+
+  const challengesCard = (
+    <PanelCard title="Challenges" subtitle={challenges.length ? completedChallengeCount + ' of ' + challenges.length + ' done' : 'Challenges are copied in from the set when the game starts.'}>
+      <div className="grid gap-4 lg:grid-cols-1">
+        <CompactList
+          title=""
+          items={challenges.map((challenge) => ({
+            id: challenge.id,
+            label: challenge.title,
+            meta: challenge.status === 'available' ? (challenge.isDeckActive ? 'open' : 'queued') : challenge.status === 'completed' ? 'done' : challenge.status,
+            tone: challenge.status === 'completed' ? '#2E6F57' : challenge.status === 'claimed' ? '#C14C33' : challenge.isDeckActive ? '#c8a86b' : '#c4cbcf',
+          }))}
+        />
+        {isTerritoryGame && zones.length ? (
+          <CompactList
+            title="Zones"
+            items={zones.map((zone) => ({
+              id: zone.id,
+              label: zone.name,
+              meta: teams.find((team) => team.id === zone.ownerTeamId)?.name ?? 'Unclaimed',
+              tone: teams.find((team) => team.id === zone.ownerTeamId)?.color ?? '#c4cbcf',
+            }))}
+          />
+        ) : null}
+      </div>
+    </PanelCard>
+  );
+
   return (
     <main className="min-h-screen bg-[#eef1f3] px-4 py-4 text-[#182126] md:px-6 lg:px-8">
       <div className="mx-auto grid max-w-[1800px] gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
@@ -630,7 +1196,6 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                 <p className="text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-[#718089]">{PLATFORM_NAME} Admin</p>
               </div>
               <h1 className="mt-2 text-2xl font-semibold text-[#182126]">Game Control</h1>
-              <p className="mt-2 text-sm text-[#5b6870]">Desktop-first management for authored maps, challenge sets, and live {PLATFORM_NAME} games.</p>
             </div>
             <button
               type="button"
@@ -641,565 +1206,173 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
             </button>
           </div>
 
-
-          <div className="mt-4 rounded-2xl border border-[#d9e1e6] bg-[#f8fafb] p-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">Library Tools</p>
-            <div className="mt-3 grid gap-2">
-              <a
-                href="/admin/zones"
-                className="rounded-xl border border-[#d4dce1] bg-white px-3 py-2 text-sm font-semibold text-[#1f2f36] transition hover:border-[#aab8c0] hover:bg-[#fbfcfc]"
-              >
-                Open Zone Editor
-              </a>
-              <a
-                href="/admin/challenges"
-                className="rounded-xl border border-[#d4dce1] bg-white px-3 py-2 text-sm font-semibold text-[#1f2f36] transition hover:border-[#aab8c0] hover:bg-[#fbfcfc]"
-              >
-                Open Challenge Keeper
-              </a>
-            </div>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <a href="/admin/challenges" className="rounded-xl border border-[#d4dce1] bg-[#f8fafb] px-3 py-2 text-center text-sm font-semibold text-[#1f2f36] transition hover:border-[#aab8c0] hover:bg-white">Challenges</a>
+            <a href="/admin/zones" className="rounded-xl border border-[#d4dce1] bg-[#f8fafb] px-3 py-2 text-center text-sm font-semibold text-[#1f2f36] transition hover:border-[#aab8c0] hover:bg-white">Maps</a>
           </div>
 
           <div className="mt-5 flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">Games</p>
             <button
               type="button"
-              onClick={() => { void loadPanel(selectedGameId); }}
-              className="text-xs font-semibold uppercase tracking-[0.18em] text-[#41535c]"
+              onClick={() => { void (selectedGameId ? refreshCurrentGame() : loadPanel(null)); }}
+              disabled={isRefreshing}
+              className="text-xs font-semibold uppercase tracking-[0.18em] text-[#41535c] disabled:opacity-50"
             >
-              Refresh
+              {isRefreshing ? 'Refreshing…' : 'Refresh'}
             </button>
           </div>
           <div className="mt-3 space-y-2">
-            {games.map((game) => (
-              <button
-                key={game.id}
-                type="button"
-                onClick={() => { void handleSelectGame(game.id); }}
-                className={[
-                  'w-full rounded-2xl border px-3 py-3 text-left transition',
-                  selectedGameId === game.id
-                    ? 'border-[#1f2f36] bg-[#1f2f36] text-white'
-                    : 'border-[#d8e0e5] bg-[#f8fafb] text-[#1d2830] hover:border-[#aab8c0] hover:bg-white',
-                ].join(' ')}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold">{game.name}</p>
-                    <p className={selectedGameId === game.id ? 'mt-1 text-xs text-white/76' : 'mt-1 text-xs text-[#60707a]'}>{maps.find((map) => map.id === game.mapId)?.name ?? 'No map selected'}</p>
-                  </div>
-                  <StatusBadge status={game.status} />
-                </div>
-              </button>
-            ))}
+            {currentGames.map((game) => renderGameButton(game, false))}
             {games.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-[#c7d0d6] bg-[#f8fafb] px-3 py-6 text-sm text-[#60707a]">
-                No games yet. Create the first draft from the setup form.
-              </div>
+              <div className="rounded-2xl border border-dashed border-[#c7d0d6] bg-[#f8fafb] px-3 py-6 text-sm text-[#60707a]">No games yet. Start one with New Game.</div>
             ) : null}
           </div>
+
+          {finishedGames.length ? (
+            <div className="mt-4">
+              <div className="flex items-center justify-between">
+                <button type="button" onClick={() => { setIsFinishedListOpen((open) => !open); }} className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">
+                  {isFinishedListOpen ? '▾' : '▸'} Finished ({finishedGames.length})
+                </button>
+                {isFinishedListOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => { setIsSelectingForDelete((on) => !on); setGamesToDelete(new Set()); }}
+                    className="text-xs font-semibold uppercase tracking-[0.18em] text-[#41535c]"
+                  >
+                    {isSelectingForDelete ? 'Cancel' : 'Select'}
+                  </button>
+                ) : null}
+              </div>
+              {isFinishedListOpen ? (
+                <div className="mt-3 space-y-2">
+                  {finishedGames.map((game) => renderGameButton(game, isSelectingForDelete))}
+                  {isSelectingForDelete ? (
+                    <button
+                      type="button"
+                      onClick={() => { void handleBulkDelete(); }}
+                      disabled={!gamesToDelete.size || isBulkDeleting}
+                      className="w-full rounded-full border border-[#b94b3f] px-4 py-2 text-sm font-semibold text-[#9b352c] disabled:cursor-not-allowed disabled:border-[#cbd3d8] disabled:text-[#8b969c]"
+                    >
+                      {isBulkDeleting ? 'Deleting…' : 'Delete ' + gamesToDelete.size + ' selected'}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </aside>
 
         <section className="space-y-4">
           {notice ? <NoticeBanner notice={notice} onDismiss={() => { setNotice(null); }} /> : null}
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
-            <PanelCard
-              title={currentGame ? 'Game Setup' : 'New Game Wizard'}
-              subtitle={currentGame ? 'Maps and challenge sets are authored assets. This view binds them into a runnable game.' : 'Choose the authored map and challenge set that define this game.'}
-              action={
-                selectedGameId ? (
-                  <div className="flex gap-2">
-                    <AnchorPill href={'/game/' + selectedGameId} label="Open Game" />
-                    {currentGame?.mapId ? <AnchorPill href={'/admin/zones?mapId=' + currentGame.mapId} label="Map" /> : null}
-                    {currentGame?.challengeSetId ? <AnchorPill href={'/admin/challenges?setId=' + currentGame.challengeSetId} label="Challenges" /> : null}
-                    {currentGame?.modeKey === 'point_challenge' ? <AnchorPill href={'/admin/judging?gameId=' + selectedGameId} label="★ Judging" /> : null}
-                  </div>
-                ) : null
-              }
-            >
-              <div className="grid gap-4 lg:grid-cols-2">
-                <Field label="Game Name">
-                  <input
-                    value={gameForm.name}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, name: event.target.value })); }}
-                    className={inputClassName}
-                    placeholder="Toronto Opening Night"
-                  />
-                </Field>
-                <Field label="Mode">
-                  <select
-                    value={gameForm.modeKey}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, modeKey: event.target.value as Game['modeKey'] })); }}
-                    className={inputClassName}
-                  >
-                    {GAME_MODE_KEYS.map((modeKey) => (
-                      <option key={modeKey} value={modeKey}>{GAME_MODE_LABELS[modeKey]}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Map">
-                  <select
-                    value={gameForm.mapId}
-                    onChange={(event) => {
-                      const mapId = event.target.value;
-                      // A set written for another city doesn't carry over to the new map.
-                      setGameForm((current) => {
-                        const currentSet = challengeSets.find((entry) => entry.id === current.challengeSetId);
-                        return { ...current, mapId, challengeSetId: currentSet && !challengeSetFitsMap(currentSet, mapId) ? '' : current.challengeSetId };
-                      });
-                    }}
-                    className={inputClassName}
-                    disabled={!canEditSetupBindings}
-                  >
-                    <option value="">Select a map</option>
-                    {maps.map((map) => {
-                      const playability = playabilityByMapId.get(map.id);
-                      return (
-                        <option disabled={gameForm.modeKey === 'territory' && playability?.isPlayable === false} key={map.id} value={map.id}>
-                          {map.name}{playability?.isPlayable === false ? ' — ' + mapPlayabilityLabel(playability.reason) : ''}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </Field>
-                <Field label="Challenge Set">
-                  <select
-                    value={gameForm.challengeSetId}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, challengeSetId: event.target.value })); }}
-                    className={inputClassName}
-                    disabled={!canEditSetupBindings}
-                  >
-                    <option value="">Select a set</option>
-                    {challengeSetOptions.map((challengeSet) => (
-                      <option key={challengeSet.id} value={challengeSet.id}>{challengeSet.name}{challengeSet.mapId ? '' : ' (any city)'}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Active Deck Size">
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={gameForm.activeChallengeCount}
-                    disabled={gameForm.dealAllChallenges}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, activeChallengeCount: event.target.value })); }}
-                    className={inputClassName + ' disabled:opacity-50'}
-                  />
-                  <label className="mt-2 flex items-center gap-2 text-xs font-medium text-[#21313a]">
-                    <input
-                      type="checkbox"
-                      checked={gameForm.dealAllChallenges}
-                      onChange={(event) => { setGameForm((current) => ({ ...current, dealAllChallenges: event.target.checked })); }}
-                      className="h-4 w-4 rounded border-[#9aabb5]"
-                    />
-                    Show every challenge from the start
-                  </label>
-                </Field>
-                <Field label="Win Condition">
-                  <select
-                    value={gameForm.winConditionType}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, winConditionType: event.target.value as WinConditionKind })); }}
-                    className={inputClassName}
-                  >
-                    <option value="all_zones">All zones</option>
-                    <option value="zone_majority">Zone majority</option>
-                    <option value="time_limit">Time limit</option>
-                  </select>
-                </Field>
-                {gameForm.winConditionType === 'zone_majority' ? (
-                  <Field label="Majority Threshold (%)">
-                    <input
-                      type="number"
-                      min={1}
-                      max={100}
-                      step={1}
-                      value={gameForm.zoneMajorityThreshold}
-                      onChange={(event) => { setGameForm((current) => ({ ...current, zoneMajorityThreshold: event.target.value })); }}
-                      className={inputClassName}
-                    />
-                  </Field>
-                ) : null}
-                {gameForm.winConditionType === 'time_limit' ? (
-                  <Field label="Time Limit (minutes)">
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={gameForm.timeLimitMinutes}
-                      onChange={(event) => { setGameForm((current) => ({ ...current, timeLimitMinutes: event.target.value })); }}
-                      className={inputClassName}
-                    />
-                  </Field>
-                ) : null}
-              </div>
-
-              <div className="mt-4 flex flex-wrap items-center gap-4 rounded-2xl border border-[#dde4e8] bg-[#f8fafb] px-4 py-3">
-                <label className="flex items-center gap-3 text-sm font-medium text-[#21313a]">
-                  <input
-                    type="checkbox"
-                    checked={gameForm.requireGpsAccuracy}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, requireGpsAccuracy: event.target.checked })); }}
-                    className="h-4 w-4 rounded border-[#9aabb5]"
-                  />
-                  Require GPS accuracy gate
-                </label>
-                <label className="flex items-center gap-3 text-sm font-medium text-[#21313a]" title="The homepage keeps showing the current game; open this one by its direct link.">
-                  <input
-                    type="checkbox"
-                    checked={gameForm.hideFromHome}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, hideFromHome: event.target.checked })); }}
-                    className="h-4 w-4 rounded border-[#9aabb5]"
-                  />
-                  Test game (hide from homepage)
-                </label>
-                <label className="flex items-center gap-3 text-sm font-medium text-[#21313a]">
-                  <input
-                    type="checkbox"
-                    checked={gameForm.broadcastTeamLocations}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, broadcastTeamLocations: event.target.checked })); }}
-                    className="h-4 w-4 rounded border-[#9aabb5]"
-                  />
-                  Broadcast team locations
-                </label>
-                <label className="flex items-center gap-3 text-sm font-medium text-[#21313a]">
-                  <input
-                    type="checkbox"
-                    checked={gameForm.allowMidgameJoin}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, allowMidgameJoin: event.target.checked })); }}
-                    className="h-4 w-4 rounded border-[#9aabb5]"
-                  />
-                  Allow mid-game joins
-                </label>
-                <label className="flex items-center gap-3 text-sm font-medium text-[#21313a]">
-                  <input
-                    type="checkbox"
-                    checked={gameForm.allowReclaimZones}
-                    onChange={(event) => { setGameForm((current) => ({ ...current, allowReclaimZones: event.target.checked })); }}
-                    className="h-4 w-4 rounded border-[#9aabb5]"
-                  />
-                  Allow reclaiming zones
-                </label>
-                {selectedMap ? <MetaPill label={'Map center ' + selectedMap.centerLat.toFixed(3) + ', ' + selectedMap.centerLng.toFixed(3)} /> : null}
-                {selectedChallengeSet ? <MetaPill label={selectedChallengeSet.name} /> : null}
-                {currentGame ? <StatusBadge status={currentGame.status} /> : null}
-              </div>
-
-              <div className="mt-5 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => { void handleSaveGame(); }}
-                  disabled={isSavingGame}
-                  className="rounded-full bg-[#1f2f36] px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#7b8a92]"
-                >
-                  {isSavingGame ? 'Saving…' : currentGame ? 'Save Game' : 'Create Game'}
-                </button>
-                {!canEditSetupBindings && currentGame ? (
-                  <p className="text-sm text-[#5f6d74]">Map and challenge set bindings lock once the game leaves setup.</p>
-                ) : null}
-              </div>
-            </PanelCard>
-
-            <PanelCard title="Lifecycle" subtitle="Runtime cloning happens when the game starts. Use lifecycle controls from here after the authored assets are ready.">
-              <div className="space-y-3">
-                <LifecycleRow
-                  label="Start"
-                  description="Clone the authored map and challenge set into runtime zones and challenges."
-                  disabled={!currentGame || currentGame.status !== 'setup' || isRefreshing || playabilityByMapId.get(currentGame.mapId ?? '')?.isPlayable === false}
-                  onClick={() => { void handleLifecycle('start'); }}
-                />
-                <LifecycleRow
-                  label="Pause"
-                  description="Freeze gameplay while keeping current ownership and runtime state."
-                  disabled={!currentGame || currentGame.status !== 'active' || isRefreshing}
-                  onClick={() => { void handleLifecycle('pause'); }}
-                />
-                <LifecycleRow
-                  label="Resume"
-                  description="Return a paused game to live play."
-                  disabled={!currentGame || currentGame.status !== 'paused' || isRefreshing}
-                  onClick={() => { void handleLifecycle('resume'); }}
-                />
-                <LifecycleRow
-                  label="Finish Game"
-                  description="Freeze the final result and open the standings, final map, timeline, and movement recap."
-                  disabled={!currentGame || (currentGame.status !== 'active' && currentGame.status !== 'paused') || isRefreshing}
-                  onClick={() => { void handleLifecycle('end'); }}
-                />
-                {currentGame?.status === 'completed' ? (
-                  <div className="border-t border-[#d9e1e5] pt-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#40535c]">Public Results</p>
-                    <p className="mt-2 text-sm text-[#5f6d74]">Choose whether this finished game appears at the main website address. A live or paused game always takes priority.</p>
-                    <button
-                      type="button"
-                      onClick={() => { void handleHomepagePublishing(); }}
-                      disabled={isHomepagePublishingPending}
-                      className="mt-3 rounded-full border border-[#718991] px-4 py-2 text-sm font-semibold text-[#314952] transition hover:bg-[#f0f5f6] disabled:opacity-50"
-                    >
-                      {isHomepagePublishingPending ? 'Updating…' : currentGame.settings.feature_results_on_home === true ? 'Remove from Homepage' : 'Show Results on Homepage'}
-                    </button>
-                  </div>
-                ) : null}
-                <div className="border-t border-[#d9e1e5] pt-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#a03d32]">Permanently Delete Game</p>
-                  <p className="mt-2 text-sm text-[#5f6d74]">Permanently removes results, location history, players, teams, events, and runtime state. Authored maps and challenge sets are kept.</p>
-                  <button
-                    type="button"
-                    onClick={() => { void handleDeleteGame(); }}
-                    disabled={!currentGame || currentGame.status === 'active' || currentGame.status === 'paused' || isDeletingGame}
-                    className="mt-3 rounded-full border border-[#b94b3f] px-4 py-2 text-sm font-semibold text-[#9b352c] transition hover:bg-[#fff2ef] disabled:cursor-not-allowed disabled:border-[#cbd3d8] disabled:text-[#8b969c]"
-                  >
-                    {isDeletingGame ? 'Deleting…' : isDeleteGameArmed ? 'Confirm Permanent Delete' : 'Permanently Delete'}
-                  </button>
-                  {currentGame?.status === 'active' || currentGame?.status === 'paused' ? (
-                    <p className="mt-2 text-xs text-[#7a858b]">Finish the game before permanently deleting it.</p>
-                  ) : null}
-                </div>
-              </div>
-            </PanelCard>
-          </div>
-
-          <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-            <PanelCard title="Teams" subtitle="Join codes stay visible here. Team edits are inline and player counts update from the current roster.">
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-                <div className="space-y-3">
-                  {teams.map((team) => {
-                    const draft = teamEdits[team.id] ?? { name: team.name, color: team.color };
-                    const playerCount = playerCountByTeamId.get(team.id) ?? 0;
-                    return (
-                      <div key={team.id} className="rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <span className="h-4 w-4 rounded-full border border-black/10" style={{ backgroundColor: draft.color }} />
-                            <input
-                              value={draft.name}
-                              onChange={(event) => {
-                                const value = event.target.value;
-                                setTeamEdits((current) => ({ ...current, [team.id]: { ...draft, name: value } }));
-                              }}
-                              className="min-w-0 flex-1 rounded-xl border border-[#cfd9de] bg-white px-3 py-2 text-sm font-semibold text-[#182126]"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => { void handleSaveTeam(team.id); }}
-                            className="rounded-full border border-[#20323a] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-[#20323a]"
-                          >
-                            Save
-                          </button>
-                        </div>
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <span className="rounded-full border border-[#d8e0e5] bg-white px-3 py-1 text-xs font-semibold text-[#31414a]">Code {team.joinCode}</span>
-                          <span className="rounded-full border border-[#d8e0e5] bg-white px-3 py-1 text-xs font-semibold text-[#31414a]">Players {playerCount}</span>
-                          <input
-                            type="color"
-                            value={draft.color}
-                            onChange={(event) => {
-                              const value = event.target.value;
-                              setTeamEdits((current) => ({ ...current, [team.id]: { ...draft, color: value } }));
-                            }}
-                            className="h-9 w-12 rounded-lg border border-[#d0d8dd] bg-white p-1"
-                            aria-label={'Color for ' + team.name}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {teams.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-[#cad3d9] bg-[#f8fafb] px-4 py-8 text-sm text-[#5d6a72]">
-                      No teams yet. Add the first team from the create form.
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="rounded-2xl border border-[#d9e1e6] bg-[#f8fafb] p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#718089]">Create Team</p>
-                  <div className="mt-4 space-y-3">
-                    <Field label="Team Name">
-                      <input
-                        value={teamDraft.name}
-                        onChange={(event) => { setTeamDraft((current) => ({ ...current, name: event.target.value })); }}
-                        className={inputClassName}
-                        placeholder="Blue Line"
-                      />
-                    </Field>
-                    <Field label="Color">
-                      <div className="flex flex-wrap gap-2">
-                        {TEAM_COLOR_SWATCHES.map((color) => (
-                          <button
-                            key={color}
-                            type="button"
-                            onClick={() => { setTeamDraft((current) => ({ ...current, color })); }}
-                            className={[
-                              'h-9 w-9 rounded-full border-2 transition',
-                              teamDraft.color === color ? 'border-[#182126]' : 'border-transparent',
-                            ].join(' ')}
-                            style={{ backgroundColor: color }}
-                            aria-label={'Use color ' + color}
-                          />
-                        ))}
-                      </div>
-                    </Field>
-                    <button
-                      type="button"
-                      onClick={() => { void handleCreateTeam(); }}
-                      disabled={!currentGame || isCreatingTeam}
-                      className="w-full rounded-full bg-[#1f2f36] px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#7b8a92]"
-                    >
-                      {isCreatingTeam ? 'Creating…' : 'Add Team'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </PanelCard>
-
-            <PanelCard title="Standings" subtitle="Live ranking for the selected game mode. This is the same scoreboard the live client consumes.">
-              <div className="space-y-2">
-                {scoreboard.map((entry) => (
-                  <div key={entry.team.id} className="flex items-center justify-between rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-semibold text-[#596870]">#{entry.rank}</span>
-                      <span className="h-3.5 w-3.5 rounded-full border border-black/10" style={{ backgroundColor: entry.team.color }} />
-                      <div>
-                        <p className="text-sm font-semibold text-[#182126]">{entry.team.name}</p>
-                        <p className="text-xs text-[#64727a]">{playerCountByTeamId.get(entry.team.id) ?? 0} players</p>
-                      </div>
-                    </div>
-                    <p className="text-sm font-semibold text-[#182126]">{currentGame?.modeKey === 'point_challenge' ? 'Points ' + (entry.resources.points ?? 0) : 'Zones ' + entry.zoneCount}</p>
-                  </div>
-                ))}
-                {scoreboard.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-[#cad3d9] bg-[#f8fafb] px-4 py-8 text-sm text-[#5d6a72]">
-                    Scoreboard will populate once the game has teams.
-                  </div>
-                ) : null}
-              </div>
-            </PanelCard>
-          </div>
-
-          {currentGame && currentGame.status !== 'setup' && currentGame.modeKey === 'point_challenge' ? (
-            <a href={'/admin/judging?gameId=' + currentGame.id} className="flex items-center justify-between gap-4 rounded-[1.75rem] border border-[#cbc3dc] bg-white p-5 shadow-[0_20px_50px_rgba(21,31,37,0.08)] transition hover:border-[#8f80b8]">
-              <div>
-                <h2 className="text-lg font-semibold text-[#182126]">★ Judging</h2>
-                <p className="mt-1 text-sm text-[#5d6a72]">Mark each judged challenge yes or no. After the game, players wait for results until you show them.</p>
-              </div>
-              <span className="shrink-0 rounded-full bg-[#3f3360] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white">Open</span>
-            </a>
-          ) : null}
-
           {currentGame ? (
-            <AdminClue
-              game={currentGame}
-              onGameChange={(game) => {
-                setCurrentGame(game);
-                setGames((current) => upsertById(current, game));
-              }}
-            />
+            <header className="rounded-[1.75rem] border border-[#cbd3d8] bg-white px-5 pt-4 shadow-[0_20px_50px_rgba(21,31,37,0.08)]">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="truncate text-xl font-semibold text-[#182126]">{currentGame.name}</h2>
+                    <StatusBadge status={currentGame.status} />
+                    {homepageGameId === currentGame.id ? <span className="rounded-full bg-[#2f6d57] px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-white">On homepage</span> : null}
+                  </div>
+                  <p className="mt-1 text-sm text-[#5f6d74]">{GAME_MODE_LABELS[currentGame.modeKey]} · {selectedChallengeSet?.name ?? 'no challenge set'}{selectedMap ? ' · ' + selectedMap.name : ''}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <AnchorPill href={'/game/' + currentGame.id} label="Open game" />
+                  <button type="button" onClick={() => { void handleCopyGameLink(); }} className={pillClassName}>Copy link</button>
+                  {currentGame.challengeSetId ? <AnchorPill href={'/admin/challenges?setId=' + currentGame.challengeSetId} label="Edit challenges" /> : null}
+                  {currentGame.modeKey === 'territory' && currentGame.mapId ? <AnchorPill href={'/admin/zones?mapId=' + currentGame.mapId} label="Edit map" /> : null}
+                  <button type="button" onClick={() => { void handleDuplicateGame(); }} disabled={isDuplicating} className={pillClassName}>{isDuplicating ? 'Duplicating…' : 'Duplicate'}</button>
+                </div>
+              </div>
+              <nav className="mt-4 flex gap-1" aria-label="Game sections">
+                {(['setup', 'live', 'results'] as const).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => { setTab(key); }}
+                    aria-current={tab === key ? 'page' : undefined}
+                    className={['-mb-px rounded-t-xl border-b-2 px-4 py-2 text-sm font-semibold transition', tab === key ? 'border-[#1f2f36] text-[#182126]' : 'border-transparent text-[#6b7980] hover:text-[#182126]'].join(' ')}
+                  >
+                    {{ setup: 'Setup', live: 'Live', results: 'Results' }[key]}
+                    {key === 'setup' && hasUnsavedChanges ? <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-[#d19a1f] align-middle" aria-label="unsaved changes" /> : null}
+                  </button>
+                ))}
+              </nav>
+            </header>
           ) : null}
 
-          <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <PanelCard title="Overrides" subtitle="Operational fixes. These write straight into live game state and broadcast to connected clients.">
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">Challenges</p>
-                  <div className="mt-3 space-y-3">
-                    <select
-                      value={selectedChallengeId}
-                      onChange={(event) => { setSelectedChallengeId(event.target.value); }}
-                      className={inputClassName}
-                    >
-                      <option value="">Select challenge</option>
-                      {challenges.map((challenge) => (
-                        <option key={challenge.id} value={challenge.id}>{challenge.title} — {challenge.status}</option>
-                      ))}
-                    </select>
-                    {selectedChallenge ? <p className="text-sm text-[#5f6d74]">{selectedChallenge.description}</p> : null}
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => { void handleForceComplete(); }} disabled={!selectedChallengeId} className={secondaryButtonClassName}>Force Complete</button>
-                      <button type="button" onClick={() => { void handleResetChallenge(); }} disabled={!selectedChallengeId} className={secondaryButtonClassName}>Reset</button>
-                    </div>
-                  </div>
-                </div>
+          {!currentGame ? settingsCard : null}
 
-                <div className="rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">Zone Owner</p>
-                  <div className="mt-3 space-y-3">
-                    <select value={selectedZoneId} onChange={(event) => { setSelectedZoneId(event.target.value); }} className={inputClassName}>
-                      <option value="">Select zone</option>
-                      {zones.map((zone) => (
-                        <option key={zone.id} value={zone.id}>{zone.name}</option>
-                      ))}
-                    </select>
-                    <select value={selectedZoneOwnerTeamId} onChange={(event) => { setSelectedZoneOwnerTeamId(event.target.value); }} className={inputClassName}>
-                      <option value="">Unclaimed</option>
-                      {teams.map((team) => (
-                        <option key={team.id} value={team.id}>{team.name}</option>
-                      ))}
-                    </select>
-                    {selectedZone ? <p className="text-sm text-[#5f6d74]">Current owner: {teams.find((team) => team.id === selectedZone.ownerTeamId)?.name ?? 'Unclaimed'}</p> : null}
-                    <button type="button" onClick={() => { void handleAssignZoneOwner(); }} disabled={!selectedZoneId} className={secondaryButtonClassName}>Apply Owner</button>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">Players</p>
-                  <div className="mt-3 space-y-3">
-                    <select value={selectedPlayerId} onChange={(event) => { setSelectedPlayerId(event.target.value); }} className={inputClassName}>
-                      <option value="">Select player</option>
-                      {players.map((player) => (
-                        <option key={player.id} value={player.id}>{player.displayName}</option>
-                      ))}
-                    </select>
-                    <select value={selectedPlayerTeamId} onChange={(event) => { setSelectedPlayerTeamId(event.target.value); }} className={inputClassName}>
-                      <option value="">No team</option>
-                      {teams.map((team) => (
-                        <option key={team.id} value={team.id}>{team.name}</option>
-                      ))}
-                    </select>
-                    {selectedPlayer ? <p className="text-sm text-[#5f6d74]">Current team: {teams.find((team) => team.id === selectedPlayer.teamId)?.name ?? 'None'}</p> : null}
-                    <button type="button" onClick={() => { void handleMovePlayer(); }} disabled={!selectedPlayerId} className={secondaryButtonClassName}>Move Player</button>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">Realtime</p>
-                  <div className="mt-3 space-y-3">
-                    <p className="text-sm text-[#5f6d74]">Use this if clients drift or reconnect after major admin edits.</p>
-                    <button type="button" onClick={() => { void handleRebroadcast(); }} disabled={!currentGame} className={secondaryButtonClassName}>Rebroadcast State</button>
-                    <button type="button" onClick={() => { void refreshCurrentGame(); }} disabled={!currentGame || isRefreshing} className={secondaryButtonClassName}>Refresh Data</button>
-                  </div>
+          {currentGame && tab === 'setup' ? (
+            <>
+              {lifecycleBar}
+              <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+                {settingsCard}
+                <div className="space-y-4">
+                  {teamsCard}
+                  {currentGame.status === 'setup' ? clueCard : null}
                 </div>
               </div>
-            </PanelCard>
+              {currentGame.status === 'setup' ? deleteCard : null}
+            </>
+          ) : null}
 
-            <PanelCard title="Runtime Snapshot" subtitle="Read-only view of what the active game is carrying right now after authored assets were cloned in.">
-              <div className="grid gap-4 md:grid-cols-3">
-                <StatBlock label="Zones" value={String(zones.length)} meta={currentGame?.mapId ? 'from authored map' : 'manual'} />
-                <StatBlock label="Challenges" value={String(challenges.length)} meta={currentGame?.challengeSetId ? 'from authored set' : 'manual'} />
-                <StatBlock label="Players" value={String(players.length)} meta={teams.length + ' teams'} />
+          {currentGame && tab === 'live' ? (
+            <>
+              {lifecycleBar}
+              {currentGame.status === 'setup' ? (
+                <p className="rounded-2xl border border-dashed border-[#cad3d9] bg-white px-4 py-6 text-sm text-[#5d6a72]">The game hasn't started. Standings, challenge progress and fixes show up here once it's live.</p>
+              ) : (
+                <>
+                  <div className="grid gap-4 2xl:grid-cols-2">
+                    {standingsCard}
+                    {challengesCard}
+                  </div>
+                  {isLive ? clueCard : null}
+                  {isLive ? fixesCard : null}
+                </>
+              )}
+            </>
+          ) : null}
+
+          {currentGame && tab === 'results' ? (
+            <>
+              {currentGame.status !== 'completed' ? (
+                <p className="rounded-2xl border border-dashed border-[#cad3d9] bg-white px-4 py-6 text-sm text-[#5d6a72]">Results open once the game is finished. Finish it from the Live tab.</p>
+              ) : null}
+              <div className="grid gap-4 2xl:grid-cols-2">
+                {standingsCard}
+                <div className="space-y-4">
+                  {currentGame.modeKey === 'point_challenge' && currentGame.status !== 'setup' ? (
+                    <a href={'/admin/judging?gameId=' + currentGame.id} className="flex items-center justify-between gap-4 rounded-[1.75rem] border border-[#cbc3dc] bg-white p-5 shadow-[0_20px_50px_rgba(21,31,37,0.08)] transition hover:border-[#8f80b8]">
+                      <div>
+                        <h2 className="text-lg font-semibold text-[#182126]">★ Judging</h2>
+                        <p className="mt-1 text-sm text-[#5d6a72]">Mark each judged challenge and bonus yes or no. Players wait for results until you publish them.</p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-[#3f3360] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white">Open</span>
+                    </a>
+                  ) : null}
+                  {currentGame.status === 'completed' ? (
+                    <PanelCard title="Homepage">
+                      <p className="text-sm text-[#5f6d74]">Show this game's results at the main website address. A live or paused game always takes priority.</p>
+                      <button
+                        type="button"
+                        onClick={() => { void handleHomepagePublishing(); }}
+                        disabled={isHomepagePublishingPending}
+                        className="mt-3 rounded-full border border-[#718991] px-4 py-2 text-sm font-semibold text-[#314952] transition hover:bg-[#f0f5f6] disabled:opacity-50"
+                      >
+                        {isHomepagePublishingPending ? 'Updating…' : currentGame.settings.feature_results_on_home === true ? 'Remove from homepage' : 'Show results on homepage'}
+                      </button>
+                    </PanelCard>
+                  ) : null}
+                </div>
               </div>
-              <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                <CompactList
-                  title="Zones"
-                  items={zones.map((zone) => ({
-                    id: zone.id,
-                    label: zone.name,
-                    meta: teams.find((team) => team.id === zone.ownerTeamId)?.name ?? 'Unclaimed',
-                    tone: teams.find((team) => team.id === zone.ownerTeamId)?.color ?? '#c4cbcf',
-                  }))}
-                />
-                <CompactList
-                  title="Challenges"
-                  items={challenges.map((challenge) => ({
-                    id: challenge.id,
-                    label: challenge.title,
-                    meta: challenge.status === 'available' ? (challenge.isDeckActive ? 'active' : 'queued') : challenge.status,
-                    tone: challenge.status === 'completed' ? '#2E6F57' : challenge.status === 'claimed' ? '#C14C33' : challenge.isDeckActive ? '#c8a86b' : '#c4cbcf',
-                  }))}
-                />
-              </div>
-            </PanelCard>
-          </div>
+              {currentGame.status === 'completed' ? clueCard : null}
+              {currentGame.status === 'completed' ? deleteCard : null}
+            </>
+          ) : null}
         </section>
       </div>
     </main>
@@ -1331,24 +1504,6 @@ function StatusBadge(props: { status: Game['status'] }) {
   );
 }
 
-function MetaPill(props: { label: string }) {
-  return <span className="rounded-full border border-[#d6dee3] bg-white px-3 py-1 text-xs font-semibold text-[#43525b]">{props.label}</span>;
-}
-
-function LifecycleRow(props: { label: string; description: string; disabled: boolean; onClick: () => void }) {
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] px-4 py-3">
-      <div>
-        <p className="text-sm font-semibold text-[#182126]">{props.label}</p>
-        <p className="mt-1 text-sm text-[#5f6d74]">{props.description}</p>
-      </div>
-      <button type="button" onClick={props.onClick} disabled={props.disabled} className={secondaryButtonClassName}>
-        {props.label}
-      </button>
-    </div>
-  );
-}
-
 function NoticeBanner(props: { notice: NoticeState; onDismiss: () => void }) {
   const toneClass = {
     info: 'border-[#ced9df] bg-[#f4f8fa] text-[#31414a]',
@@ -1365,28 +1520,27 @@ function NoticeBanner(props: { notice: NoticeState; onDismiss: () => void }) {
 }
 
 function AnchorPill(props: { href: string; label: string }) {
-  return (
-    <a href={props.href} className="rounded-full border border-[#d4dce1] bg-[#f8fafb] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-[#33434c]">
-      {props.label}
-    </a>
-  );
+  return <a href={props.href} className={pillClassName}>{props.label}</a>;
 }
 
-function StatBlock(props: { label: string; value: string; meta: string }) {
+function LockedValue(props: { value: string }) {
+  return <p className="rounded-xl border border-[#e1e7ea] bg-[#f5f7f8] px-3 py-2.5 text-sm text-[#43525b]" title="Fixed once the game has started">{props.value}</p>;
+}
+
+function Toggle(props: { checked: boolean; onChange(checked: boolean): void; label: string }) {
   return (
-    <div className="rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] px-4 py-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">{props.label}</p>
-      <p className="mt-2 text-3xl font-semibold text-[#182126]">{props.value}</p>
-      <p className="mt-1 text-sm text-[#5f6d74]">{props.meta}</p>
-    </div>
+    <label className="flex items-center gap-2.5 text-sm font-medium text-[#21313a]">
+      <input type="checkbox" checked={props.checked} onChange={(event) => { props.onChange(event.target.checked); }} className="h-4 w-4 rounded border-[#9aabb5]" />
+      {props.label}
+    </label>
   );
 }
 
 function CompactList(props: { title: string; items: Array<{ id: string; label: string; meta: string; tone: string }> }) {
   return (
     <div>
-      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">{props.title}</p>
-      <div className="mt-3 max-h-[20rem] space-y-2 overflow-y-auto pr-1">
+      {props.title ? <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-[#718089]">{props.title}</p> : null}
+      <div className="max-h-[24rem] space-y-2 overflow-y-auto pr-1">
         {props.items.map((item) => (
           <div key={item.id} className="flex items-center justify-between gap-3 rounded-2xl border border-[#dbe2e7] bg-[#fbfcfc] px-3 py-2.5">
             <div className="flex min-w-0 items-center gap-3">
@@ -1401,6 +1555,20 @@ function CompactList(props: { title: string; items: Array<{ id: string; label: s
   );
 }
 
+function tabForStatus(status: Game['status']): AdminTab {
+  return status === 'setup' ? 'setup' : status === 'completed' ? 'results' : 'live';
+}
+
+function isSameForm(left: GameFormState, right: GameFormState): boolean {
+  return (Object.keys(left) as Array<keyof GameFormState>).every((key) => left[key] === right[key]);
+}
+
+// The first swatch no team uses yet, so added teams come out in different colours.
+function nextTeamColor(existing: Team[], fallback: string): string {
+  const used = new Set(existing.map((team) => team.color.toLowerCase()));
+  return TEAM_COLOR_SWATCHES.find((color) => !used.has(color.toLowerCase())) ?? fallback;
+}
+
 function challengeSetFitsMap(challengeSet: ChallengeSet, mapId: string): boolean {
   return !challengeSet.mapId || challengeSet.mapId === mapId;
 }
@@ -1412,4 +1580,5 @@ function mapPlayabilityLabel(reason: MapPlayability['reason']): string {
 }
 
 const inputClassName = 'w-full rounded-xl border border-[#cfd9de] bg-white px-3 py-2.5 text-sm text-[#182126] shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] outline-none transition focus:border-[#8094a1] focus:ring-2 focus:ring-[#c9d5dc]';
+const pillClassName = 'rounded-full border border-[#d4dce1] bg-[#f8fafb] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-[#33434c] disabled:opacity-50';
 const secondaryButtonClassName = 'rounded-full border border-[#20323a] px-3.5 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#20323a] disabled:cursor-not-allowed disabled:border-[#b5c0c6] disabled:text-[#88969d]';
