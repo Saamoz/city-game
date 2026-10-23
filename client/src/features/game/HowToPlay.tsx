@@ -18,7 +18,7 @@ interface Slide {
 const SLIDES: Slide[] = [
   {
     title: 'Explore the city',
-    body: <>This is a scavenger hunt across the city. <b>Stick together</b> as a team and complete the most challenges. <b>Uber and Lyft are banned.</b></>,
+    body: <>This is a scavenger hunt across the city <b>on bikes and public transit</b>. <b>Stick together</b> as a team and complete the most challenges. <b>Uber and Lyft are banned.</b></>,
     art: <TeamArt />,
   },
   {
