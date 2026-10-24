@@ -80,7 +80,6 @@ function createTeamLocationMarkerElement(teamColor: string): HTMLDivElement {
   colorDot.style.transform = 'translate(7px, -2px)';
   colorDot.style.boxShadow = '0 4px 10px rgba(14, 24, 29, 0.18)';
 
-  root.style.position = 'relative';
   root.append(pin, stem, colorDot);
   return root;
 }

@@ -414,3 +414,7 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 - **Players** on the completing team also get **+ Add bonus** on that challenge in the Completed tray while the game is live (`POST /challenges/:id/bonuses`, add-only; repeats are no-ops).
 - **Extra points** on the same tab: a −/+ counter per team that gives or takes away one point per tap (good spirit, penalties), during or after the game. It uses the existing `POST /admin/resources/adjust` (reason `admin_adjustment`); `GET /game/:id/point-adjustments` returns each team's points and adjustment total. The public results read the ledger, so they update straight away.
 - Both bonus paths write the points difference as `challenge_completed` for the challenge (so an admin Reopen takes them back), keep judged bonus ids and notes on the claim untouched, reject judged bonuses, and push fresh state to every player. `server/src/modes/territory/bonus-service.ts`.
+
+## Team Markers Stay Put (2026-10-24, not deployed yet)
+
+- Other teams' location markers slid around the map when zooming. Their element set `position: relative` inline, overriding Mapbox's `.mapboxgl-marker { position: absolute }`, so the markers stacked in normal flow: the first was right, the second drawn 26px low, the third 52px low, a fixed screen offset that drifts against the map as you zoom. Removed that line in `teamLocationMarkers.ts`; the small colour dot still positions against the (absolute) marker.
