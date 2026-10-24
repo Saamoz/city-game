@@ -258,6 +258,18 @@ describe('judged challenges', () => {
     expect((await setBonuses(['j1'], 'judged-id')).statusCode).toBe(400);
   });
 
+  it('lets an admin add or take away points from a team after the game', async () => {
+    await seedPointGame();
+    app = await createTestApp({ db: testDatabase.db });
+    await endGame();
+    const adjust = (delta: number, key: string) => app.inject({ method: 'POST', url: '/api/v1/admin/resources/adjust', headers: { 'idempotency-key': key }, payload: { gameId: GAME_ID, teamId: TEAM_ONE_ID, resourceType: 'points', delta } });
+    expect((await adjust(3, 'spirit-plus')).statusCode).toBe(200);
+    expect((await adjust(-5, 'spirit-minus')).statusCode).toBe(200);
+    expect(await pointsFor(TEAM_ONE_ID)).toBe(-2);
+    const summary = (await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/point-adjustments' })).json().teams;
+    expect(summary).toEqual(expect.arrayContaining([{ teamId: TEAM_ONE_ID, points: -2, adjustment: -2 }]));
+  });
+
   async function endGame() {
     const response = await app.inject({ method: 'POST', url: '/api/v1/game/' + GAME_ID + '/end', headers: { 'idempotency-key': 'end-game' } });
     expect(response.statusCode).toBe(200);

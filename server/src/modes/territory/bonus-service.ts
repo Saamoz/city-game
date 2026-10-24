@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
   errorCodes,
   eventTypes,
@@ -14,7 +14,7 @@ import {
   type ResourceLedgerEntry,
 } from '@city-game/shared';
 import type { DatabaseClient } from '../../db/connection.js';
-import { challengeClaims, challenges } from '../../db/schema.js';
+import { challengeClaims, challenges, resourceLedger } from '../../db/schema.js';
 import { AppError } from '../../lib/errors.js';
 import { appendEvents } from '../../services/event-service.js';
 import { lockGameById } from '../../services/game-service.js';
@@ -94,6 +94,22 @@ export async function listBonusTasks(db: DatabaseClient, gameId: string): Promis
         : null,
     };
   });
+}
+
+// Each team's points and how much of that came from admin adjustments (the judging page's +/- counter,
+// which posts to /admin/resources/adjust and records reason admin_adjustment).
+export async function listTeamPointAdjustments(db: DatabaseClient, gameId: string): Promise<Array<{ teamId: string; points: number; adjustment: number }>> {
+  const rows = await db
+    .select({
+      teamId: resourceLedger.teamId,
+      points: sql<number>`COALESCE(SUM(${resourceLedger.delta}), 0)::int`,
+      adjustment: sql<number>`COALESCE(SUM(${resourceLedger.delta}) FILTER (WHERE ${resourceLedger.reason} = 'admin_adjustment'), 0)::int`,
+    })
+    .from(resourceLedger)
+    .where(and(eq(resourceLedger.gameId, gameId), eq(resourceLedger.resourceType, 'points')))
+    .groupBy(resourceLedger.teamId);
+  return rows.filter((row): row is { teamId: string; points: number; adjustment: number } => Boolean(row.teamId))
+    .map((row) => ({ teamId: row.teamId, points: Number(row.points), adjustment: Number(row.adjustment) }));
 }
 
 async function lockCompletedChallenge(db: DatabaseClient, challengeId: string, gameId: string) {

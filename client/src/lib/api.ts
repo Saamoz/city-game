@@ -200,6 +200,20 @@ export async function adminSetChallengeBonuses(challengeId: string, bonusIds: st
   return apiRequest('/admin/challenges/' + challengeId + '/bonuses', { method: 'POST', body: { bonusIds } });
 }
 
+export interface TeamPointAdjustment {
+  teamId: string;
+  points: number;
+  adjustment: number;
+}
+
+export async function getPointAdjustments(gameId: string): Promise<TeamPointAdjustment[]> {
+  return (await apiRequest<{ teams: TeamPointAdjustment[] }>('/game/' + gameId + '/point-adjustments')).teams;
+}
+
+export async function adminAdjustTeamPoints(gameId: string, teamId: string, delta: number): Promise<void> {
+  await apiRequest('/admin/resources/adjust', { method: 'POST', body: { gameId, teamId, resourceType: 'points', delta } });
+}
+
 export async function getJudgingSheet(gameId: string, signal?: AbortSignal): Promise<GameJudgingSheet> {
   const response = await apiRequest<{ judging: GameJudgingSheet }>('/game/' + gameId + '/judging', { signal });
   return response.judging;

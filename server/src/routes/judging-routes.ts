@@ -3,7 +3,7 @@ import { STATE_VERSION_HEADER, socketServerEventTypes, type JsonObject, type Jud
 import { executeIdempotentMutation } from '../services/idempotency-service.js';
 import { getGameById } from '../services/game-service.js';
 import { getJudgingSheet, publishJudging, setSubmissionDecision } from '../services/judging-service.js';
-import { listBonusTasks, setChallengeBonusesAsAdmin, type ChallengeBonusChangeResult } from '../modes/territory/bonus-service.js';
+import { listBonusTasks, listTeamPointAdjustments, setChallengeBonusesAsAdmin, type ChallengeBonusChangeResult } from '../modes/territory/bonus-service.js';
 import { broadcastFullStateToGame } from '../socket/admin-sync.js';
 
 const idParamsSchema = {
@@ -47,6 +47,11 @@ export const judgingRoutes: FastifyPluginAsync = async (app) => {
   app.get('/game/:id/bonus-tasks', { preHandler: [app.requireAdmin], schema: { params: idParamsSchema } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     reply.send({ tasks: await listBonusTasks(app.db, id) });
+  });
+
+  app.get('/game/:id/point-adjustments', { preHandler: [app.requireAdmin], schema: { params: idParamsSchema } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    reply.send({ teams: await listTeamPointAdjustments(app.db, id) });
   });
 
   app.post('/admin/challenges/:id/bonuses', {

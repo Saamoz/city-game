@@ -9,7 +9,7 @@ import {
   type JudgingSubmission,
   type Team,
 } from '@city-game/shared';
-import { ApiError, adminSetChallengeBonuses, getBonusTasks, getJudgingSheet, getTeams, listGames, publishJudgedScores, setJudgingDecision, type BonusTask } from '../../lib/api';
+import { ApiError, adminAdjustTeamPoints, adminSetChallengeBonuses, getBonusTasks, getPointAdjustments, type TeamPointAdjustment, getJudgingSheet, getTeams, listGames, publishJudgedScores, setJudgingDecision, type BonusTask } from '../../lib/api';
 
 interface AdminJudgingProps {
   initialGameId: string | null;
@@ -36,6 +36,7 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
   const [isPublishing, setIsPublishing] = useState(false);
   const [bonusTasks, setBonusTasks] = useState<BonusTask[]>([]);
   const [savingChallengeIds, setSavingChallengeIds] = useState<Set<string>>(new Set());
+  const [adjustments, setAdjustments] = useState<TeamPointAdjustment[]>([]);
   // Cards you judge stay where they are until you switch tabs, so a tap never makes them jump away.
   const [keepVisible, setKeepVisible] = useState<Set<string>>(new Set());
   const switchSection = (next: Section) => { setSection(next); setKeepVisible(new Set()); };
@@ -55,7 +56,8 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
 
   const load = useCallback(async (targetGameId: string) => {
     try {
-      const [nextSheet, nextTeams, nextBonusTasks] = await Promise.all([getJudgingSheet(targetGameId), getTeams(targetGameId), getBonusTasks(targetGameId)]);
+      const [nextSheet, nextTeams, nextBonusTasks, nextAdjustments] = await Promise.all([getJudgingSheet(targetGameId), getTeams(targetGameId), getBonusTasks(targetGameId), getPointAdjustments(targetGameId)]);
+      setAdjustments(nextAdjustments);
       setSheet(nextSheet);
       setTeams(nextTeams);
       setBonusTasks(nextBonusTasks);
@@ -101,11 +103,27 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
     setBonusTasks((tasks) => tasks.map((entry) => entry.challenge.id === challengeId && entry.completion ? { ...entry, completion: { ...entry.completion, bonusIds: next } } : entry));
     try {
       await adminSetChallengeBonuses(challengeId, next);
+      if (gameId) setAdjustments(await getPointAdjustments(gameId));
     } catch (reason) {
       setError(getErrorMessage(reason));
       if (gameId) void load(gameId);
     } finally {
       setSavingChallengeIds((ids) => { const rest = new Set(ids); rest.delete(challengeId); return rest; });
+    }
+  };
+
+  // Points for general good spirit (or a penalty), one tap per point. They count straight away.
+  const adjustPoints = async (teamId: string, delta: number) => {
+    if (!gameId) return;
+    setAdjustments((rows) => {
+      const existing = rows.find((row) => row.teamId === teamId) ?? { teamId, points: 0, adjustment: 0 };
+      return [...rows.filter((row) => row.teamId !== teamId), { teamId, points: existing.points + delta, adjustment: existing.adjustment + delta }];
+    });
+    try {
+      await adminAdjustTeamPoints(gameId, teamId, delta);
+    } catch (reason) {
+      setError(getErrorMessage(reason));
+      void load(gameId);
     }
   };
 
@@ -157,7 +175,7 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
           <div className="mx-auto mt-3 flex max-w-5xl gap-2">
             <SectionTab active={section === 'todo'} count={todo.length} label="To judge" onClick={() => switchSection('todo')} />
             <SectionTab active={section === 'done'} count={done.length} label="Judged" onClick={() => switchSection('done')} />
-            {bonusTasks.length ? <SectionTab active={section === 'bonuses'} count={bonusTasks.filter((task) => task.completion).length} label="Bonuses" onClick={() => switchSection('bonuses')} /> : null}
+            {teams.length ? <SectionTab active={section === 'bonuses'} count={bonusTasks.filter((task) => task.completion).length} label="Bonuses & points" onClick={() => switchSection('bonuses')} /> : null}
           </div>
         ) : null}
       </header>
@@ -166,7 +184,8 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
         {error ? <Banner tone="error">{error}</Banner> : null}
         {notice ? <Banner tone="success">{notice}</Banner> : null}
         {!sheet && !error ? <Banner tone="info">Loading…</Banner> : null}
-        {section === 'bonuses' ? <BonusTasksSection onToggle={toggleBonus} savingChallengeIds={savingChallengeIds} tasks={bonusTasks} teamById={teamById} /> : null}
+        {section === 'bonuses' ? <PointAdjustments adjustments={adjustments} onAdjust={(teamId, delta) => { void adjustPoints(teamId, delta); }} teams={teams} /> : null}
+        {section === 'bonuses' && bonusTasks.length ? <BonusTasksSection onToggle={toggleBonus} savingChallengeIds={savingChallengeIds} tasks={bonusTasks} teamById={teamById} /> : null}
         {section !== 'bonuses' && sheet && sheet.challenges.length === 0 ? <Banner tone="info">This game has no judged challenges or bonuses{bonusTasks.length ? '. Bonus tasks teams tick themselves are under Bonuses' : ''}.</Banner> : null}
         {section !== 'bonuses' && sheet && sheet.challenges.length > 0 && shown.length === 0 ? (
           <Banner tone="info">{section === 'todo' ? (done.length ? 'Everything submitted so far is judged.' : 'No team has completed a judged challenge yet.') : 'Nothing judged yet.'}</Banner>
@@ -209,6 +228,32 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
         </footer>
       ) : null}
     </main>
+  );
+}
+
+function PointAdjustments({ teams, adjustments, onAdjust }: { teams: Team[]; adjustments: TeamPointAdjustment[]; onAdjust(teamId: string, delta: number): void }) {
+  const byTeam = new Map(adjustments.map((row) => [row.teamId, row]));
+  const step = 'flex h-9 w-9 items-center justify-center rounded-full border border-[#c8b48a]/70 bg-white text-lg font-semibold text-[#3f4d52] active:scale-95';
+  return (
+    <section className="rounded-[1.4rem] border border-[#c8b48a]/55 bg-[#fff8eb] p-4 shadow-[0_10px_24px_rgba(24,32,36,0.06)]">
+      <h3 className="font-[Georgia,Times_New_Roman,serif] text-lg font-semibold">Extra points</h3>
+      <p className="mt-1 text-sm text-[#5a6a70]">Give or take away points for anything else, like good spirit. Each tap counts straight away, during or after the game.</p>
+      <div className="mt-3 divide-y divide-[#e6d9b8]">
+        {teams.map((team) => {
+          const row = byTeam.get(team.id);
+          const adjustment = row?.adjustment ?? 0;
+          return (
+            <div key={team.id} className="flex items-center gap-3 py-2">
+              <span className="h-3 w-3 shrink-0 rounded-full border border-black/10" style={{ backgroundColor: team.color }} />
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold">{team.name}<span className="ml-2 font-normal text-[#6b777b]">{row?.points ?? 0} pts</span></span>
+              <button aria-label={'Take a point from ' + team.name} className={step} onClick={() => onAdjust(team.id, -1)} type="button">−</button>
+              <span className={['w-10 text-center font-[Georgia,Times_New_Roman,serif] text-lg font-semibold', adjustment > 0 ? 'text-[#2e6f57]' : adjustment < 0 ? 'text-[#a33a2b]' : 'text-[#8a8270]'].join(' ')}>{adjustment > 0 ? '+' + adjustment : adjustment}</span>
+              <button aria-label={'Give a point to ' + team.name} className={step} onClick={() => onAdjust(team.id, 1)} type="button">+</button>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
