@@ -399,3 +399,7 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 ## Final Clue Card Collapsed (2026-10-24)
 
 - The admin panel's 🧩 Final clue card is collapsed by default (title and a Show toggle only) so the candidate pictures stay off screen while others are around; it collapses again when switching games. The Reveal button is inside, so expand it to reveal at the end.
+
+## Custom Team Colors (2026-10-24)
+
+- The Add team row in the admin panel has a rainbow swatch after the six presets that opens the browser's color picker for any color; it shows the chosen color and a selection ring when the color isn't a preset. Existing team rows already had a full picker.

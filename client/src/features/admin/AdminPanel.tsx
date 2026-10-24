@@ -1040,6 +1040,24 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                 aria-label={'Use color ' + color}
               />
             ))}
+            {(() => {
+              const isCustom = !TEAM_COLOR_SWATCHES.some((color) => color.toLowerCase() === teamDraft.color.toLowerCase());
+              return (
+                <label
+                  title="Pick any color"
+                  className={['relative h-7 w-7 cursor-pointer overflow-hidden rounded-full border-2 transition', isCustom ? 'border-[#182126]' : 'border-transparent'].join(' ')}
+                  style={{ background: isCustom ? teamDraft.color : 'conic-gradient(#e0433a, #e8c547, #4caf6a, #3a8be0, #8a4fd1, #e0433a)' }}
+                >
+                  <input
+                    type="color"
+                    value={teamDraft.color}
+                    onChange={(event) => { const color = event.target.value; setTeamDraft((current) => ({ ...current, color })); }}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    aria-label="Pick any color"
+                  />
+                </label>
+              );
+            })()}
           </div>
           <input
             value={teamDraft.name}
