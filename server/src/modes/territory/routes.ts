@@ -16,6 +16,8 @@ import { executeIdempotentMutation } from '../../services/idempotency-service.js
 import { evaluateConfiguredWinConditions } from '../../services/win-condition-service.js';
 import type { TerritoryPostCommitData } from './handler.js';
 import { toggleChallengeRerollVote, type ToggleChallengeRerollVoteResult } from './reroll-service.js';
+import { addChallengeBonuses, type ChallengeBonusChangeResult } from './bonus-service.js';
+import { broadcastFullStateToGame } from '../../socket/admin-sync.js';
 
 const challengeParamsSchema = {
   type: 'object',
@@ -323,6 +325,57 @@ export const territoryRoutes: FastifyPluginAsync = async (app) => {
               activatedChallenge: result.activatedChallenge,
             },
           });
+        },
+      );
+    },
+  );
+
+  app.post(
+    '/challenges/:id/bonuses',
+    {
+      preHandler: [app.authenticate, app.requireTeam],
+      schema: {
+        params: challengeParamsSchema,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['bonusIds'],
+          properties: { bonusIds: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string' } } },
+        },
+      },
+    },
+    async (request, reply) => {
+      let result: ChallengeBonusChangeResult | null = null;
+
+      await executeIdempotentMutation(
+        app,
+        request,
+        reply,
+        async (db) => {
+          const player = request.player;
+          if (!player?.teamId) throw new Error('Authenticated team player expected.');
+
+          result = await addChallengeBonuses(db, {
+            gameId: player.gameId,
+            challengeId: (request.params as { id: string }).id,
+            playerId: player.id,
+            teamId: player.teamId,
+            bonusIds: (request.body as { bonusIds: string[] }).bonusIds,
+          });
+
+          return {
+            gameId: result.gameId,
+            playerId: player.id,
+            statusCode: 200,
+            body: { claim: result.claim, entry: result.entry },
+            responseHeaders: (result.stateVersion === null ? {} : { [STATE_VERSION_HEADER]: String(result.stateVersion) }) as JsonObject,
+          };
+        },
+        async () => {
+          const committed = result as ChallengeBonusChangeResult | null;
+          if (!committed || committed.stateVersion === null) return;
+          // The claim's bonus list changed as well as the score, so every viewer gets fresh state.
+          await broadcastFullStateToGame(app, committed.gameId);
         },
       );
     },

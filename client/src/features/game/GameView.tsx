@@ -5,6 +5,7 @@ import {
   getBasePoints,
   getChallengeArea,
   getClaimedBonuses,
+  getSelfReportedBonuses,
   socketServerEventTypes,
   sumBonusPoints,
   type Challenge,
@@ -21,6 +22,7 @@ import {
 import {
   ApiError,
   completeChallenge,
+  addChallengeBonuses,
   toggleChallengeRerollVote,
   getMapState,
   getRecentEvents,
@@ -43,7 +45,7 @@ import { ChallengeAreaLayer, getAreaBounds, getAreaDistance, isAreaChallenge, is
 import { ClueButton, ClueOverlay, useTeamClue } from './ClueBoard';
 import { HowToPlay } from './HowToPlay';
 import { GameResultsScreen } from './GameResultsScreen';
-import { formatPoints, type CompletionExtras } from './ChallengeScoring';
+import { AddBonusSheet, formatPoints, type CompletionExtras } from './ChallengeScoring';
 import { isJudgedChallenge } from './JudgedChallenges';
 import {
   FeedOverlay,
@@ -77,6 +79,8 @@ interface CompletedCardViewModel {
   teamColor: string | null;
   zoneId: string | null;
   pointsEarned: number;
+  teamId: string | null;
+  claimedBonusIds: string[];
 }
 
 // How much of the closed deck stays on screen.
@@ -142,6 +146,7 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
   const { status: locationStatus, gpsPayload, errorMessage: locationErrorMessage, refresh: refreshLocation } = useGeolocation();
   const { runAction, isPending } = useIdempotentAction();
+  const [bonusSheetChallengeId, setBonusSheetChallengeId] = useState<string | null>(null);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -807,6 +812,20 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
     };
   }, [gameId, snapshot?.game.status, snapshot?.player?.teamId]);
 
+  const handleAddBonuses = (challengeId: string, bonusIds: string[]) => {
+    void runAction('bonus:' + challengeId, async (idempotencyKey) => {
+      try {
+        const response = await addChallengeBonuses(challengeId, bonusIds, idempotencyKey);
+        setBonusSheetChallengeId(null);
+        setToast({ tone: 'success', title: 'Bonus added', body: response.entry ? '+' + formatPoints(response.entry.delta) : undefined });
+        return response;
+      } catch (error) {
+        setToast({ tone: 'error', title: 'Could not add the bonus', body: getMutationErrorMessage(error) });
+        return null;
+      }
+    });
+  };
+
   const handleCaptureChallenge = (challengeId: string, targetZoneId: string | null, extras: CompletionExtras = {}) => {
     void runAction(`capture:${challengeId}`, async (idempotencyKey) => {
       const challenge = snapshot?.challenges.find((entry) => entry.id === challengeId) ?? null;
@@ -1323,10 +1342,13 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
               >
                 <div className="mt-3 -mx-1 overflow-x-auto [scrollbar-width:none] [touch-action:pan-x] [&::-webkit-scrollbar]:hidden">
                   <div className="flex w-max gap-3 px-1 pb-1 pr-5">
-                    {completedCards.map(({ challenge, teamName, teamColor, pointsEarned }) => (
+                    {completedCards.map(({ challenge, teamName, teamColor, pointsEarned, teamId, claimedBonusIds }) => {
+                      const canAddBonus = isPointMode && snapshot.game.status === 'active' && teamId !== null && teamId === snapshot.team?.id
+                        && getSelfReportedBonuses(challenge.config).some((bonus) => !claimedBonusIds.includes(bonus.id));
+                      return (
+                      <div key={challenge.id} className="flex min-w-[12rem] max-w-[12rem] flex-none flex-col overflow-hidden rounded-[1.2rem] border border-[#c8b48a]/45 bg-[#f7efdc] text-[#24343a] shadow-[0_10px_24px_rgba(24,32,36,0.08)]">
                       <button
-                        key={challenge.id}
-                        className="min-w-[12rem] max-w-[12rem] flex-none rounded-[1.2rem] border border-[#c8b48a]/45 bg-[#f7efdc] p-4 text-left text-[#24343a] shadow-[0_10px_24px_rgba(24,32,36,0.08)] transition hover:bg-[#fbf3e2]"
+                        className="flex-1 p-4 text-left transition hover:bg-[#fbf3e2]"
                         onClick={() => handleFocusCompletedCard(challenge.id)}
                         type="button"
                       >
@@ -1347,7 +1369,18 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
                           {(challenge.config?.['short_description'] as string | undefined) ?? challenge.description}
                         </p>
                       </button>
-                    ))}
+                      {canAddBonus ? (
+                        <button
+                          className="border-t border-[#c8b48a]/45 px-4 py-2 text-left text-[11px] font-bold uppercase tracking-[0.16em] text-[#7a5413] transition hover:bg-[#f6e3b4]"
+                          onClick={() => setBonusSheetChallengeId(challenge.id)}
+                          type="button"
+                        >
+                          + Add bonus
+                        </button>
+                      ) : null}
+                      </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -1457,6 +1490,18 @@ export function GameView({ gameId, onLeaveMap }: GameViewProps) {
 
       {clueOverlay}
       {isHowToPlayOpen ? <HowToPlay onClose={() => setIsHowToPlayOpen(false)} /> : null}
+      {(() => {
+        const card = bonusSheetChallengeId ? completedCards.find((entry) => entry.challenge.id === bonusSheetChallengeId) : null;
+        return card ? (
+          <AddBonusSheet
+            challenge={card.challenge}
+            claimedIds={card.claimedBonusIds}
+            onCancel={() => setBonusSheetChallengeId(null)}
+            onConfirm={(bonusIds) => handleAddBonuses(card.challenge.id, bonusIds)}
+            pending={isPending('bonus:' + card.challenge.id)}
+          />
+        ) : null;
+      })()}
 
       {toast ? <Toast tone={toast.tone} title={toast.title} body={toast.body} accentColor={toast.accentColor} /> : null}
     </main>
@@ -1701,6 +1746,8 @@ function buildCompletedCards(
         teamColor: team?.color ?? null,
         zoneId: challenge.zoneId ?? null,
         pointsEarned: getBasePoints(challenge.scoring) + sumBonusPoints(getClaimedBonuses(challenge.config, completedClaim?.submission)),
+        teamId: completedClaim?.teamId ?? null,
+        claimedBonusIds: getClaimedBonuses(challenge.config, completedClaim?.submission).map((bonus) => bonus.id),
       };
     });
 }

@@ -296,6 +296,34 @@ describe('territory complete route', () => {
     expect(ledger).toMatchObject({ teamId: TEAM_ONE_ID, resourceType: 'points', delta: 5 });
   });
 
+  it('lets the completing team add bonuses afterwards, once each, and nobody else', async () => {
+    await seedGame({ modeKey: 'point_challenge' }); await seedTeam();
+    await seedTeam({ id: TEAM_TWO_ID, name: 'Other Team', color: '#2563eb', joinCode: 'TEAM9999' });
+    await seedPlayer({ sessionToken: 'late-bonus-session' });
+    await seedPlayer({ id: PLAYER_TWO_ID, teamId: TEAM_TWO_ID, sessionToken: 'late-bonus-other', displayName: 'Player Two' });
+    await seedChallenge({ zoneId: null, isDeckActive: true, scoring: { points: 3 }, config: { portable: true, location_mode: 'portable', bonuses: [{ id: 'b-hat', label: 'Wear a hat', points: 2 }, { id: 'b-song', label: 'Sing it', points: 5 }, { id: 'b-art', label: 'Best art', points: 4, judged: true }] } });
+    // A second open challenge keeps the game live after the first is done.
+    await testDatabase.db.insert(challenges).values(createTestChallenge({ id: NEXT_CHALLENGE_ID, gameId: GAME_ID, zoneId: null, isDeckActive: true, sortOrder: 1, config: { portable: true, location_mode: 'portable' } }));
+    app = await createTestApp({ db: testDatabase.db });
+    const addBonuses = (sessionToken: string, actionId: string, bonusIds: string[]) => app.inject({ method: 'POST', url: `/api/v1/challenges/${CHALLENGE_ID}/bonuses`, cookies: { [SESSION_COOKIE_NAME]: sessionToken }, headers: { 'idempotency-key': actionId }, payload: { bonusIds } });
+
+    expect((await addBonuses('late-bonus-session', 'too-early', ['b-hat'])).statusCode).toBe(400);
+    expect((await completeRequest({ sessionToken: 'late-bonus-session', actionId: 'late-complete', payload: { gps: null, submission: { bonusIds: ['b-hat'] } } })).statusCode).toBe(200);
+
+    expect((await addBonuses('late-bonus-other', 'other-team', ['b-song'])).statusCode).toBe(403);
+    expect((await addBonuses('late-bonus-session', 'judged', ['b-art'])).statusCode).toBe(400);
+
+    const added = await addBonuses('late-bonus-session', 'add-song', ['b-hat', 'b-song']);
+    expect(added.statusCode).toBe(200);
+    expect(added.json()).toMatchObject({ claim: { submission: { bonusIds: ['b-hat', 'b-song'] } }, entry: { teamId: TEAM_ONE_ID, delta: 5, balanceAfter: 10 } });
+
+    const repeat = await addBonuses('late-bonus-session', 'add-song-again', ['b-song']);
+    expect(repeat.statusCode).toBe(200);
+    expect(repeat.json().entry).toBeNull();
+    const ledger = await testDatabase.db.select().from(resourceLedger).where(eq(resourceLedger.gameId, GAME_ID));
+    expect(ledger.map((row) => row.delta).sort()).toEqual([5, 5]);
+  });
+
   it('awards the default 1 point when a challenge has no points set', async () => {
     await seedGame({ modeKey: 'point_challenge' }); await seedTeam(); await seedPlayer({ sessionToken: 'default-points-session' });
     await seedChallenge({ zoneId: null, isDeckActive: true, scoring: {}, config: { portable: true, location_mode: 'portable' } });

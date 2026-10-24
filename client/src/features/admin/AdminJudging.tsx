@@ -9,13 +9,13 @@ import {
   type JudgingSubmission,
   type Team,
 } from '@city-game/shared';
-import { ApiError, getJudgingSheet, getTeams, listGames, publishJudgedScores, setJudgingDecision } from '../../lib/api';
+import { ApiError, adminSetChallengeBonuses, getBonusTasks, getJudgingSheet, getTeams, listGames, publishJudgedScores, setJudgingDecision, type BonusTask } from '../../lib/api';
 
 interface AdminJudgingProps {
   initialGameId: string | null;
 }
 
-type Section = 'todo' | 'done';
+type Section = 'todo' | 'done' | 'bonuses';
 
 const REFRESH_MS = 15_000;
 
@@ -34,6 +34,8 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
   const [notice, setNotice] = useState<string | null>(null);
   const [savingClaimIds, setSavingClaimIds] = useState<Set<string>>(new Set());
   const [isPublishing, setIsPublishing] = useState(false);
+  const [bonusTasks, setBonusTasks] = useState<BonusTask[]>([]);
+  const [savingChallengeIds, setSavingChallengeIds] = useState<Set<string>>(new Set());
   // Cards you judge stay where they are until you switch tabs, so a tap never makes them jump away.
   const [keepVisible, setKeepVisible] = useState<Set<string>>(new Set());
   const switchSection = (next: Section) => { setSection(next); setKeepVisible(new Set()); };
@@ -53,9 +55,10 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
 
   const load = useCallback(async (targetGameId: string) => {
     try {
-      const [nextSheet, nextTeams] = await Promise.all([getJudgingSheet(targetGameId), getTeams(targetGameId)]);
+      const [nextSheet, nextTeams, nextBonusTasks] = await Promise.all([getJudgingSheet(targetGameId), getTeams(targetGameId), getBonusTasks(targetGameId)]);
       setSheet(nextSheet);
       setTeams(nextTeams);
+      setBonusTasks(nextBonusTasks);
       setError(null);
     } catch (reason) {
       setError(getErrorMessage(reason));
@@ -85,6 +88,24 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
       if (gameId) void load(gameId);
     } finally {
       setSavingClaimIds((current) => { const next = new Set(current); next.delete(submission.claimId); return next; });
+    }
+  };
+
+  // Bonus tasks count as soon as they are ticked, during or after the game, with no publishing step.
+  const toggleBonus = async (task: BonusTask, bonusId: string) => {
+    if (!task.completion) return;
+    const current = task.completion.bonusIds;
+    const next = current.includes(bonusId) ? current.filter((id) => id !== bonusId) : [...current, bonusId];
+    const challengeId = task.challenge.id;
+    setSavingChallengeIds((ids) => new Set(ids).add(challengeId));
+    setBonusTasks((tasks) => tasks.map((entry) => entry.challenge.id === challengeId && entry.completion ? { ...entry, completion: { ...entry.completion, bonusIds: next } } : entry));
+    try {
+      await adminSetChallengeBonuses(challengeId, next);
+    } catch (reason) {
+      setError(getErrorMessage(reason));
+      if (gameId) void load(gameId);
+    } finally {
+      setSavingChallengeIds((ids) => { const rest = new Set(ids); rest.delete(challengeId); return rest; });
     }
   };
 
@@ -136,6 +157,7 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
           <div className="mx-auto mt-3 flex max-w-5xl gap-2">
             <SectionTab active={section === 'todo'} count={todo.length} label="To judge" onClick={() => switchSection('todo')} />
             <SectionTab active={section === 'done'} count={done.length} label="Judged" onClick={() => switchSection('done')} />
+            {bonusTasks.length ? <SectionTab active={section === 'bonuses'} count={bonusTasks.filter((task) => task.completion).length} label="Bonuses" onClick={() => switchSection('bonuses')} /> : null}
           </div>
         ) : null}
       </header>
@@ -144,12 +166,13 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
         {error ? <Banner tone="error">{error}</Banner> : null}
         {notice ? <Banner tone="success">{notice}</Banner> : null}
         {!sheet && !error ? <Banner tone="info">Loading…</Banner> : null}
-        {sheet && sheet.challenges.length === 0 ? <Banner tone="info">This game has no judged challenges or bonuses.</Banner> : null}
-        {sheet && sheet.challenges.length > 0 && shown.length === 0 ? (
+        {section === 'bonuses' ? <BonusTasksSection onToggle={toggleBonus} savingChallengeIds={savingChallengeIds} tasks={bonusTasks} teamById={teamById} /> : null}
+        {section !== 'bonuses' && sheet && sheet.challenges.length === 0 ? <Banner tone="info">This game has no judged challenges or bonuses{bonusTasks.length ? '. Bonus tasks teams tick themselves are under Bonuses' : ''}.</Banner> : null}
+        {section !== 'bonuses' && sheet && sheet.challenges.length > 0 && shown.length === 0 ? (
           <Banner tone="info">{section === 'todo' ? (done.length ? 'Everything submitted so far is judged.' : 'No team has completed a judged challenge yet.') : 'Nothing judged yet.'}</Banner>
         ) : null}
 
-        {shown.map((entry) => (
+        {section !== 'bonuses' && shown.map((entry) => (
           <ChallengeCard
             key={entry.challenge.id}
             entry={entry}
@@ -186,6 +209,56 @@ export function AdminJudging({ initialGameId }: AdminJudgingProps) {
         </footer>
       ) : null}
     </main>
+  );
+}
+
+// Self-reported bonus tasks on completed challenges. Ticking or unticking one changes the team's
+// score straight away, so a bonus a team forgot (or did later) can be added during or after the game.
+function BonusTasksSection({ tasks, teamById, savingChallengeIds, onToggle }: { tasks: BonusTask[]; teamById: Map<string, Team>; savingChallengeIds: Set<string>; onToggle(task: BonusTask, bonusId: string): void }) {
+  const completed = tasks.filter((task) => task.completion);
+  const open = tasks.filter((task) => !task.completion);
+  return (
+    <>
+      <Banner tone="info">Tick bonus tasks a team did but didn't claim, or untick ones it didn't do. Points change straight away.</Banner>
+      {completed.length === 0 ? <Banner tone="info">No challenge with bonus tasks has been completed yet.</Banner> : null}
+      {completed.map((task) => {
+        const team = task.completion ? teamById.get(task.completion.teamId) : undefined;
+        const ticked = new Set(task.completion?.bonusIds ?? []);
+        return (
+          <section key={task.challenge.id} className="rounded-[1.4rem] border border-[#c8b48a]/55 bg-[#fff8eb] p-4 shadow-[0_10px_24px_rgba(24,32,36,0.06)]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-[Georgia,Times_New_Roman,serif] text-lg font-semibold">{task.challenge.title}</h3>
+              <span className="flex items-center gap-2 text-xs font-semibold text-[#5a6a70]">
+                <span className="h-3 w-3 rounded-full border border-black/10" style={{ backgroundColor: team?.color ?? '#a28f67' }} />
+                {team?.name ?? 'Unknown team'}{savingChallengeIds.has(task.challenge.id) ? ' · saving…' : ''}
+              </span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {task.bonuses.map((bonus) => {
+                const on = ticked.has(bonus.id);
+                return (
+                  <button
+                    key={bonus.id}
+                    aria-pressed={on}
+                    className={['rounded-full border px-3 py-1.5 text-left text-sm transition', on ? 'border-[#2e6f57] bg-[#2e6f57] text-white' : 'border-[#c8b48a]/70 bg-white text-[#3f4d52]'].join(' ')}
+                    onClick={() => onToggle(task, bonus.id)}
+                    type="button"
+                  >
+                    {on ? '✓ ' : ''}{bonus.label} <span className={on ? 'text-white/80' : 'text-[#7a5413]'}>+{bonus.points}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
+      {open.length ? (
+        <section className="rounded-[1.4rem] border border-dashed border-[#bda370]/60 px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#7a6a48]">Not completed yet</p>
+          <p className="mt-1 text-sm text-[#5a6a70]">{open.map((task) => task.challenge.title).join(' · ')}</p>
+        </section>
+      ) : null}
+    </>
   );
 }
 

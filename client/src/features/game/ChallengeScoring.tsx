@@ -133,3 +133,53 @@ export function CompleteChallengeSheet({ challenge, pending, confirmLabel, onCon
     </div>
   );
 }
+
+interface AddBonusSheetProps {
+  challenge: Challenge;
+  claimedIds: string[];
+  pending: boolean;
+  onConfirm(bonusIds: string[]): void;
+  onCancel(): void;
+}
+
+// After completing: tick bonus tasks the team did later, or forgot to tick. Bonuses already counted
+// stay listed, ticked and locked; judged ones are decided after the game.
+export function AddBonusSheet({ challenge, claimedIds, pending, onConfirm, onCancel }: AddBonusSheetProps) {
+  const bonuses = getChallengeBonuses(challenge.config).filter((bonus) => !bonus.judged);
+  const claimed = new Set(claimedIds);
+  const { selected, toggle } = useBonusSelection();
+  const added = bonuses.filter((bonus) => selected.has(bonus.id)).reduce((total, bonus) => total + bonus.points, 0);
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-[#162126]/45 p-3 lg:items-center" data-deck-interactive="true" onClick={onCancel}>
+      <div className="w-full max-w-md rounded-[1.8rem] border border-[#c8b48a]/55 bg-[#f8f1df] p-5 text-[#1f2a2f] shadow-[0_24px_70px_rgba(20,28,32,0.3)]" data-deck-interactive="true" onClick={(event) => event.stopPropagation()}>
+        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-[#936718]">Add bonus</p>
+        <h3 className="mt-1.5 font-[Georgia,Times_New_Roman,serif] text-2xl font-semibold leading-tight">{challenge.title}</h3>
+        <div className="mt-4 space-y-3">
+          <fieldset className="rounded-2xl border border-[#d8c49a]/70 bg-[#fdf6e4] p-2">
+            <legend className="px-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[#7a5413]">Bonus tasks you did</legend>
+            <div className="space-y-0.5">
+              {bonuses.map((bonus) => {
+                const done = claimed.has(bonus.id);
+                const checked = done || selected.has(bonus.id);
+                return (
+                  <label key={bonus.id} className={['flex items-center gap-3 rounded-xl px-2 py-2 text-sm transition', done ? 'text-[#8a8270]' : checked ? 'cursor-pointer bg-[#f6e3b4] text-[#2c2a20]' : 'cursor-pointer text-[#4f5b5f] hover:bg-[#f9ecca]'].join(' ')}>
+                    <input checked={checked} className="h-5 w-5 shrink-0 accent-[#9b6b16]" disabled={done} onChange={() => toggle(bonus.id)} type="checkbox" />
+                    <span className="min-w-0 flex-1">{bonus.label}{done ? <span className="block text-[11px] italic">Already counted</span> : null}</span>
+                    <span className="shrink-0 font-semibold text-[#7a5413]">+{bonus.points}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+          <p className="px-1 text-[11px] leading-4 text-[#6b777b]">Only tick bonuses your team really did. Added bonuses can't be removed.</p>
+          <div className="grid grid-cols-[1fr_auto] gap-2">
+            <button className="rounded-2xl border border-[#29414b] bg-[#24343a] px-4 py-3.5 text-sm font-semibold uppercase tracking-[0.12em] text-[#f4ead7] disabled:opacity-60" disabled={pending || selected.size === 0} onClick={() => onConfirm([...selected])} type="button">
+              {pending ? 'Adding…' : added ? 'Add +' + formatPoints(added) : 'Add bonus'}
+            </button>
+            <button className="rounded-2xl border border-[#c8b48a]/55 bg-[#efe5cf] px-4 py-3.5 text-sm font-semibold uppercase tracking-[0.12em] text-[#5d4d33]" onClick={onCancel} type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

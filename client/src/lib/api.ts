@@ -6,6 +6,7 @@ import {
   type ClueImageUpload,
   type TeamClue,
   type Challenge,
+  type ChallengeBonus,
   type ChallengeClaim,
   type ChallengeRerollState,
   type ChallengeSet,
@@ -30,6 +31,7 @@ import {
   type Player,
   type PushSubscriptionData,
   type ResourceAwardMap,
+  type ResourceLedgerEntry,
   type ScoreboardEntry,
   type Team,
   type TeamLocation,
@@ -182,6 +184,20 @@ export async function listGames(signal?: AbortSignal): Promise<Game[]> {
 export async function getGameRecap(gameId: string, signal?: AbortSignal): Promise<GameRecap> {
   const response = await apiRequest<GameRecapResponse>('/game/' + gameId + '/recap', { signal });
   return response.recap;
+}
+
+export interface BonusTask {
+  challenge: Challenge;
+  bonuses: ChallengeBonus[];
+  completion: { claimId: string; teamId: string; bonusIds: string[] } | null;
+}
+
+export async function getBonusTasks(gameId: string): Promise<BonusTask[]> {
+  return (await apiRequest<{ tasks: BonusTask[] }>('/game/' + gameId + '/bonus-tasks')).tasks;
+}
+
+export async function adminSetChallengeBonuses(challengeId: string, bonusIds: string[]): Promise<{ claim: ChallengeClaim; entry: ResourceLedgerEntry | null }> {
+  return apiRequest('/admin/challenges/' + challengeId + '/bonuses', { method: 'POST', body: { bonusIds } });
 }
 
 export async function getJudgingSheet(gameId: string, signal?: AbortSignal): Promise<GameJudgingSheet> {
@@ -737,6 +753,10 @@ export async function importAdminZones(
     body: featureCollection,
   });
   return response.zones;
+}
+
+export async function addChallengeBonuses(challengeId: string, bonusIds: string[], idempotencyKey?: string): Promise<{ claim: ChallengeClaim; entry: ResourceLedgerEntry | null }> {
+  return apiRequest('/challenges/' + challengeId + '/bonuses', { method: 'POST', body: { bonusIds }, idempotencyKey });
 }
 
 export async function adminForceCompleteChallenge(challengeId: string, input?: { submission?: JsonValue | null; teamId?: string | null; notes?: string }): Promise<CompleteChallengeResponse> {

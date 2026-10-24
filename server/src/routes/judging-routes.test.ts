@@ -233,6 +233,31 @@ describe('judged challenges', () => {
     expect(recap.json().recap.judging.status).toBe('published');
   });
 
+  it('lets an admin tick and untick self-reported bonuses on a completed challenge, during and after the game', async () => {
+    await seedPointGame();
+    await testDatabase.db.update(challenges).set({ scoring: { points: 3 }, config: { portable: true, location_mode: 'portable', bonuses: [{ id: 'b1', label: 'Hat', points: 2 }, { id: 'b2', label: 'Song', points: 5 }, { id: 'j1', label: 'Best', points: 4, judged: true }] } }).where(eq(challenges.id, REGULAR_ID));
+    app = await createTestApp({ db: testDatabase.db });
+    const setBonuses = (bonusIds: string[], key: string) => app.inject({ method: 'POST', url: '/api/v1/admin/challenges/' + REGULAR_ID + '/bonuses', headers: { 'idempotency-key': key }, payload: { bonusIds } });
+    const tasks = async () => (await app.inject({ method: 'GET', url: '/api/v1/game/' + GAME_ID + '/bonus-tasks' })).json().tasks;
+
+    expect((await setBonuses(['b1'], 'before-complete')).statusCode).toBe(400);
+    expect(await tasks()).toEqual([expect.objectContaining({ challenge: expect.objectContaining({ id: REGULAR_ID }), bonuses: [expect.objectContaining({ id: 'b1' }), expect.objectContaining({ id: 'b2' })], completion: null })]);
+
+    expect((await submitTo(REGULAR_ID, 'team-two-session', 'regular-bonus', { bonusIds: ['b1', 'j1'] })).statusCode).toBe(200);
+    expect(await pointsFor(TEAM_TWO_ID)).toBe(5);
+    await waitFor(async () => (await getGameStatus()) === 'completed');
+
+    // After the game: add the song, then take the hat back. The judged bonus id stays on the claim.
+    const added = await setBonuses(['b1', 'b2'], 'after-add');
+    expect(added.statusCode).toBe(200);
+    expect(added.json()).toMatchObject({ claim: { submission: { bonusIds: ['j1', 'b1', 'b2'] } }, entry: { teamId: TEAM_TWO_ID, delta: 5 } });
+    expect((await setBonuses(['b2'], 'after-remove')).json().entry).toMatchObject({ delta: -2 });
+    expect(await pointsFor(TEAM_TWO_ID)).toBe(8);
+    expect((await setBonuses(['b2'], 'after-same')).json().entry).toBeNull();
+    expect((await tasks())[0].completion).toEqual({ claimId: expect.any(String), teamId: TEAM_TWO_ID, bonusIds: ['b2'] });
+    expect((await setBonuses(['j1'], 'judged-id')).statusCode).toBe(400);
+  });
+
   async function endGame() {
     const response = await app.inject({ method: 'POST', url: '/api/v1/game/' + GAME_ID + '/end', headers: { 'idempotency-key': 'end-game' } });
     expect(response.statusCode).toBe(200);

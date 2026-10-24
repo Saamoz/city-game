@@ -407,3 +407,9 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 ## Put a Game on the Homepage (2026-10-24)
 
 - Unfinished games get a **Put on homepage** button in the admin header (and **Unpin from homepage** once pinned). It sets `settings.pin_to_home`, which only one game holds at a time; `/game/active` serves the pinned game ahead of the live game, featured results and the newest setup game, so a game still in setup can be the main page's game for joining and picking teams. A finished game can't be pinned (it uses "Show results on homepage"); a pinned game that finishes stops counting. Duplicate doesn't copy the pin.
+
+## Bonuses After Completing (2026-10-24, not deployed yet)
+
+- **Judging page → Bonuses tab** lists every completed regular challenge that has self-reported bonus tasks, with the team that completed it and a toggle per bonus. Ticking or unticking changes the team's points straight away (no publishing step), during the game or after it ends (`POST /admin/challenges/:id/bonuses` sets the list; `GET /game/:id/bonus-tasks` feeds the tab). Challenges not completed yet are listed underneath.
+- **Players** on the completing team also get **+ Add bonus** on that challenge in the Completed tray while the game is live (`POST /challenges/:id/bonuses`, add-only; repeats are no-ops).
+- Both write the points difference as `challenge_completed` for the challenge (so an admin Reopen takes them back), keep judged bonus ids and notes on the claim untouched, reject judged bonuses, and push fresh state to every player. `server/src/modes/territory/bonus-service.ts`.

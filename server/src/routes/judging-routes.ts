@@ -1,8 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { STATE_VERSION_HEADER, socketServerEventTypes, type JudgingVerdict, type ResourceLedgerEntry } from '@city-game/shared';
+import { STATE_VERSION_HEADER, socketServerEventTypes, type JsonObject, type JudgingVerdict, type ResourceLedgerEntry } from '@city-game/shared';
 import { executeIdempotentMutation } from '../services/idempotency-service.js';
 import { getGameById } from '../services/game-service.js';
 import { getJudgingSheet, publishJudging, setSubmissionDecision } from '../services/judging-service.js';
+import { listBonusTasks, setChallengeBonusesAsAdmin, type ChallengeBonusChangeResult } from '../modes/territory/bonus-service.js';
+import { broadcastFullStateToGame } from '../socket/admin-sync.js';
 
 const idParamsSchema = {
   type: 'object',
@@ -38,6 +40,36 @@ export const judgingRoutes: FastifyPluginAsync = async (app) => {
       : typeof body.points === 'number' ? { verdict: 'points' as const, points: body.points } : null;
     const points = await setSubmissionDecision(app.db, id, decision);
     reply.send({ ok: true, points });
+  });
+
+  // Self-reported bonus tasks on completed challenges, which an admin can tick or untick during or
+  // after the game. Unlike judged scores these count straight away.
+  app.get('/game/:id/bonus-tasks', { preHandler: [app.requireAdmin], schema: { params: idParamsSchema } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    reply.send({ tasks: await listBonusTasks(app.db, id) });
+  });
+
+  app.post('/admin/challenges/:id/bonuses', {
+    preHandler: [app.requireAdmin],
+    schema: {
+      params: idParamsSchema,
+      body: { type: 'object', additionalProperties: false, required: ['bonusIds'], properties: { bonusIds: { type: 'array', maxItems: 20, items: { type: 'string' } } } },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    let result: ChallengeBonusChangeResult | null = null;
+    await executeIdempotentMutation(app, request, reply, async (db) => {
+      result = await setChallengeBonusesAsAdmin(db, { challengeId: id, bonusIds: (request.body as { bonusIds: string[] }).bonusIds });
+      return {
+        gameId: result.gameId,
+        statusCode: 200,
+        body: { claim: result.claim, entry: result.entry },
+        responseHeaders: (result.stateVersion === null ? {} : { [STATE_VERSION_HEADER]: String(result.stateVersion) }) as JsonObject,
+      };
+    }, async () => {
+      const committed = result as ChallengeBonusChangeResult | null;
+      if (committed && committed.stateVersion !== null) await broadcastFullStateToGame(app, committed.gameId);
+    });
   });
 
   app.post('/game/:id/judging/publish', { preHandler: [app.requireAdmin], schema: { params: idParamsSchema } }, async (request, reply) => {
