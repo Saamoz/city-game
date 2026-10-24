@@ -395,3 +395,7 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 ## How to Play Cards (2026-10-22)
 
 - Challenge Hunt games get a **How to play** deck: six parchment cards (explore together / no Uber or Lyft; first team takes a challenge, bonuses; tap Complete then post proof to the group chat; clue fragments and the final meetup; every challenge is worth the same; iPhone Add to Home Screen), each with a hand-drawn diagram (inline SVG through a turbulence/displacement filter so lines wobble, Kalam labels). Opened from a button under "Waiting for the game to start…" in the lobby and from the in-game ☰ menu. Native horizontal scroll-snap does the paging, so swipes follow the finger; Back/Next, dots, arrow keys and Esc also work. `client/src/features/game/HowToPlay.tsx`.
+
+## Final Clue Card Collapsed (2026-10-24)
+
+- The admin panel's 🧩 Final clue card is collapsed by default (title and a Show toggle only) so the candidate pictures stay off screen while others are around; it collapses again when switching games. The Reveal button is inside, so expand it to reveal at the end.

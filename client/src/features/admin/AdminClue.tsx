@@ -20,6 +20,8 @@ export function AdminClue({ game, onGameChange }: AdminClueProps) {
   const [status, setStatus] = useState<AdminClueStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Collapsed by default so the candidate pictures stay hidden from anyone glancing at the screen.
+  const [isOpen, setIsOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isSetup = game.status === 'setup';
 
@@ -30,6 +32,10 @@ export function AdminClue({ game, onGameChange }: AdminClueProps) {
     } catch (reason) {
       setError(getErrorMessage(reason));
     }
+  }, [game.id]);
+
+  useEffect(() => {
+    setIsOpen(false);
   }, [game.id]);
 
   useEffect(() => {
@@ -95,9 +101,19 @@ export function AdminClue({ game, onGameChange }: AdminClueProps) {
 
   return (
     <section className="rounded-[1.75rem] border border-[#d6c79f] bg-white p-5 shadow-[0_20px_50px_rgba(21,31,37,0.08)]">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((current) => !current)}
+        className="flex w-full items-center justify-between gap-3 text-left"
+      >
+        <h2 className="text-lg font-semibold text-[#182126]">🧩 Final clue</h2>
+        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5b6870]">{isOpen ? 'Hide ▲' : 'Show ▼'}</span>
+      </button>
+
+      {isOpen ? (<>
+      <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
         <div className="max-w-2xl">
-          <h2 className="text-lg font-semibold text-[#182126]">🧩 Final clue</h2>
           <p className="mt-1 text-sm text-[#5b6870]">
             {!isSetup
               ? 'Each team only sees the fragments it found until you reveal them all.'
@@ -170,6 +186,7 @@ export function AdminClue({ game, onGameChange }: AdminClueProps) {
         {busy ? <p className="text-sm text-[#5d6a72]">{busy}</p> : null}
         {error ? <p className="text-sm text-[#a33a2b]">{error}</p> : null}
       </div>
+      </>) : null}
     </section>
   );
 }
