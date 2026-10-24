@@ -422,3 +422,7 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 ## Bonus Changes in the Feed (2026-10-24)
 
 - Bonuses added after completing (by the team or from the judging page) now show in the feed as "Foxes got a bonus on Color Hunt · +1 pt" (or "lost a bonus" when a judge unticks one). The points are worked out from the event's before/after claim and the challenge's bonuses, so bonuses added before this change show too. The original "completed" line keeps the points from the moment of completion.
+
+## High-Res Street View Script (2026-10-24)
+
+- `scripts/streetview/streetview.py` renders a Street View picture of a place (`--place "…"` via Places search, or `--lat/--lng`) from the Map Tiles API's full panoramas (usually 16384×8192) instead of the Street View Static API, which stops at 640×640. It picks the newest Google panorama within `--radius` (the single nearest is often years old), faces the place unless `--heading` is given, and re-projects the view at any `--size`/`--fov` (default 3000px at 80°, about native resolution). Reads `GOOGLE_MAPS_API_KEY`; needs numpy and Pillow. In-game clue pictures are capped at 2000px (`CLUE_IMAGE_MAX_DIMENSION`), so uploads are scaled to that.
