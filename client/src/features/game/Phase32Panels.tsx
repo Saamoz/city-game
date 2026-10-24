@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import type { GameEventRecord, Player, Team, TeamResourcesByTeam, Zone } from '@city-game/shared';
+import { getClaimedBonuses, sumBonusPoints, type GameEventRecord, type Player, type Team, type TeamResourcesByTeam, type Zone } from '@city-game/shared';
 
 export interface FeedEntry {
   id: string;
@@ -433,6 +433,24 @@ function formatFeedEntry(
       }
       const awardedPoints = asRecord(event.meta.resourcesAwarded)?.points;
       return { id: event.id, title: `${teamName} completed ${challenge?.name ?? 'a challenge'}`, body: typeof awardedPoints === 'number' && awardedPoints !== 0 ? '+' + awardedPoints + (Math.abs(awardedPoints) === 1 ? ' pt' : ' pts') : null, createdAt: event.createdAt, accentColor: event.actorTeamId ? teamColorById.get(event.actorTeamId) : undefined };
+    }
+    case 'OBJECTIVE_STATE_CHANGED': {
+      // Only bonus changes after completing (from the team or the judges) show here; they carry bonusIds.
+      if (!Array.isArray(event.meta.bonusIds)) return null;
+      const challengeRecord = asRecord(event.meta.challenge);
+      const challenge = asNamedObject(event.meta.challenge);
+      const selfReported = (submission: unknown) => getClaimedBonuses(challengeRecord?.config, submission).filter((bonus) => !bonus.judged);
+      const delta = sumBonusPoints(selfReported(asRecord(event.afterState)?.submission)) - sumBonusPoints(selfReported(asRecord(event.beforeState)?.submission));
+      if (delta === 0) return null;
+      const teamId = asString(asRecord(event.afterState)?.teamId) ?? event.actorTeamId;
+      const teamName = teamId ? teamNameById.get(teamId) ?? 'A team' : 'A team';
+      return {
+        id: event.id,
+        title: `${teamName} ${delta > 0 ? 'got a bonus on' : 'lost a bonus on'} ${challenge?.name ?? 'a challenge'}`,
+        body: (delta > 0 ? '+' : '−') + Math.abs(delta) + (Math.abs(delta) === 1 ? ' pt' : ' pts'),
+        createdAt: event.createdAt,
+        accentColor: teamId ? teamColorById.get(teamId) : undefined,
+      };
     }
     case 'CHALLENGE_REROLL_STATE_CHANGED': {
       const challenge = asNamedObject(event.meta.challenge);

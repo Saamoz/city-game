@@ -418,3 +418,7 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 ## Team Markers Stay Put (2026-10-24, not deployed yet)
 
 - Other teams' location markers slid around the map when zooming. Their element set `position: relative` inline, overriding Mapbox's `.mapboxgl-marker { position: absolute }`, so the markers stacked in normal flow: the first was right, the second drawn 26px low, the third 52px low, a fixed screen offset that drifts against the map as you zoom. Removed that line in `teamLocationMarkers.ts`; the small colour dot still positions against the (absolute) marker.
+
+## Bonus Changes in the Feed (2026-10-24)
+
+- Bonuses added after completing (by the team or from the judging page) now show in the feed as "Foxes got a bonus on Color Hunt · +1 pt" (or "lost a bonus" when a judge unticks one). The points are worked out from the event's before/after claim and the challenge's bonuses, so bonuses added before this change show too. The original "completed" line keeps the points from the moment of completion.
