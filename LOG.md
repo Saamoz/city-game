@@ -403,3 +403,7 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 ## Custom Team Colors (2026-10-24)
 
 - The Add team row in the admin panel has a rainbow swatch after the six presets that opens the browser's color picker for any color; it shows the chosen color and a selection ring when the color isn't a preset. Existing team rows already had a full picker.
+
+## Put a Game on the Homepage (2026-10-24)
+
+- Unfinished games get a **Put on homepage** button in the admin header (and **Unpin from homepage** once pinned). It sets `settings.pin_to_home`, which only one game holds at a time; `/game/active` serves the pinned game ahead of the live game, featured results and the newest setup game, so a game still in setup can be the main page's game for joining and picking teams. A finished game can't be pinned (it uses "Show results on homepage"); a pinned game that finishes stops counting. Duplicate doesn't copy the pin.

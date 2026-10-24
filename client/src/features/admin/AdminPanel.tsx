@@ -489,6 +489,29 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
       setIsHomepagePublishingPending(false);
     }
   };
+  const handlePinToHomepage = async () => {
+    if (!currentGame || currentGame.status === 'completed') return;
+    const isPinned = currentGame.settings.pin_to_home === true;
+    setIsHomepagePublishingPending(true);
+    try {
+      const updatedGame = await updateGameDefinition(currentGame.id, {
+        settings: { ...currentGame.settings, pin_to_home: !isPinned },
+      });
+      setCurrentGame(updatedGame);
+      setGames(await listGames());
+      await loadHomepageGame();
+      setNotice({
+        tone: 'success',
+        message: !isPinned
+          ? 'This game is now the homepage game, so players can join and pick teams from the main page.'
+          : 'Unpinned. The homepage goes back to the live game, featured results or the newest setup game.',
+      });
+    } catch (error) {
+      setNotice({ tone: 'error', message: getApiErrorMessage(error) });
+    } finally {
+      setIsHomepagePublishingPending(false);
+    }
+  };
   const handleDeleteGame = async () => {
     if (!currentGame || currentGame.status === 'active' || currentGame.status === 'paused') {
       return;
@@ -518,7 +541,7 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
     if (!currentGame || !confirmDiscard()) return;
     setIsDuplicating(true);
     try {
-      const { feature_results_on_home: _featured, challenge_total_count: _total, ...settings } = currentGame.settings as JsonObject;
+      const { feature_results_on_home: _featured, pin_to_home: _pinned, challenge_total_count: _total, ...settings } = currentGame.settings as JsonObject;
       const copy = await createGameDefinition({
         name: currentGame.name + ' (copy)',
         modeKey: currentGame.modeKey,
@@ -1333,6 +1356,11 @@ export function AdminPanel({ initialGameId }: AdminPanelProps) {
                   <button type="button" onClick={() => { void handleCopyGameLink(); }} className={pillClassName}>Copy link</button>
                   {currentGame.challengeSetId ? <AnchorPill href={'/admin/challenges?setId=' + currentGame.challengeSetId} label="Edit challenges" /> : null}
                   {currentGame.modeKey === 'territory' && currentGame.mapId ? <AnchorPill href={'/admin/zones?mapId=' + currentGame.mapId} label="Edit map" /> : null}
+                  {currentGame.status !== 'completed' && (homepageGameId !== currentGame.id || currentGame.settings.pin_to_home === true) ? (
+                    <button type="button" onClick={() => { void handlePinToHomepage(); }} disabled={isHomepagePublishingPending} className={pillClassName}>
+                      {currentGame.settings.pin_to_home === true ? 'Unpin from homepage' : 'Put on homepage'}
+                    </button>
+                  ) : null}
                   <button type="button" onClick={() => { void handleDuplicateGame(); }} disabled={isDuplicating} className={pillClassName}>{isDuplicating ? 'Duplicating…' : 'Duplicate'}</button>
                 </div>
               </div>

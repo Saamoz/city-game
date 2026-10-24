@@ -355,6 +355,48 @@ describe("game and team routes", () => {
     });
   });
 
+  it("puts a pinned setup game on the homepage ahead of live play and featured results", async () => {
+    await seedGame({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      name: "Featured Final",
+      status: "completed",
+      settings: { feature_results_on_home: true },
+    });
+    await seedGame({
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      name: "Live Game",
+      status: "active",
+      settings: { pin_to_home: true },
+    });
+    await seedGame({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      name: "Upcoming Game",
+      status: "setup",
+    });
+    app = await createGameTestApp();
+
+    const pinResponse = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/game/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      headers: adminHeaders("pin-upcoming"),
+      payload: { settings: { pin_to_home: true } },
+    });
+    expect(pinResponse.statusCode).toBe(200);
+
+    const home = await app.inject({ method: "GET", url: "/api/v1/game/active" });
+    expect(home.json().game).toMatchObject({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", status: "setup" });
+    const previouslyPinned = await app.inject({ method: "GET", url: "/api/v1/game/cccccccc-cccc-4ccc-8ccc-cccccccccccc" });
+    expect(previouslyPinned.json().game.settings.pin_to_home).toBeUndefined();
+
+    const finishedPin = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/game/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      headers: adminHeaders("pin-finished"),
+      payload: { settings: { pin_to_home: true } },
+    });
+    expect(finishedPin.statusCode).toBe(400);
+  });
+
   it("keeps featured results on the homepage while a hidden test game is live", async () => {
     await seedGame({
       id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",

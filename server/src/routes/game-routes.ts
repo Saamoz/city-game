@@ -119,31 +119,40 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
     reply.send({ games: rows.map(serializeGameRecord) });
   });
 
-  // The homepage game. Test games set hide_from_home so they never replace it; open them by direct link.
+  // The homepage game. An admin can pin one unfinished game (pin_to_home), e.g. a game still in setup so
+  // players can join and pick teams; otherwise the live game, then featured results, then the newest setup
+  // game. Test games set hide_from_home so they never replace it; open them by direct link.
   app.get('/game/active', async (_request, reply) => {
     const listedOnHome = sql`COALESCE(${games.settings}->>'hide_from_home', 'false') <> 'true'`;
-    const [liveGame] = await app.db
+    const [pinnedGame] = await app.db
+      .select()
+      .from(games)
+      .where(and(inArray(games.status, ['setup', 'active', 'paused']), sql`${games.settings}->>'pin_to_home' = 'true'`))
+      .orderBy(desc(games.updatedAt))
+      .limit(1);
+
+    const [liveGame] = pinnedGame ? [] : await app.db
       .select()
       .from(games)
       .where(and(inArray(games.status, ['active', 'paused']), listedOnHome))
       .orderBy(desc(games.createdAt))
       .limit(1);
 
-    const [featuredFinishedGame] = liveGame ? [] : await app.db
+    const [featuredFinishedGame] = pinnedGame || liveGame ? [] : await app.db
       .select()
       .from(games)
       .where(and(eq(games.status, 'completed'), sql`${games.settings}->>'feature_results_on_home' = 'true'`))
       .orderBy(desc(games.updatedAt))
       .limit(1);
 
-    const [setupGame] = liveGame || featuredFinishedGame ? [] : await app.db
+    const [setupGame] = pinnedGame || liveGame || featuredFinishedGame ? [] : await app.db
       .select()
       .from(games)
       .where(and(eq(games.status, 'setup'), listedOnHome))
       .orderBy(desc(games.createdAt))
       .limit(1);
 
-    const publicGame = liveGame ?? featuredFinishedGame ?? setupGame;
+    const publicGame = pinnedGame ?? liveGame ?? featuredFinishedGame ?? setupGame;
     if (!publicGame) {
       throw new AppError(errorCodes.gameNotFound, { message: 'No active game found.' });
     }
@@ -269,6 +278,16 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
             .update(games)
             .set({ settings: sql`${games.settings} - 'feature_results_on_home'` })
             .where(and(ne(games.id, id), sql`${games.settings}->>'feature_results_on_home' = 'true'`));
+        }
+
+        if (nextSettings.pin_to_home === true && (existingGame.settings as JsonObject).pin_to_home !== true) {
+          if (existingGame.status === 'completed') {
+            throw new AppError(errorCodes.validationError, { message: 'A finished game is shown on the homepage through its results instead.' });
+          }
+          await db
+            .update(games)
+            .set({ settings: sql`${games.settings} - 'pin_to_home'` })
+            .where(and(ne(games.id, id), sql`${games.settings}->>'pin_to_home' = 'true'`));
         }
 
         if ((body.mapId !== undefined || body.challengeSetId !== undefined) && existingGame.status !== 'setup') {
@@ -516,7 +535,7 @@ function normalizeGameSettings(input: JsonObject | undefined, existing: JsonObje
     next.allow_reclaim_zones = false;
   }
 
-  for (const key of ['feature_results_on_home'] as const) {
+  for (const key of ['feature_results_on_home', 'pin_to_home'] as const) {
     if (next[key] !== undefined && typeof next[key] !== 'boolean') {
       throw new AppError(errorCodes.validationError, { message: `settings.${key} must be a boolean.` });
     }
