@@ -426,3 +426,7 @@ The admin map editor's geometry editing was rebuilt around a **shared-node topol
 ## High-Res Street View Script (2026-10-24)
 
 - `scripts/streetview/streetview.py` renders a Street View picture of a place (`--place "…"` via Places search, or `--lat/--lng`) from the Map Tiles API's full panoramas (usually 16384×8192) instead of the Street View Static API, which stops at 640×640. It picks the newest Google panorama within `--radius` (the single nearest is often years old), faces the place unless `--heading` is given, and re-projects the view at any `--size`/`--fov` (default 3000px at 80°, about native resolution). Reads `GOOGLE_MAPS_API_KEY`; needs numpy and Pillow. In-game clue pictures are capped at 2000px (`CLUE_IMAGE_MAX_DIMENSION`), so uploads are scaled to that.
+
+## Finished Games Take the Homepage (2026-10-24)
+
+- When a game ends (admin Finish or a win condition), it becomes the homepage's featured results game: `feature_results_on_home` moves to it from any older game and its `pin_to_home` is dropped. Hidden test games (`hide_from_home`) don't take over. Admins can still feature a different finished game afterwards; a live or pinned game still comes first.

@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import {
   eventTypes,
   errorCodes,
@@ -213,6 +213,22 @@ async function applyLifecycleTransition(
     .returning();
 
   runtimeGame = updatedGame;
+
+  // A game that just finished takes over the homepage with its results, replacing an older featured
+  // game. Hidden test games leave the homepage alone. The admin can still feature another game later.
+  if (transition === 'end' && (runtimeGame.settings as JsonObject).hide_from_home !== true) {
+    await db
+      .update(games)
+      .set({ settings: sql`${games.settings} - 'feature_results_on_home'` })
+      .where(and(ne(games.id, runtimeGame.id), sql`${games.settings}->>'feature_results_on_home' = 'true'`));
+    const { pin_to_home: _pinned, ...settings } = runtimeGame.settings as JsonObject;
+    const [featuredGame] = await db
+      .update(games)
+      .set({ settings: { ...settings, feature_results_on_home: true } })
+      .where(eq(games.id, runtimeGame.id))
+      .returning();
+    runtimeGame = featuredGame;
+  }
 
   if (transition === 'start') {
 

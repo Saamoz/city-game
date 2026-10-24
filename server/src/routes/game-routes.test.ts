@@ -397,6 +397,30 @@ describe("game and team routes", () => {
     expect(finishedPin.statusCode).toBe(400);
   });
 
+  it("features a game's results on the homepage once it ends, replacing an older featured game", async () => {
+    await seedGame({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      name: "Older Final",
+      status: "completed",
+      settings: { feature_results_on_home: true },
+    });
+    await seedGame({ name: "Just Played", status: "active", settings: { pin_to_home: true } });
+    await seedGame({ id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", name: "Test Game", status: "active", settings: { hide_from_home: true } });
+    app = await createGameTestApp();
+
+    expect((await lifecycleRequest("end", "end-just-played")).statusCode).toBe(200);
+    const home = await app.inject({ method: "GET", url: "/api/v1/game/active" });
+    expect(home.json().game).toMatchObject({ id: GAME_ID, status: "completed", settings: { feature_results_on_home: true } });
+    expect(home.json().game.settings.pin_to_home).toBeUndefined();
+    const older = await app.inject({ method: "GET", url: "/api/v1/game/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
+    expect(older.json().game.settings.feature_results_on_home).toBeUndefined();
+
+    // Ending a hidden test game leaves the homepage as it is.
+    const endTest = await app.inject({ method: "POST", url: "/api/v1/game/dddddddd-dddd-4ddd-8ddd-dddddddddddd/end", headers: adminHeaders("end-test-game") });
+    expect(endTest.statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/api/v1/game/active" })).json().game.id).toBe(GAME_ID);
+  });
+
   it("keeps featured results on the homepage while a hidden test game is live", async () => {
     await seedGame({
       id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
